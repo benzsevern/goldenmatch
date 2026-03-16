@@ -6,22 +6,36 @@ from pathlib import Path
 
 import polars as pl
 
+# Text-file extensions that should route through smart_load
+_TEXT_SUFFIXES = {".csv", ".txt", ".tsv", ".dat", ".tab", ".psv", ".log", ".asc"}
+
 
 def load_file(
     path: Path | str,
-    delimiter: str = ",",
-    encoding: str = "utf8",
+    delimiter: str | None = None,  # None = auto-detect
+    encoding: str | None = None,   # None = auto-detect
     sheet: str | None = None,
+    parse_mode: str = "auto",
+    header_row: int | None = None,
+    has_header: bool | None = None,
+    skip_rows: list[int] | None = None,
 ) -> pl.LazyFrame:
     """Load a data file as a Polars LazyFrame.
 
-    Supports CSV (.csv), Parquet (.parquet), and Excel (.xlsx) formats.
+    Supports CSV/text files (with smart auto-detection), Parquet, and Excel.
 
     Args:
         path: Path to the file.
-        delimiter: Column delimiter for CSV files.
-        encoding: Text encoding for CSV files.
+        delimiter: Column delimiter for text files. ``None`` triggers
+            auto-detection via :func:`smart_load`.
+        encoding: Text encoding. ``None`` triggers auto-detection.
         sheet: Sheet name for Excel files (optional).
+        parse_mode: Parsing strategy — ``"auto"`` (default), ``"delimited"``,
+            ``"fixed_width"``, ``"key_value"``, ``"block"``, or
+            ``"entity_extract"``.
+        header_row: Explicit header row index (``None`` = auto-detect).
+        has_header: Whether file has a header row (``None`` = auto-detect).
+        skip_rows: Explicit list of row indices to skip.
 
     Returns:
         A Polars LazyFrame.
@@ -36,18 +50,40 @@ def load_file(
 
     suffix = path.suffix.lower()
 
-    if suffix == ".csv":
-        return pl.scan_csv(path, separator=delimiter, encoding=encoding)
-    elif suffix == ".parquet":
+    if suffix == ".parquet":
         return pl.scan_parquet(path)
-    elif suffix == ".xlsx":
+
+    if suffix == ".xlsx":
         kwargs = {"engine": "openpyxl"}
         if sheet is not None:
             kwargs["sheet_name"] = sheet
         df = pl.read_excel(path, **kwargs)
         return df.lazy()
-    else:
-        raise ValueError(f"Unsupported file format: {suffix!r}")
+
+    # Text file handling ─────────────────────────────────────────────────
+    if suffix in _TEXT_SUFFIXES or suffix == "":
+        # For .csv files with default auto mode, preserve backwards-compatible
+        # fast Polars scan_csv path (comma-delimited by default).
+        if parse_mode == "auto" and (delimiter is not None or suffix == ".csv"):
+            sep = delimiter or ","
+            enc = encoding or "utf8"
+            return pl.scan_csv(path, separator=sep, encoding=enc)
+
+        # Otherwise route through smart_load
+        from goldenmatch.core.smart_ingest import smart_load
+
+        df, _meta = smart_load(
+            path,
+            parse_mode=parse_mode,
+            delimiter=delimiter,
+            encoding=encoding,
+            header_row=header_row,
+            has_header=has_header,
+            skip_rows=skip_rows,
+        )
+        return df.lazy()
+
+    raise ValueError(f"Unsupported file format: {suffix!r}")
 
 
 def load_files(file_specs: list[tuple[Path | str, str]]) -> list[pl.LazyFrame]:

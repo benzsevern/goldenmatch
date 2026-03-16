@@ -210,6 +210,10 @@ class InputFileConfig(BaseModel):
     delimiter: str = ","
     encoding: str = "utf8"
     sheet: str | None = None
+    parse_mode: str = "auto"  # auto, delimited, fixed_width, key_value, block, entity_extract
+    header_row: int | None = None
+    has_header: bool | None = None
+    skip_rows: list[int] | None = None
 
 
 class InputConfig(BaseModel):
