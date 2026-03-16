@@ -48,13 +48,19 @@ class FieldTransform(BaseModel):
 
 
 class MatchkeyField(BaseModel):
-    field: str
+    field: str | None = None
+    column: str | None = None
     transforms: list[str] = Field(default_factory=list)
     scorer: str | None = None
     weight: float | None = None
 
     @model_validator(mode="after")
-    def _validate_transforms_and_scorer(self) -> "MatchkeyField":
+    def _resolve_field_column(self) -> "MatchkeyField":
+        # Allow 'column' as alias for 'field'
+        if self.field is None and self.column is not None:
+            self.field = self.column
+        elif self.field is None and self.column is None:
+            raise ValueError("MatchkeyField requires 'field' or 'column'.")
         for t in self.transforms:
             ft = FieldTransform(transform=t)  # reuse validation
         if self.scorer is not None and self.scorer not in VALID_SCORERS:
@@ -69,12 +75,21 @@ class MatchkeyField(BaseModel):
 
 class MatchkeyConfig(BaseModel):
     name: str
-    type: Literal["exact", "weighted"]
+    type: Literal["exact", "weighted"] | None = None
+    comparison: str | None = None
     fields: list[MatchkeyField]
     threshold: float | None = None
 
     @model_validator(mode="after")
     def _validate_weighted(self) -> "MatchkeyConfig":
+        # Allow 'comparison' as alias for 'type'
+        if self.type is None and self.comparison is not None:
+            if self.comparison in ("exact", "weighted"):
+                self.type = self.comparison
+            else:
+                raise ValueError(f"Invalid comparison '{self.comparison}'. Must be 'exact' or 'weighted'.")
+        elif self.type is None:
+            raise ValueError("MatchkeyConfig requires 'type' or 'comparison'.")
         if self.type == "weighted":
             if self.threshold is None:
                 raise ValueError("Weighted matchkeys require a 'threshold'.")
@@ -129,11 +144,18 @@ class GoldenFieldRule(BaseModel):
 
 
 class GoldenRulesConfig(BaseModel):
-    default_strategy: str
+    default_strategy: str | None = None
+    default: GoldenFieldRule | None = None
     field_rules: dict[str, GoldenFieldRule] = Field(default_factory=dict)
+    max_cluster_size: int = 100
 
     @model_validator(mode="after")
     def _validate_default(self) -> "GoldenRulesConfig":
+        # Resolve default_strategy from either field
+        if self.default is not None and self.default_strategy is None:
+            self.default_strategy = self.default.strategy
+        if self.default_strategy is None:
+            raise ValueError("GoldenRulesConfig requires 'default_strategy' or 'default'.")
         if self.default_strategy not in VALID_STRATEGIES:
             raise ValueError(
                 f"Invalid default_strategy '{self.default_strategy}'."
@@ -159,8 +181,10 @@ class InputConfig(BaseModel):
 
 
 class OutputConfig(BaseModel):
-    path: str
+    path: str | None = None
     format: str | None = None
+    directory: str | None = None
+    run_name: str | None = None
 
 
 # ── MatchSettingsConfig ─────────────────────────────────────────────────────
@@ -174,17 +198,27 @@ class MatchSettingsConfig(BaseModel):
 
 
 class GoldenMatchConfig(BaseModel):
-    input: InputConfig
-    output: OutputConfig
-    match_settings: MatchSettingsConfig
+    input: InputConfig | None = None
+    output: OutputConfig = Field(default_factory=lambda: OutputConfig())
+    match_settings: MatchSettingsConfig | None = None
+    matchkeys: list[MatchkeyConfig] | None = None
     blocking: BlockingConfig | None = None
-    golden_rules: GoldenRulesConfig
+    golden_rules: GoldenRulesConfig | None = None
 
     @model_validator(mode="after")
     def _validate_fuzzy_needs_blocking(self) -> "GoldenMatchConfig":
-        has_weighted = any(mk.type == "weighted" for mk in self.match_settings.matchkeys)
+        mks = self.get_matchkeys()
+        has_weighted = any(mk.type == "weighted" for mk in mks)
         if has_weighted and self.blocking is None:
             raise ValueError(
                 "Weighted/fuzzy matchkeys require a 'blocking' configuration."
             )
         return self
+
+    def get_matchkeys(self) -> list[MatchkeyConfig]:
+        """Return matchkeys from either top-level or match_settings."""
+        if self.matchkeys:
+            return self.matchkeys
+        if self.match_settings:
+            return self.match_settings.matchkeys
+        return []
