@@ -83,11 +83,48 @@ goldenmatch/
     └── test_prefs.py
 ```
 
+## Pipeline Flow
+
+The matching pipeline executes in a fixed sequence:
+
+```
+1. INGEST      Load files into Polars LazyFrames, validate columns
+2. TRANSFORM   Apply per-field transforms to build matchkey values (Polars expressions, vectorized)
+3. BLOCK       Group records into blocks using blocking keys (Polars group_by, stays in Polars)
+4. COMPARE     Within each block, generate candidate pairs and score them:
+                 - Exact matchkeys: Polars inner join on concatenated key (stays in Polars)
+                 - Fuzzy matchkeys: Collect block into Python, score with rapidfuzz, return pairs
+5. THRESHOLD   Filter candidate pairs to those meeting the matchkey threshold
+6. CLUSTER     Union-Find over all surviving pairs to form clusters (dedupe) or join results (list-match)
+7. GOLDEN      For dedupe: merge cluster members into golden records with confidence scores
+8. OUTPUT      Write configured output files incrementally
+```
+
+**Critical boundary — Polars vs. Python**: Steps 1-3 and exact comparisons in step 4 run entirely in Polars (lazy, multi-threaded, vectorized). Fuzzy comparisons in step 4 require materializing each block into Python and calling rapidfuzz. This is the primary performance bottleneck. The blocker's job is to keep blocks small enough that this materialization is fast. If any single block exceeds `max_block_size` (default: 5000), it is logged as a warning and optionally split using a secondary blocking key or skipped with a flag.
+
+**Blocking is required when any matchkey uses fuzzy comparison.** If the user defines a fuzzy matchkey but no blocking config, the tool will error with a message explaining why blocking is necessary and suggesting a blocking key based on the matchkey fields.
+
+**Blocking is optional for exact-only matchkeys.** Exact matchkeys use Polars joins directly, which are O(n) with hash joins and do not require blocking.
+
 ## Core Concepts
 
 ### Matchkeys
 
 A matchkey is a composite key built from one or more transformed fields. Multiple matchkeys can be defined — records that match on ANY matchkey are considered potential duplicates (OR logic across keys). Each matchkey can use exact or fuzzy comparison.
+
+**Exact matchkeys**: All fields are transformed and concatenated into a single composite string. Records with identical composite keys are matches. The `threshold` field is ignored (always 1.0). These run as Polars hash joins.
+
+**Fuzzy (weighted) matchkeys**: Each field is scored independently using its configured scorer, then aggregated into a composite score. Records above the threshold are matches. These require blocking.
+
+**Weighted score aggregation formula**: For a fuzzy matchkey with N fields:
+
+```
+score = sum(field_score_i * weight_i for non-null fields) / sum(weight_i for non-null fields)
+```
+
+- Weights are not required to sum to 1.0 — they are relative.
+- If a field is null in either record of the pair, that field is excluded from both the numerator and denominator. This means null fields do not penalize the score; the score is based only on fields that can be compared.
+- If ALL fields are null for one or both records, the pair scores 0.0.
 
 ```yaml
 matchkeys:
@@ -99,7 +136,7 @@ matchkeys:
       - column: zip
         transforms: ["substring:0:3"]
     comparison: exact
-    threshold: 1.0
+    # threshold is ignored for exact; always 1.0
 
   - name: "fuzzy_name_email"
     description: "Fuzzy full name + exact email"
@@ -156,6 +193,8 @@ blocking:
 
 Multiple blocking keys can be defined (union of blocks). A record can appear in multiple blocks.
 
+**Max block size**: Default 5000 records. Blocks exceeding this are logged as warnings. Configurable via `max_block_size` in the blocking config. Oversized blocks can optionally be skipped with `skip_oversized: true`. See the complete YAML schema for the full blocking config structure.
+
 **Performance target**: With blocking, a 5-million-record file with average block size of 50 should complete in minutes, not hours.
 
 ### Golden Record Rules
@@ -191,18 +230,132 @@ golden_rules:
 | `source_priority` | First non-null value from the preferred source order |
 | `most_complete` | Longest non-null string value |
 | `majority_vote` | Most common value across duplicates |
-| `first_non_null` | First non-null value encountered |
+| `first_non_null` | First non-null value by source order (CLI file order), then row order within file |
 
 #### Confidence Scoring
 
-Each field in the golden record gets a confidence score (0.0 - 1.0):
+Each field in the golden record gets a confidence score (0.0 - 1.0) computed per-strategy:
 
-- **1.0**: All duplicates agree on this value
-- **0.8-0.99**: Majority agreement, minor variants
-- **0.5-0.79**: Split values, winner chosen by strategy
-- **Below 0.5**: Low agreement, flagged for review
+| Strategy | Confidence Formula |
+|----------|-------------------|
+| `most_recent` | 1.0 if only one record has the latest date; 0.5 if tied on date (falls back to source_priority) |
+| `source_priority` | 1.0 if highest-priority source has a value; decreases by 0.1 per priority level fallen through |
+| `most_complete` | 1.0 if winner is strictly longer than all others; 0.7 if tied with another value of same length |
+| `majority_vote` | `count_of_winning_value / total_non_null_records_in_cluster` |
+| `first_non_null` | 0.6 always (low confidence — ordering is arbitrary; prefer other strategies) |
 
-The overall record confidence is the weighted average of field confidences.
+The overall record confidence is the mean of all field confidences.
+
+Fields where all cluster members agree get an automatic 1.0 regardless of strategy.
+
+### Clustering (Dedupe Mode)
+
+The clustering algorithm is **Union-Find (disjoint set union)** with path compression and union by rank:
+
+1. Every record starts as its own cluster.
+2. For each surviving candidate pair (above threshold), union the two records.
+3. After all pairs are processed, find the root of each record to determine cluster membership.
+
+**Safeguards**:
+- **Max cluster size**: Default 100. If a cluster exceeds this, it is flagged in the report as `oversized_cluster` and the golden record is not created (the raw cluster is still output). Configurable via `max_cluster_size` in the config.
+- **Cluster IDs**: Monotonically increasing integers starting at 1.
+
+### Matching (List-Match Mode)
+
+List-match does **not** use clustering. Instead, each target record is compared against reference records within its block, and results are returned as:
+
+- **Default (1:best)**: Each target gets its single best-scoring match above threshold. Ties are broken by: (1) highest composite score, (2) first file in `--against` order, (3) first row in file.
+- **`--match-mode all`**: Each target gets ALL reference matches above threshold, with scores. Output has one row per target-reference pair.
+- **`--match-mode none`**: No joining — just flag targets as matched/unmatched with a boolean column.
+
+Golden record creation is **not available** in list-match mode. The output joins target fields with reference fields side-by-side for matched pairs.
+
+## Complete YAML Config Schema
+
+Below is a fully annotated example config showing all top-level sections and defaults:
+
+```yaml
+# goldenmatch.yaml — complete example
+
+# --- Input settings (optional, can also be passed via CLI args) ---
+input:
+  files:
+    - path: crm_export.csv
+      source_name: crm              # Used in golden_rules source_priority
+      delimiter: ","                 # Default: ","
+      encoding: utf-8               # Default: utf-8
+      sheet: null                    # For .xlsx files only
+    - path: legacy_db.parquet
+      source_name: legacy
+
+# --- Mode: "dedupe" or "match" (optional, inferred from CLI subcommand) ---
+mode: dedupe
+
+# --- Matchkeys (required) ---
+matchkeys:
+  - name: "name_zip"
+    description: "Last name prefix + ZIP prefix"
+    fields:
+      - column: last_name
+        transforms: [lowercase, strip, "substring:0:5"]
+      - column: zip
+        transforms: ["substring:0:3"]
+    comparison: exact
+
+  - name: "fuzzy_name_email"
+    description: "Fuzzy full name + exact email"
+    fields:
+      - column: full_name
+        transforms: [lowercase, strip]
+        scorer: jaro_winkler
+        weight: 0.6
+      - column: email
+        transforms: [lowercase, strip]
+        scorer: exact
+        weight: 0.4
+    comparison: weighted
+    threshold: 0.85
+
+# --- Blocking (required if any matchkey uses fuzzy comparison) ---
+blocking:
+  max_block_size: 5000             # Default: 5000. Warn if exceeded.
+  skip_oversized: false            # Default: false. If true, skip oversized blocks.
+  keys:
+    - key_fields:
+        - column: last_name
+          transforms: [lowercase, "substring:0:3"]
+        - column: state
+          transforms: [uppercase]
+
+# --- Golden record rules (dedupe mode only, optional) ---
+golden_rules:
+  max_cluster_size: 100            # Default: 100. Clusters above this are flagged, not merged.
+  default:
+    strategy: most_complete        # Fallback for fields without explicit rules
+
+  email:
+    strategy: most_recent
+    date_column: updated_at
+  address:
+    strategy: source_priority
+    source_priority: [crm, legacy]
+  phone:
+    strategy: most_complete
+  specialty:
+    strategy: majority_vote
+
+# --- Output preferences (optional, overridden by CLI flags) ---
+output:
+  format: csv                      # csv | xlsx | parquet. Default: csv
+  directory: ./results             # Default: current directory
+  run_name: null                   # Default: timestamp. Set for deterministic naming.
+
+# --- List-match settings (match mode only, optional) ---
+match_settings:
+  match_mode: best                 # best | all | none. Default: best
+```
+
+**Required fields**: Only `matchkeys` is strictly required. Everything else has defaults or is inferred from CLI arguments. If `--config` is omitted from the CLI, the tool looks for `goldenmatch.yaml` in the current directory and fails with a helpful message if not found.
 
 ## Modes
 
@@ -336,6 +489,39 @@ The run name defaults to a timestamp but can be set via `--run-name`.
 - **Empty files**: Warn and skip, don't crash.
 - **Corrupt rows**: Log and skip with a count of skipped rows in the report.
 - **No matches found**: Produce empty output files with headers, plus a report noting 0 matches.
+
+## Logging
+
+GoldenMatch uses Python's `logging` module writing to stderr (so stdout is reserved for piping output).
+
+**Verbosity flags**:
+
+| Flag | Level | What gets logged |
+|------|-------|-----------------|
+| `--quiet` / `-q` | WARNING | Only warnings and errors |
+| (default) | INFO | Progress milestones: files loaded, blocks created, pairs scored, clusters formed, output written |
+| `--verbose` / `-v` | DEBUG | Per-block stats, per-matchkey pair counts, skipped rows, timing per pipeline stage |
+
+**Structured output**: When `--log-file path.log` is provided, logs are written as JSON lines (timestamp, level, message, context) for machine parsing. stderr output remains human-readable.
+
+**Progress bars**: Long-running operations (blocking, scoring, clustering) display Rich progress bars in the terminal. Suppressed when `--quiet` is set or when stdout is not a TTY.
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Config error (invalid YAML, missing required fields, validation failure) |
+| 2 | Input error (file not found, missing columns, unsupported format) |
+| 3 | Runtime error (unexpected failure during processing) |
+
+## Source Name Mapping
+
+When using multi-file dedupe with golden rules that reference `source_priority`, files must have source names. These can be provided in three ways (in priority order):
+
+1. **Config file**: The `input.files[].source_name` field (see complete YAML schema above)
+2. **CLI flag**: `goldenmatch dedupe file1.csv:crm file2.csv:legacy --config ...` (colon-separated name suffix)
+3. **Filename inference**: If neither is provided, the source name defaults to the filename stem (e.g., `crm_export.csv` becomes `crm_export`)
 
 ## Testing Strategy
 
