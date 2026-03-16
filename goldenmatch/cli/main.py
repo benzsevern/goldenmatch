@@ -179,3 +179,32 @@ def init_cmd(
     from goldenmatch.config.wizard import run_wizard
 
     run_wizard(output_path=output)
+
+
+# ── Profile command ───────────────────────────────────────────────────────
+
+
+@app.command("profile")
+def profile_cmd(
+    files: list[str] = typer.Argument(..., help="File(s) to profile"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed per-column info"),
+) -> None:
+    """Scan input files and generate a data quality report."""
+    from pathlib import Path
+
+    from goldenmatch.core.ingest import load_file
+    from goldenmatch.core.profiler import format_profile_report, profile_dataframe
+
+    for file_path in files:
+        p = Path(file_path)
+        console.print(f"\n[bold cyan]Profiling:[/bold cyan] {p.name}")
+        try:
+            lf = load_file(p)
+            df = lf.collect()
+        except (FileNotFoundError, ValueError) as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            continue
+
+        profile = profile_dataframe(df)
+        report = format_profile_report(profile, df=df if verbose else None)
+        console.print(report)
