@@ -1,8 +1,12 @@
 """Tests for goldenmatch config schemas and loader."""
 
+from pathlib import Path
+
 import pytest
+import yaml
 from pydantic import ValidationError
 
+from goldenmatch.config.loader import load_config
 from goldenmatch.config.schemas import (
     BlockingConfig,
     BlockingKeyConfig,
@@ -267,3 +271,82 @@ class TestGoldenMatchConfig:
             golden_rules=GoldenRulesConfig(default_strategy="first_non_null"),
         )
         assert cfg is not None
+
+
+# ── Config Loader ──────────────────────────────────────────────────────────
+
+
+class TestLoadConfig:
+    def test_load_minimal_yaml(self, tmp_path):
+        cfg_data = {
+            "input": {"file_a": {"path": "a.csv"}},
+            "output": {"path": "out.csv"},
+            "match_settings": {
+                "matchkeys": [
+                    {
+                        "name": "exact_email",
+                        "type": "exact",
+                        "fields": [{"field": "email"}],
+                    }
+                ]
+            },
+            "golden_rules": {"default_strategy": "first_non_null"},
+        }
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(cfg_data))
+        cfg = load_config(path)
+        assert isinstance(cfg, GoldenMatchConfig)
+        assert cfg.input.file_a.path == "a.csv"
+
+    def test_load_full_yaml_with_golden_rules_normalization(self, tmp_path):
+        """Non-special keys in golden_rules should be normalized into field_rules."""
+        cfg_data = {
+            "input": {
+                "file_a": {"path": "a.csv", "id_column": "id", "source_label": "crm"},
+                "file_b": {"path": "b.csv", "id_column": "id", "source_label": "web"},
+            },
+            "output": {"path": "out.csv"},
+            "match_settings": {
+                "matchkeys": [
+                    {
+                        "name": "exact_email",
+                        "type": "exact",
+                        "fields": [{"field": "email", "transforms": ["lowercase", "strip"]}],
+                    },
+                    {
+                        "name": "fuzzy_name",
+                        "type": "weighted",
+                        "threshold": 0.85,
+                        "fields": [
+                            {"field": "first_name", "scorer": "jaro_winkler", "weight": 0.5},
+                            {"field": "last_name", "scorer": "jaro_winkler", "weight": 0.5},
+                        ],
+                    },
+                ]
+            },
+            "blocking": {
+                "keys": [{"fields": ["zip"], "transforms": ["lowercase"]}]
+            },
+            "golden_rules": {
+                "default_strategy": "first_non_null",
+                "email": {"strategy": "most_complete"},
+                "phone": {"strategy": "majority_vote"},
+            },
+        }
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(cfg_data))
+        cfg = load_config(path)
+        assert len(cfg.match_settings.matchkeys) == 2
+        assert "email" in cfg.golden_rules.field_rules
+        assert "phone" in cfg.golden_rules.field_rules
+        assert cfg.golden_rules.field_rules["email"].strategy == "most_complete"
+
+    def test_load_missing_file(self):
+        with pytest.raises(FileNotFoundError):
+            load_config(Path("/nonexistent/config.yaml"))
+
+    def test_load_invalid_yaml(self, tmp_path):
+        path = tmp_path / "bad.yaml"
+        path.write_text(": : : not valid yaml [[[")
+        with pytest.raises(ValueError):
+            load_config(path)
