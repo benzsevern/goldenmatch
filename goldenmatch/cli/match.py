@@ -33,6 +33,7 @@ def match_cmd(
     output_dir: Optional[str] = typer.Option(None, "--output-dir", help="Output directory"),
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format (csv, parquet)"),
     run_name: Optional[str] = typer.Option(None, "--run-name", help="Run name for output files"),
+    auto_fix: bool = typer.Option(False, "--auto-fix", help="Run auto-fix before matching"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress output"),
 ) -> None:
@@ -62,6 +63,14 @@ def match_cmd(
         output_unmatched = True
         output_scores = True
         output_report = True
+
+    # Enable auto-fix from CLI flag
+    if auto_fix:
+        from goldenmatch.config.schemas import ValidationConfig
+        if cfg.validation is None:
+            cfg.validation = ValidationConfig(auto_fix=True)
+        else:
+            cfg.validation.auto_fix = True
 
     # Resolve column maps
     all_parsed = [target_parsed] + refs_parsed

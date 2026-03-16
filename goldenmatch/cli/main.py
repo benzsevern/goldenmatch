@@ -188,6 +188,7 @@ def init_cmd(
 def profile_cmd(
     files: list[str] = typer.Argument(..., help="File(s) to profile"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed per-column info"),
+    suggest_fixes: bool = typer.Option(False, "--suggest-fixes", help="Show what auto-fix would do (dry run)"),
 ) -> None:
     """Scan input files and generate a data quality report."""
     from pathlib import Path
@@ -208,3 +209,16 @@ def profile_cmd(
         profile = profile_dataframe(df)
         report = format_profile_report(profile, df=df if verbose else None)
         console.print(report)
+
+        if suggest_fixes:
+            from goldenmatch.core.autofix import auto_fix_dataframe
+
+            _, fixes = auto_fix_dataframe(df, profile=profile)
+            console.print("\n[bold yellow]Suggested Fixes (dry run):[/bold yellow]")
+            any_fix = False
+            for fix in fixes:
+                if fix["rows_affected"] > 0:
+                    any_fix = True
+                    console.print(f"  [green]{fix['fix']}[/green]: {fix['detail']}")
+            if not any_fix:
+                console.print("  [dim]No fixes needed.[/dim]")

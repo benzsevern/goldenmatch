@@ -9,8 +9,10 @@ from datetime import datetime
 import polars as pl
 
 from goldenmatch.config.schemas import GoldenMatchConfig, GoldenRulesConfig
+from goldenmatch.core.autofix import auto_fix_dataframe
 from goldenmatch.core.ingest import load_file, validate_columns, apply_column_map
 from goldenmatch.core.standardize import apply_standardization
+from goldenmatch.core.validate import ValidationRule, validate_dataframe
 from goldenmatch.core.matchkey import compute_matchkeys
 from goldenmatch.core.blocker import build_blocks
 from goldenmatch.core.scorer import find_exact_matches, find_fuzzy_matches
@@ -94,7 +96,31 @@ def run_dedupe(
 
     combined_lf = pl.concat([f.collect() for f in frames]).lazy()
 
-    # ── Step 1.5: STANDARDIZE ──
+    # ── Step 1.5a: AUTO-FIX + VALIDATION ──
+    if config.validation and config.validation.auto_fix:
+        combined_df_tmp = combined_lf.collect()
+        combined_df_tmp, fix_log = auto_fix_dataframe(combined_df_tmp)
+        logger.info("Auto-fix applied: %d fix type(s)", len(fix_log))
+        combined_lf = combined_df_tmp.lazy()
+
+    if config.validation and config.validation.rules:
+        rules = [
+            ValidationRule(
+                column=rc.column,
+                rule_type=rc.rule_type,
+                params=rc.params,
+                action=rc.action,
+            )
+            for rc in config.validation.rules
+        ]
+        combined_df_tmp = combined_lf.collect()
+        valid_df, quarantine_df, val_report = validate_dataframe(combined_df_tmp, rules)
+        logger.info("Validation: %d quarantined rows", quarantine_df.height)
+        combined_lf = valid_df.lazy()
+    else:
+        quarantine_df = None
+
+    # ── Step 1.5b: STANDARDIZE ──
     if config.standardization and config.standardization.rules:
         combined_lf = apply_standardization(combined_lf, config.standardization.rules)
 
@@ -236,6 +262,7 @@ def run_dedupe(
         "unique": unique_df,
         "dupes": dupes_df,
         "report": report,
+        "quarantine": quarantine_df,
     }
 
     return results
@@ -307,7 +334,31 @@ def run_match(
     combined_df = pl.concat(all_frames)
     combined_lf = combined_df.lazy()
 
-    # ── Step 2.5: STANDARDIZE ──
+    # ── Step 2.5a: AUTO-FIX + VALIDATION ──
+    if config.validation and config.validation.auto_fix:
+        combined_df_tmp = combined_lf.collect()
+        combined_df_tmp, fix_log = auto_fix_dataframe(combined_df_tmp)
+        logger.info("Auto-fix applied: %d fix type(s)", len(fix_log))
+        combined_lf = combined_df_tmp.lazy()
+
+    if config.validation and config.validation.rules:
+        rules = [
+            ValidationRule(
+                column=rc.column,
+                rule_type=rc.rule_type,
+                params=rc.params,
+                action=rc.action,
+            )
+            for rc in config.validation.rules
+        ]
+        combined_df_tmp = combined_lf.collect()
+        valid_df, quarantine_df_match, val_report = validate_dataframe(combined_df_tmp, rules)
+        logger.info("Validation: %d quarantined rows", quarantine_df_match.height)
+        combined_lf = valid_df.lazy()
+    else:
+        quarantine_df_match = None
+
+    # ── Step 2.5b: STANDARDIZE ──
     if config.standardization and config.standardization.rules:
         combined_lf = apply_standardization(combined_lf, config.standardization.rules)
 
@@ -419,4 +470,5 @@ def run_match(
         "matched": matched_df,
         "unmatched": unmatched_df,
         "report": report,
+        "quarantine": quarantine_df_match,
     }
