@@ -103,6 +103,8 @@ class BlockingKeyConfig(BaseModel):
 
 class BlockingConfig(BaseModel):
     keys: list[BlockingKeyConfig]
+    max_block_size: int = 5000
+    skip_oversized: bool = False
 
 
 # ── GoldenFieldRule / GoldenRulesConfig ─────────────────────────────────────
