@@ -106,3 +106,16 @@ def config_show(
     except FileNotFoundError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1)
+
+
+# ── Init command (wizard) ──────────────────────────────────────────────────
+
+
+@app.command("init")
+def init_cmd(
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Output path for generated config"),
+) -> None:
+    """Launch the interactive config wizard."""
+    from goldenmatch.config.wizard import run_wizard
+
+    run_wizard(output_path=output)
