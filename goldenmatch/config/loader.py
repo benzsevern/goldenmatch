@@ -30,6 +30,26 @@ def _normalize_golden_rules(raw: dict[str, Any]) -> dict[str, Any]:
     return raw
 
 
+def _normalize_standardization(raw: dict[str, Any]) -> dict[str, Any]:
+    """Allow flat standardization format without explicit 'rules' key.
+
+    Users can write either:
+        standardization:
+          rules:
+            email: [email]
+    Or the shorthand:
+        standardization:
+          email: [email]
+    """
+    std = raw.get("standardization")
+    if std is None or not isinstance(std, dict):
+        return raw
+    if "rules" not in std:
+        # Everything is a column->standardizers mapping
+        raw["standardization"] = {"rules": std}
+    return raw
+
+
 def load_config(path: str | Path) -> GoldenMatchConfig:
     """Load and validate a GoldenMatch YAML config file.
 
@@ -58,6 +78,7 @@ def load_config(path: str | Path) -> GoldenMatchConfig:
         raise ValueError(f"Config file must contain a YAML mapping, got {type(raw).__name__}")
 
     raw = _normalize_golden_rules(raw)
+    raw = _normalize_standardization(raw)
 
     try:
         return GoldenMatchConfig(**raw)

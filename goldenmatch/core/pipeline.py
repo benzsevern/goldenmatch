@@ -10,6 +10,7 @@ import polars as pl
 
 from goldenmatch.config.schemas import GoldenMatchConfig, GoldenRulesConfig
 from goldenmatch.core.ingest import load_file, validate_columns, apply_column_map
+from goldenmatch.core.standardize import apply_standardization
 from goldenmatch.core.matchkey import compute_matchkeys
 from goldenmatch.core.blocker import build_blocks
 from goldenmatch.core.scorer import find_exact_matches, find_fuzzy_matches
@@ -92,6 +93,10 @@ def run_dedupe(
         frames.append(collected.lazy())
 
     combined_lf = pl.concat([f.collect() for f in frames]).lazy()
+
+    # ── Step 1.5: STANDARDIZE ──
+    if config.standardization and config.standardization.rules:
+        combined_lf = apply_standardization(combined_lf, config.standardization.rules)
 
     # ── Step 2: TRANSFORM ──
     combined_lf = compute_matchkeys(combined_lf, matchkeys)
@@ -301,6 +306,10 @@ def run_match(
     all_frames = [target_df] + ref_frames
     combined_df = pl.concat(all_frames)
     combined_lf = combined_df.lazy()
+
+    # ── Step 2.5: STANDARDIZE ──
+    if config.standardization and config.standardization.rules:
+        combined_lf = apply_standardization(combined_lf, config.standardization.rules)
 
     # ── Step 3: Compute matchkeys ──
     combined_lf = compute_matchkeys(combined_lf, matchkeys)

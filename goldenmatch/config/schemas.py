@@ -163,6 +163,29 @@ class GoldenRulesConfig(BaseModel):
         return self
 
 
+# ── StandardizationConfig ──────────────────────────────────────────────────
+
+VALID_STANDARDIZERS = frozenset({
+    "email", "name_proper", "name_upper", "name_lower",
+    "phone", "zip5", "address", "state", "strip", "trim_whitespace",
+})
+
+
+class StandardizationConfig(BaseModel):
+    rules: dict[str, list[str]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_standardizers(self) -> "StandardizationConfig":
+        for column, std_names in self.rules.items():
+            for name in std_names:
+                if name not in VALID_STANDARDIZERS:
+                    raise ValueError(
+                        f"Invalid standardizer '{name}' for column '{column}'. "
+                        f"Valid: {sorted(VALID_STANDARDIZERS)}"
+                    )
+        return self
+
+
 # ── InputFileConfig / InputConfig ───────────────────────────────────────────
 
 
@@ -210,6 +233,7 @@ class GoldenMatchConfig(BaseModel):
     matchkeys: list[MatchkeyConfig] | None = None
     blocking: BlockingConfig | None = None
     golden_rules: GoldenRulesConfig | None = None
+    standardization: StandardizationConfig | None = None
 
     @model_validator(mode="after")
     def _validate_fuzzy_needs_blocking(self) -> "GoldenMatchConfig":
