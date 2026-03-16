@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from goldenmatch.config.wizard import suggest_transforms, suggest_scorer
 

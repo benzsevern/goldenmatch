@@ -2,7 +2,6 @@
 
 import polars as pl
 import pytest
-from pathlib import Path
 
 from goldenmatch.output.writer import write_output
 from goldenmatch.output.report import generate_dedupe_report, generate_match_report

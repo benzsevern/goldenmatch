@@ -3,7 +3,6 @@
 import logging
 
 import polars as pl
-import pytest
 
 from goldenmatch.core.blocker import build_blocks, BlockResult
 from goldenmatch.config.schemas import BlockingConfig, BlockingKeyConfig

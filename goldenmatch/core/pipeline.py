@@ -5,11 +5,10 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from datetime import datetime
-from pathlib import Path
 
 import polars as pl
 
-from goldenmatch.config.schemas import GoldenMatchConfig, GoldenRulesConfig, GoldenFieldRule
+from goldenmatch.config.schemas import GoldenMatchConfig, GoldenRulesConfig
 from goldenmatch.core.ingest import load_file, validate_columns
 from goldenmatch.core.matchkey import compute_matchkeys
 from goldenmatch.core.blocker import build_blocks

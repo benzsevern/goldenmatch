@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 from rich.console import Console
-from rich.prompt import Prompt, Confirm, IntPrompt
+from rich.prompt import Prompt, Confirm
 
 console = Console()
 

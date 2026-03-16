@@ -1,7 +1,6 @@
 """Tests for goldenmatch scorer."""
 
 import polars as pl
-import pytest
 
 from goldenmatch.config.schemas import MatchkeyConfig, MatchkeyField
 from goldenmatch.core.scorer import (

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from goldenmatch.config.schemas import MatchkeyConfig, MatchkeyField
+from goldenmatch.config.schemas import MatchkeyConfig
 from goldenmatch.utils.transforms import apply_transforms
 
 

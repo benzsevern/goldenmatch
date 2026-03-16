@@ -1,6 +1,5 @@
 """Tests for goldenmatch clustering."""
 
-import pytest
 
 from goldenmatch.core.cluster import UnionFind, build_clusters
 

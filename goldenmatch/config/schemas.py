@@ -62,7 +62,7 @@ class MatchkeyField(BaseModel):
         elif self.field is None and self.column is None:
             raise ValueError("MatchkeyField requires 'field' or 'column'.")
         for t in self.transforms:
-            ft = FieldTransform(transform=t)  # reuse validation
+            FieldTransform(transform=t)  # reuse validation
         if self.scorer is not None and self.scorer not in VALID_SCORERS:
             raise ValueError(
                 f"Invalid scorer '{self.scorer}'. Must be one of {sorted(VALID_SCORERS)}."

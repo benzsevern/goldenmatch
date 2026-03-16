@@ -1,7 +1,6 @@
 """Tests for goldenmatch matchkey builder."""
 
 import polars as pl
-import pytest
 
 from goldenmatch.core.matchkey import build_matchkey_expr, compute_matchkeys
 from goldenmatch.config.schemas import MatchkeyConfig, MatchkeyField

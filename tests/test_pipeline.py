@@ -1,8 +1,5 @@
 """Tests for the pipeline orchestrator."""
 
-import pytest
-import polars as pl
-from pathlib import Path
 from goldenmatch.core.pipeline import run_dedupe, run_match
 from goldenmatch.config.schemas import (
     GoldenMatchConfig, MatchkeyConfig, MatchkeyField,
@@ -78,7 +75,7 @@ class TestRunDedupe:
                 default=GoldenFieldRule(strategy="most_complete"),
             ),
         )
-        results = run_dedupe(
+        run_dedupe(
             files=[(sample_csv, "test_source")],
             config=cfg,
             output_golden=True,
