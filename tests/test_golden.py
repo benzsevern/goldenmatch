@@ -1,0 +1,150 @@
+"""Tests for goldenmatch golden record builder."""
+
+import polars as pl
+import pytest
+
+from goldenmatch.config.schemas import GoldenFieldRule, GoldenRulesConfig
+from goldenmatch.core.golden import merge_field, build_golden_record
+
+
+class TestMergeFieldMostComplete:
+    """Tests for most_complete strategy."""
+
+    def test_longest_string_wins(self):
+        rule = GoldenFieldRule(strategy="most_complete")
+        val, conf = merge_field(["Jo", "John", "Jon"], rule)
+        assert val == "John"
+        assert conf == 1.0
+
+    def test_tied_length(self):
+        rule = GoldenFieldRule(strategy="most_complete")
+        val, conf = merge_field(["abc", "xyz"], rule)
+        assert val in ("abc", "xyz")
+        assert conf == 0.7
+
+
+class TestMergeFieldMajorityVote:
+    """Tests for majority_vote strategy."""
+
+    def test_majority_wins(self):
+        rule = GoldenFieldRule(strategy="majority_vote")
+        val, conf = merge_field(["A", "B", "A", "A"], rule)
+        assert val == "A"
+        assert conf == pytest.approx(3 / 4)
+
+    def test_tie_picks_one(self):
+        rule = GoldenFieldRule(strategy="majority_vote")
+        val, conf = merge_field(["A", "B"], rule)
+        assert val in ("A", "B")
+        assert conf == pytest.approx(0.5)
+
+
+class TestMergeFieldSourcePriority:
+    """Tests for source_priority strategy."""
+
+    def test_first_source_match(self):
+        rule = GoldenFieldRule(
+            strategy="source_priority",
+            source_priority=["src_a", "src_b"],
+        )
+        val, conf = merge_field(
+            ["v_a", "v_b"],
+            rule,
+            sources=["src_a", "src_b"],
+        )
+        assert val == "v_a"
+        assert conf == pytest.approx(1.0)
+
+    def test_second_source_match(self):
+        rule = GoldenFieldRule(
+            strategy="source_priority",
+            source_priority=["src_a", "src_b", "src_c"],
+        )
+        val, conf = merge_field(
+            [None, "v_b", "v_c"],
+            rule,
+            sources=["src_a", "src_b", "src_c"],
+        )
+        assert val == "v_b"
+        assert conf == pytest.approx(0.9)
+
+    def test_confidence_floor(self):
+        """Confidence never drops below 0.1."""
+        rule = GoldenFieldRule(
+            strategy="source_priority",
+            source_priority=["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11"],
+        )
+        vals = [None] * 11 + ["found", "other"]
+        sources = ["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "s12"]
+        val, conf = merge_field(vals, rule, sources=sources)
+        assert val == "found"
+        assert conf == pytest.approx(0.1)
+
+
+class TestMergeFieldFirstNonNull:
+    """Tests for first_non_null strategy."""
+
+    def test_first_value(self):
+        rule = GoldenFieldRule(strategy="first_non_null")
+        val, conf = merge_field([None, "hello", "world"], rule)
+        assert val == "hello"
+        assert conf == 0.6
+
+
+class TestMergeFieldAllAgree:
+    """When all non-null values are identical, confidence is 1.0."""
+
+    def test_all_identical(self):
+        rule = GoldenFieldRule(strategy="majority_vote")
+        val, conf = merge_field(["same", "same", "same"], rule)
+        assert val == "same"
+        assert conf == 1.0
+
+
+class TestMergeFieldAllNull:
+    """All null returns (None, 0.0)."""
+
+    def test_all_none(self):
+        rule = GoldenFieldRule(strategy="most_complete")
+        val, conf = merge_field([None, None], rule)
+        assert val is None
+        assert conf == 0.0
+
+    def test_empty_list(self):
+        rule = GoldenFieldRule(strategy="most_complete")
+        val, conf = merge_field([], rule)
+        assert val is None
+        assert conf == 0.0
+
+
+class TestBuildGoldenRecord:
+    """Integration test for build_golden_record."""
+
+    def test_build_golden_record(self):
+        df = pl.DataFrame({
+            "__row_id__": [1, 2, 3],
+            "__source__": ["a", "b", "c"],
+            "__block_key__": ["k", "k", "k"],
+            "__mk_exact": ["x", "x", "x"],
+            "name": ["John", "John", "Jonathan"],
+            "email": ["j@a.com", "john@b.com", "j@a.com"],
+        })
+        rules = GoldenRulesConfig(
+            default_strategy="most_complete",
+            field_rules={
+                "email": GoldenFieldRule(strategy="majority_vote"),
+            },
+        )
+        result = build_golden_record(df, rules)
+        # Internal columns should be absent
+        assert "__row_id__" not in result
+        assert "__source__" not in result
+        assert "__block_key__" not in result
+        assert "__mk_exact" not in result
+        # name: most_complete -> "Jonathan" (longest)
+        assert result["name"]["value"] == "Jonathan"
+        # email: majority_vote -> "j@a.com" (2 vs 1)
+        assert result["email"]["value"] == "j@a.com"
+        # golden confidence is mean of individual confidences
+        assert "__golden_confidence__" in result
+        assert 0.0 < result["__golden_confidence__"] <= 1.0
