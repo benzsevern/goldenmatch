@@ -171,6 +171,18 @@ VALID_STANDARDIZERS = frozenset({
 })
 
 
+class ValidationRuleConfig(BaseModel):
+    column: str
+    rule_type: Literal["regex", "min_length", "max_length", "not_null", "in_set", "format"]
+    params: dict = Field(default_factory=dict)
+    action: Literal["null", "quarantine", "flag"] = "flag"
+
+
+class ValidationConfig(BaseModel):
+    rules: list[ValidationRuleConfig] = Field(default_factory=list)
+    auto_fix: bool = True  # whether to run auto-fix before validation
+
+
 class StandardizationConfig(BaseModel):
     rules: dict[str, list[str]] = Field(default_factory=dict)
 
@@ -234,6 +246,7 @@ class GoldenMatchConfig(BaseModel):
     blocking: BlockingConfig | None = None
     golden_rules: GoldenRulesConfig | None = None
     standardization: StandardizationConfig | None = None
+    validation: ValidationConfig | None = None
 
     @model_validator(mode="after")
     def _validate_fuzzy_needs_blocking(self) -> "GoldenMatchConfig":
