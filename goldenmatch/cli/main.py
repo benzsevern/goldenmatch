@@ -2,20 +2,80 @@
 
 from __future__ import annotations
 
+import platform
+import sys
 from typing import Optional
 
 import typer
 from rich.console import Console
 from rich.syntax import Syntax
+from rich.table import Table
+from rich.text import Text
 
+from goldenmatch import __version__
 from goldenmatch.cli.dedupe import dedupe_cmd
 from goldenmatch.cli.match import match_cmd
 from goldenmatch.prefs.store import PresetStore
 
+LOGO = r"""[bold bright_yellow]
+   ██████╗  ██████╗ ██╗     ██████╗ ███████╗███╗   ██╗
+  ██╔════╝ ██╔═══██╗██║     ██╔══██╗██╔════╝████╗  ██║
+  ██║  ███╗██║   ██║██║     ██║  ██║█████╗  ██╔██╗ ██║
+  ██║   ██║██║   ██║██║     ██║  ██║██╔══╝  ██║╚██╗██║
+  ╚██████╔╝╚██████╔╝███████╗██████╔╝███████╗██║ ╚████║
+   ╚═════╝  ╚═════╝ ╚══════╝╚═════╝ ╚══════╝╚═╝  ╚═══╝
+  ███╗   ███╗ █████╗ ████████╗ ██████╗██╗  ██╗
+  ████╗ ████║██╔══██╗╚══██╔══╝██╔════╝██║  ██║
+  ██╔████╔██║███████║   ██║   ██║     ███████║
+  ██║╚██╔╝██║██╔══██║   ██║   ██║     ██╔══██║
+  ██║ ╚═╝ ██║██║  ██║   ██║   ╚██████╗██║  ██║
+  ╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝    ╚═════╝╚═╝  ╚═╝[/bold bright_yellow]"""
+
+
+def _print_banner() -> None:
+    console = Console(stderr=True)
+    console.print(LOGO)
+    console.print()
+
+    info = Table(show_header=False, box=None, padding=(0, 2), show_edge=False)
+    info.add_column(style="bold cyan", no_wrap=True)
+    info.add_column(style="white")
+
+    info.add_row("version", __version__)
+    info.add_row("python", f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+    info.add_row("platform", platform.system() + " " + platform.machine())
+
+    store = PresetStore()
+    presets = store.list_presets()
+    info.add_row("presets", str(len(presets)) + " saved")
+
+    import importlib
+    for pkg in ["polars", "rapidfuzz", "typer", "pydantic"]:
+        try:
+            mod = importlib.import_module(pkg)
+            ver = getattr(mod, "__version__", "installed")
+            info.add_row(pkg, ver)
+        except ImportError:
+            info.add_row(pkg, "[red]missing[/red]")
+
+    console.print(info)
+    console.print()
+    console.print("[dim]Usage: goldenmatch <command> [options][/dim]")
+    console.print("[dim]Commands: dedupe, match, config, init[/dim]")
+    console.print("[dim]Run goldenmatch <command> --help for details[/dim]")
+    console.print()
+
+
+def _callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        _print_banner()
+
+
 app = typer.Typer(
     name="goldenmatch",
     help="GoldenMatch: deduplication and list-matching toolkit.",
-    no_args_is_help=True,
+    invoke_without_command=True,
+    callback=_callback,
 )
 
 app.command("dedupe", help="Run deduplication on one or more files.")(dedupe_cmd)
