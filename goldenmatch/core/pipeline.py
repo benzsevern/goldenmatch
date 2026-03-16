@@ -9,7 +9,7 @@ from datetime import datetime
 import polars as pl
 
 from goldenmatch.config.schemas import GoldenMatchConfig, GoldenRulesConfig
-from goldenmatch.core.ingest import load_file, validate_columns
+from goldenmatch.core.ingest import load_file, validate_columns, apply_column_map
 from goldenmatch.core.matchkey import compute_matchkeys
 from goldenmatch.core.blocker import build_blocks
 from goldenmatch.core.scorer import find_exact_matches, find_fuzzy_matches
@@ -74,8 +74,15 @@ def run_dedupe(
     # ── Step 1: INGEST ──
     frames = []
     offset = 0
-    for file_path, source_name in files:
+    for file_spec in files:
+        if len(file_spec) == 3:
+            file_path, source_name, column_map = file_spec
+        else:
+            file_path, source_name = file_spec[0], file_spec[1]
+            column_map = None
         lf = load_file(file_path)
+        if column_map:
+            lf = apply_column_map(lf, column_map)
         required = _get_required_columns(config)
         validate_columns(lf, required)
         lf = lf.with_columns(pl.lit(source_name).alias("__source__"))
@@ -257,8 +264,14 @@ def run_match(
     matchkeys = config.get_matchkeys()
 
     # ── Step 1: Load target ──
-    target_path, target_source = target_file
+    if len(target_file) == 3:
+        target_path, target_source, target_col_map = target_file
+    else:
+        target_path, target_source = target_file[0], target_file[1]
+        target_col_map = None
     target_lf = load_file(target_path)
+    if target_col_map:
+        target_lf = apply_column_map(target_lf, target_col_map)
     target_lf = target_lf.with_columns(pl.lit(target_source).alias("__source__"))
     target_lf = _add_row_ids(target_lf, offset=0)
     target_df = target_lf.collect()
@@ -268,8 +281,15 @@ def run_match(
     # ── Step 2: Load references ──
     ref_frames = []
     ref_sources = set()
-    for ref_path, ref_source in reference_files:
+    for ref_spec in reference_files:
+        if len(ref_spec) == 3:
+            ref_path, ref_source, ref_col_map = ref_spec
+        else:
+            ref_path, ref_source = ref_spec[0], ref_spec[1]
+            ref_col_map = None
         ref_lf = load_file(ref_path)
+        if ref_col_map:
+            ref_lf = apply_column_map(ref_lf, ref_col_map)
         ref_lf = ref_lf.with_columns(pl.lit(ref_source).alias("__source__"))
         ref_lf = _add_row_ids(ref_lf, offset=offset)
         ref_df = ref_lf.collect()

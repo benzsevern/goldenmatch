@@ -170,10 +170,16 @@ class InputFileConfig(BaseModel):
     path: str
     id_column: str | None = None
     source_label: str | None = None
+    source_name: str | None = None
+    column_map: dict[str, str] | None = None
+    delimiter: str = ","
+    encoding: str = "utf8"
+    sheet: str | None = None
 
 
 class InputConfig(BaseModel):
-    file_a: InputFileConfig
+    files: list[InputFileConfig] = Field(default_factory=list)
+    file_a: InputFileConfig | None = None
     file_b: InputFileConfig | None = None
 
 

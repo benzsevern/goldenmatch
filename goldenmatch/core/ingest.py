@@ -67,6 +67,82 @@ def load_files(file_specs: list[tuple[Path | str, str]]) -> list[pl.LazyFrame]:
     return frames
 
 
+def apply_column_map(lf: pl.LazyFrame, column_map: dict[str, str]) -> pl.LazyFrame:
+    """Rename columns according to a mapping.
+
+    Args:
+        lf: The LazyFrame to rename columns in.
+        column_map: Mapping of {original_name: target_name}.
+            e.g. {"LNAME": "last_name", "FNAME": "first_name"}
+
+    Returns:
+        LazyFrame with renamed columns.
+
+    Raises:
+        ValueError: If a source column in the map doesn't exist in the frame.
+    """
+    available = set(lf.collect_schema().names())
+    missing = [src for src in column_map if src not in available]
+    if missing:
+        raise ValueError(
+            f"Column map references columns not in file: {missing}. "
+            f"Available: {sorted(available)}"
+        )
+    return lf.rename(column_map)
+
+
+def suggest_column_mapping(
+    file_columns: list[str],
+    target_columns: list[str],
+    threshold: float = 0.75,
+) -> dict[str, str]:
+    """Suggest column mappings from file columns to target columns using fuzzy matching.
+
+    Args:
+        file_columns: Column names in the input file.
+        target_columns: Expected/target column names from the config.
+        threshold: Minimum similarity score (0-1) to suggest a mapping.
+
+    Returns:
+        Dict of {file_column: target_column} for suggested matches.
+    """
+    from rapidfuzz.distance import JaroWinkler
+
+    suggestions: dict[str, str] = {}
+    remaining_targets = set(target_columns)
+
+    # Exact matches first (case-insensitive)
+    for fc in file_columns:
+        for tc in list(remaining_targets):
+            if fc.lower() == tc.lower() and fc != tc:
+                suggestions[fc] = tc
+                remaining_targets.discard(tc)
+                break
+
+    # Skip targets that already have an exact match in the file (no rename needed)
+    for fc in file_columns:
+        for tc in list(remaining_targets):
+            if fc == tc:
+                remaining_targets.discard(tc)
+
+    # Fuzzy matches for remaining
+    for tc in list(remaining_targets):
+        best_score = 0.0
+        best_fc = None
+        for fc in file_columns:
+            if fc in suggestions or fc == tc:
+                continue
+            score = JaroWinkler.similarity(fc.lower(), tc.lower())
+            if score > best_score and score >= threshold:
+                best_score = score
+                best_fc = fc
+        if best_fc is not None:
+            suggestions[best_fc] = tc
+            remaining_targets.discard(tc)
+
+    return suggestions
+
+
 def validate_columns(lf: pl.LazyFrame, required: list[str]) -> None:
     """Check that required columns exist in a LazyFrame schema.
 

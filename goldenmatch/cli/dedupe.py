@@ -33,6 +33,33 @@ def _parse_file_source(raw: str) -> tuple[str, str]:
     return (left, raw[idx + 1:])
 
 
+def _resolve_column_maps(parsed_files, cfg):
+    """Match CLI files against config input.files to pick up column_map settings.
+
+    Returns list of (path, source_name, column_map_or_None) tuples.
+    """
+    config_files = {}
+    if cfg.input and hasattr(cfg.input, "files") and cfg.input.files:
+        for fc in cfg.input.files:
+            config_files[Path(fc.path).name] = fc
+    elif cfg.input and hasattr(cfg.input, "file_a") and cfg.input.file_a:
+        config_files[Path(cfg.input.file_a.path).name] = cfg.input.file_a
+        if cfg.input.file_b:
+            config_files[Path(cfg.input.file_b.path).name] = cfg.input.file_b
+
+    result = []
+    for file_path, source_name in parsed_files:
+        fname = Path(file_path).name
+        col_map = None
+        if fname in config_files:
+            fc = config_files[fname]
+            col_map = fc.column_map
+            if fc.source_name and source_name == Path(file_path).stem:
+                source_name = fc.source_name
+        result.append((file_path, source_name, col_map))
+    return result
+
+
 def dedupe_cmd(
     files: list[str] = typer.Argument(
         ..., help="Input files as path or path:source_name"
@@ -80,12 +107,15 @@ def dedupe_cmd(
         output_unique = True
         output_report = True
 
+    # Resolve column maps from config input.files section
+    file_specs = _resolve_column_maps(parsed_files, cfg)
+
     # Run dedupe
     try:
         from goldenmatch.core.pipeline import run_dedupe
 
         results = run_dedupe(
-            files=parsed_files,
+            files=file_specs,
             config=cfg,
             output_golden=output_golden,
             output_clusters=output_clusters,

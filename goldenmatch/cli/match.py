@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from goldenmatch.config.loader import load_config
-from goldenmatch.cli.dedupe import _parse_file_source
+from goldenmatch.cli.dedupe import _parse_file_source, _resolve_column_maps
 
 console = Console()
 
@@ -38,8 +38,8 @@ def match_cmd(
 ) -> None:
     """Run list-matching: match a target file against reference files."""
     # Parse target and reference files
-    target_file = _parse_file_source(target)
-    reference_files = [_parse_file_source(f) for f in against]
+    target_parsed = _parse_file_source(target)
+    refs_parsed = [_parse_file_source(f) for f in against]
 
     # Load config
     try:
@@ -62,6 +62,12 @@ def match_cmd(
         output_unmatched = True
         output_scores = True
         output_report = True
+
+    # Resolve column maps
+    all_parsed = [target_parsed] + refs_parsed
+    all_resolved = _resolve_column_maps(all_parsed, cfg)
+    target_file = all_resolved[0]
+    reference_files = all_resolved[1:]
 
     # Run match
     try:
