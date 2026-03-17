@@ -64,26 +64,31 @@ def find_exact_matches(
 ) -> list[tuple[int, int, float]]:
     """Find exact matches by grouping on the matchkey column.
 
-    Groups by __mk_{name}__ column, then generates all combinations of
-    __row_id__ pairs within each group that has 2+ records, each with score 1.0.
+    Uses a Polars self-join on the matchkey column to find all pairs of
+    __row_id__ that share the same matchkey value, each with score 1.0.
+    Null matchkey values are excluded.
     """
     mk_col = f"__mk_{mk.name}__"
-    df = lf.collect()
+    df = lf.select("__row_id__", mk_col).collect()
 
-    results: list[tuple[int, int, float]] = []
+    # Drop nulls — they should not match
+    df = df.filter(pl.col(mk_col).is_not_null())
 
-    for _key, group_df in df.group_by(mk_col):
-        key_val = _key[0]
-        if key_val is None:
-            continue
-        if len(group_df) < 2:
-            continue
+    if df.height < 2:
+        return []
 
-        row_ids = group_df["__row_id__"].to_list()
-        for id_a, id_b in combinations(row_ids, 2):
-            results.append((id_a, id_b, 1.0))
+    # Self-join on matchkey — produces all (left, right) combinations per group
+    joined = df.join(df, on=mk_col, suffix="_right")
 
-    return results
+    # Keep only pairs where left < right (avoid duplicates and self-matches)
+    joined = joined.filter(pl.col("__row_id__") < pl.col("__row_id___right"))
+
+    if joined.height == 0:
+        return []
+
+    ids_a = joined["__row_id__"].to_list()
+    ids_b = joined["__row_id___right"].to_list()
+    return [(a, b, 1.0) for a, b in zip(ids_a, ids_b)]
 
 
 def find_fuzzy_matches(
