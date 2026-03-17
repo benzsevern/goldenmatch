@@ -189,7 +189,10 @@ def interactive_cmd(
     files: list[str] = typer.Argument(..., help="File(s) to load"),
 ) -> None:
     """Launch the interactive TUI for building configs with live feedback."""
-    console.print("[yellow]Interactive TUI coming soon. Use --preview for now.[/yellow]")
+    from goldenmatch.tui.app import GoldenMatchApp
+
+    tui_app = GoldenMatchApp(files=files)
+    tui_app.run()
 
 
 @app.command("profile")
