@@ -53,16 +53,16 @@ Returns a ranked list of blocking strategies with estimated performance.
 
 ### Step 1: Candidate Generation
 
-For each column referenced in the matchkey fields, generate candidate blocking transforms:
+For each column referenced in the matchkey fields, generate candidate blocking transforms. Column types are detected via **column name heuristics** (matching patterns like "name", "email", "zip", "phone", "state" in the column name, case-insensitive). All unrecognized columns are treated as "Generic string" — specialized transforms are only applied when the name clearly indicates the type.
 
-| Column Type | Candidates |
-|-------------|-----------|
-| Name fields | `col[:3]`, `col[:4]`, `col[:5]`, `soundex(col)` |
-| Zip/postal | `col[:3]`, `col[:5]`, `col` exact |
-| State | `col` exact |
-| Email | `col.split('@')[1]` (domain), `col[:5]` |
-| Phone | `col[:3]` (area code), `col[:6]` |
-| Generic string | `col[:3]`, `col[:4]`, `col[:5]` |
+| Column Type | Detection Pattern | Candidates |
+|-------------|------------------|-----------|
+| Name fields | `*name*`, `*fname*`, `*lname*` | `col[:3]`, `col[:4]`, `col[:5]`, `soundex(col)` |
+| Zip/postal | `*zip*`, `*postal*` | `col[:3]`, `col[:5]`, `col` exact |
+| State | `*state*` | `col` exact |
+| Email | `*email*`, `*mail*` | `col.split('@')[1]` (domain), `col[:5]` |
+| Phone | `*phone*`, `*tel*`, `*mobile*` | `col[:3]` (area code), `col[:6]` |
+| Generic string | (everything else) | `col[:3]`, `col[:4]`, `col[:5]` |
 
 Also generate compound candidates by combining two single-column keys (e.g., `last_name[:3] + state`).
 
@@ -94,10 +94,12 @@ Candidates that fail coverage are demoted (not eliminated — they may be useful
 
 ### Step 4: Pair Sampling Validation
 
-1. Take a random sample of `sample_size` records (default 5000)
-2. Run full unblocked fuzzy matching on the sample (5K records = ~12.5M comparisons, feasible in ~30s)
-3. For each true pair found, check: would the proposed blocking key have placed both records in the same block?
-4. Compute estimated recall: `pairs_in_same_block / total_true_pairs`
+1. Take a random sample of `sample_size` records (default 1000 — this keeps comparisons at ~500K which completes in seconds)
+2. Run **simplified** unblocked fuzzy matching on the sample: use only the highest-weighted matchkey field with `rapidfuzz.process.cdist` for a single-field NxN score matrix. This is a lightweight proxy for the full multi-field evaluation — fast enough for recall estimation without running the full scorer.
+3. For each pair above a loose threshold (0.7), check: would the proposed blocking key have placed both records in the same block?
+4. Compute estimated recall: `pairs_in_same_block / total_proxy_pairs`
+
+**Performance note**: 1000 records × 1000 records = 1M comparisons via cdist, which completes in < 1 second per candidate. The entire analyzer including all candidates and pair sampling should complete in < 30 seconds on 1M records.
 
 ### Output: BlockingSuggestion
 
@@ -151,18 +153,17 @@ blocking:
 
 ### Implementation in blocker.py
 
-`build_blocks` gains a `strategy` parameter:
+`build_blocks` signature stays the same — `(lf, config)`. Strategy and sub_block_keys are read from the `BlockingConfig` object (single source of truth, no parameter duplication):
 
 ```python
 def build_blocks(
     lf: pl.LazyFrame,
     config: BlockingConfig,
-    strategy: str = "static",            # "static" | "adaptive" | "sorted_neighborhood"
-    sub_block_keys: list | None = None,  # for adaptive strategy
 ) -> list[BlockResult]:
+    # Reads config.strategy, config.sub_block_keys, config.window_size, config.sort_key
 ```
 
-For `strategy="adaptive"`:
+For `config.strategy="adaptive"`:
 1. Build primary blocks as usual
 2. For each block exceeding `max_block_size`:
    a. Apply first sub_block_key within the block
@@ -191,9 +192,13 @@ blocking:
   strategy: sorted_neighborhood
   window_size: 20                # default: 20, max: 50
   sort_key:
-    key_fields: [last_name, zip]
-    transforms: [lowercase, soundex, "substring:0:3"]
+    - column: last_name
+      transforms: [lowercase, soundex]
+    - column: zip
+      transforms: ["substring:0:3"]
 ```
+
+**Note**: Sort keys use per-field transforms (a list of column+transforms dicts), unlike blocking keys which apply transforms uniformly. This is necessary because sorted neighborhood sort keys need different transforms per field (e.g., soundex on names, substring on zips). The schema uses a new `SortKeyField` model to distinguish from `BlockingKeyConfig`.
 
 ### Performance
 
@@ -204,6 +209,22 @@ For N records with window size W:
 
 The window size should be tuned based on the dataset — the analyzer can suggest an appropriate size based on the sort key's ability to group similar records together.
 
+## BlockResult Metadata
+
+Extend the existing `BlockResult` dataclass with optional metadata for observability:
+
+```python
+@dataclass
+class BlockResult:
+    block_key: str
+    df: pl.LazyFrame
+    strategy: str = "static"          # "static" | "adaptive" | "sorted_neighborhood"
+    depth: int = 0                    # sub-blocking recursion depth (0 = primary)
+    parent_key: str | None = None     # parent block key if sub-blocked
+```
+
+This metadata is used for logging, debugging, and the reporting layer. Existing code that only accesses `block_key` and `df` is unaffected.
+
 ## Schema Changes
 
 Add to `BlockingConfig` in `schemas.py`:
@@ -211,13 +232,13 @@ Add to `BlockingConfig` in `schemas.py`:
 ```python
 class BlockingConfig(BaseModel):
     keys: list[BlockingKeyConfig]
-    max_block_size: int = 2000                          # lowered from 5000
+    max_block_size: int = 5000                          # kept at 5000 for backwards compatibility
     skip_oversized: bool = False
     strategy: Literal["static", "adaptive", "sorted_neighborhood"] = "static"
     auto_suggest: bool = False
     sub_block_keys: list[BlockingKeyConfig] | None = None
     window_size: int = 20                               # for sorted_neighborhood
-    sort_key: BlockingKeyConfig | None = None            # for sorted_neighborhood
+    sort_key: list[SortKeyField] | None = None           # for sorted_neighborhood (per-field transforms)
 ```
 
 ## Pipeline Integration
@@ -237,6 +258,8 @@ In `pipeline.py` `run_dedupe` and `run_match`, the blocking step becomes:
 ```
 
 Same integration in `tui/engine.py`.
+
+**For `run_match`**: The analyzer runs on the **concatenated** target + reference DataFrame. This is necessary because blocking key quality depends on cross-dataset distribution — a key that separates records well within one file may not work for cross-file matching. The pair sampling validation step specifically checks cross-source pair recall.
 
 ## CLI Integration
 
