@@ -14,6 +14,7 @@ from goldenmatch.core.ingest import load_file, validate_columns, apply_column_ma
 from goldenmatch.core.standardize import apply_standardization
 from goldenmatch.core.validate import ValidationRule, validate_dataframe
 from goldenmatch.core.matchkey import compute_matchkeys
+from goldenmatch.core.block_analyzer import analyze_blocking
 from goldenmatch.core.blocker import build_blocks
 from goldenmatch.core.scorer import find_exact_matches, find_fuzzy_matches
 from goldenmatch.core.cluster import build_clusters
@@ -22,6 +23,61 @@ from goldenmatch.output.writer import write_output
 from goldenmatch.output.report import generate_dedupe_report, generate_match_report
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_matchkey_columns(config: GoldenMatchConfig) -> list[str]:
+    """Extract unique field names from all matchkeys in config."""
+    cols = set()
+    for mk in config.get_matchkeys():
+        for f in mk.fields:
+            cols.add(f.field)
+    return sorted(cols)
+
+
+def _run_auto_suggest(df: pl.DataFrame, config: GoldenMatchConfig) -> None:
+    """Run block analyzer auto-suggest if enabled in config.
+
+    Logs the top 3 suggestions. If config.blocking.keys is empty,
+    populates it from the top suggestion.
+    """
+    if not config.blocking or not config.blocking.auto_suggest:
+        return
+
+    matchkey_columns = _extract_matchkey_columns(config)
+    if not matchkey_columns:
+        return
+
+    suggestions = analyze_blocking(df, matchkey_columns)
+    if not suggestions:
+        logger.info("Auto-suggest: no blocking suggestions found")
+        return
+
+    # Log top 3 suggestions
+    for i, s in enumerate(suggestions[:3]):
+        logger.info(
+            "Auto-suggest #%d: %s (blocks=%d, max_size=%d, comparisons=%d, recall=%.2f, score=%.4f)",
+            i + 1,
+            s.description,
+            s.group_count,
+            s.max_group_size,
+            s.total_comparisons,
+            s.estimated_recall,
+            s.score,
+        )
+
+    # If no user-configured keys, use the top suggestion
+    if not config.blocking.keys:
+        top = suggestions[0]
+        from goldenmatch.config.schemas import BlockingKeyConfig
+
+        new_keys = []
+        for cand in top.keys:
+            new_keys.append(BlockingKeyConfig(
+                fields=cand["key_fields"],
+                transforms=cand.get("transforms", []) if isinstance(cand.get("transforms", []), list) and all(isinstance(t, str) for t in cand.get("transforms", [])) else [],
+            ))
+        config.blocking.keys = new_keys
+        logger.info("Auto-suggest: using top suggestion '%s' as blocking keys", top.description)
 
 
 def _add_row_ids(lf: pl.LazyFrame, offset: int = 0) -> pl.LazyFrame:
@@ -127,10 +183,13 @@ def run_dedupe(
     # ── Step 2: TRANSFORM ──
     combined_lf = compute_matchkeys(combined_lf, matchkeys)
 
+    # ── Step 2.5: AUTO-SUGGEST blocking keys ──
+    collected_df = combined_lf.collect()
+    _run_auto_suggest(collected_df, config)
+
     # ── Step 3: BLOCK + COMPARE (cascading: exact first, then fuzzy) ──
     all_pairs: list[tuple[int, int, float]] = []
     matched_pairs: set[tuple[int, int]] = set()
-    collected_df = combined_lf.collect()
 
     # Build source lookup for across_files_only filtering
     source_lookup = {}
@@ -376,6 +435,9 @@ def run_match(
     # ── Step 3: Compute matchkeys ──
     combined_lf = compute_matchkeys(combined_lf, matchkeys)
     combined_df = combined_lf.collect()
+
+    # ── Step 3.5: AUTO-SUGGEST blocking keys ──
+    _run_auto_suggest(combined_df, config)
 
     # Build source lookup
     source_lookup = {}

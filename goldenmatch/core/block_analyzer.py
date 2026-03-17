@@ -140,7 +140,7 @@ def _apply_candidate_transforms(df: pl.DataFrame, candidate: dict) -> pl.DataFra
         col = key_fields[0]
         tfms = transforms  # flat list of transforms
         if tfms:
-            expr = pl.col(col).map_elements(
+            expr = pl.col(col).cast(pl.Utf8).map_elements(
                 lambda val, t=tfms: apply_transforms(val, t),
                 return_dtype=pl.Utf8,
             )
@@ -153,7 +153,7 @@ def _apply_candidate_transforms(df: pl.DataFrame, candidate: dict) -> pl.DataFra
         for i, col in enumerate(key_fields):
             tfms = transforms[i] if i < len(transforms) else []
             if tfms:
-                expr = pl.col(col).map_elements(
+                expr = pl.col(col).cast(pl.Utf8).map_elements(
                     lambda val, t=tfms: apply_transforms(val, t),
                     return_dtype=pl.Utf8,
                 )

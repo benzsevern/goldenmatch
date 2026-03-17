@@ -155,10 +155,15 @@ class MatchEngine:
         matchkeys = config.get_matchkeys()
         combined_lf = compute_matchkeys(combined_lf, matchkeys)
 
+        # ── Auto-suggest blocking keys ──
+        collected_df = combined_lf.collect()
+        if config.blocking and config.blocking.auto_suggest:
+            from goldenmatch.core.pipeline import _run_auto_suggest
+            _run_auto_suggest(collected_df, config)
+
         # ── Score all pairs (cascading: exact first, then fuzzy) ──
         all_pairs: list[tuple[int, int, float]] = []
         matched_pairs: set[tuple[int, int]] = set()
-        collected_df = combined_lf.collect()
 
         # Phase 1: Exact matchkeys (fast)
         for mk in matchkeys:

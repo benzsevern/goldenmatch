@@ -2,6 +2,7 @@
 
 from goldenmatch.core.pipeline import run_dedupe, run_match
 from goldenmatch.config.schemas import (
+    BlockingConfig, BlockingKeyConfig,
     GoldenMatchConfig, MatchkeyConfig, MatchkeyField,
     OutputConfig, GoldenRulesConfig, GoldenFieldRule,
 )
@@ -138,3 +139,97 @@ class TestRunMatch:
         if results["matched"] is not None and len(results["matched"]) > 0:
             target_ids = results["matched"]["__target_row_id__"].to_list()
             assert len(target_ids) == len(set(target_ids))
+
+
+class TestAdaptiveBlockingPipeline:
+    def test_dedupe_with_adaptive_blocking(self, sample_csv, tmp_path):
+        """Config with strategy='adaptive', auto_suggest=True, and empty keys to trigger auto-suggest."""
+        cfg = GoldenMatchConfig(
+            matchkeys=[
+                MatchkeyConfig(
+                    name="name_zip",
+                    fields=[
+                        MatchkeyField(column="first_name", transforms=["lowercase"]),
+                        MatchkeyField(column="last_name", transforms=["lowercase"]),
+                        MatchkeyField(column="zip"),
+                    ],
+                    comparison="exact",
+                ),
+            ],
+            blocking=BlockingConfig(
+                keys=[],
+                strategy="adaptive",
+                auto_suggest=True,
+                max_block_size=50,
+            ),
+            output=OutputConfig(format="csv", directory=str(tmp_path), run_name="adaptive_test"),
+            golden_rules=GoldenRulesConfig(
+                default=GoldenFieldRule(strategy="most_complete"),
+            ),
+        )
+        results = run_dedupe(
+            files=[(sample_csv, "test_source")],
+            config=cfg,
+            output_golden=True,
+            output_clusters=True,
+            output_report=True,
+        )
+        assert "clusters" in results
+        assert "golden" in results
+        assert results["report"]["total_records"] == 5
+
+    def test_dedupe_auto_suggest_does_not_override_user_keys(self, sample_csv, tmp_path):
+        """When user provides blocking keys, auto_suggest logs but does not override them."""
+        cfg = GoldenMatchConfig(
+            matchkeys=[
+                MatchkeyConfig(
+                    name="email_key",
+                    fields=[MatchkeyField(column="email", transforms=["lowercase", "strip"])],
+                    comparison="exact",
+                ),
+            ],
+            blocking=BlockingConfig(
+                keys=[BlockingKeyConfig(fields=["zip"])],
+                strategy="static",
+                auto_suggest=True,
+            ),
+            output=OutputConfig(format="csv", directory=str(tmp_path), run_name="no_override_test"),
+            golden_rules=GoldenRulesConfig(
+                default=GoldenFieldRule(strategy="most_complete"),
+            ),
+        )
+        # Capture the original key
+        original_keys = list(cfg.blocking.keys)
+        results = run_dedupe(
+            files=[(sample_csv, "test_source")],
+            config=cfg,
+            output_golden=True,
+            output_report=True,
+        )
+        # Keys should remain unchanged
+        assert cfg.blocking.keys == original_keys
+        assert "clusters" in results
+
+    def test_dedupe_without_auto_suggest_unchanged(self, sample_csv, tmp_path):
+        """When auto_suggest is False, behavior is unchanged."""
+        cfg = GoldenMatchConfig(
+            matchkeys=[
+                MatchkeyConfig(
+                    name="email_key",
+                    fields=[MatchkeyField(column="email", transforms=["lowercase", "strip"])],
+                    comparison="exact",
+                ),
+            ],
+            output=OutputConfig(format="csv", directory=str(tmp_path), run_name="no_auto_test"),
+            golden_rules=GoldenRulesConfig(
+                default=GoldenFieldRule(strategy="most_complete"),
+            ),
+        )
+        results = run_dedupe(
+            files=[(sample_csv, "test_source")],
+            config=cfg,
+            output_golden=True,
+            output_report=True,
+        )
+        assert "clusters" in results
+        assert results["report"]["total_records"] == 5
