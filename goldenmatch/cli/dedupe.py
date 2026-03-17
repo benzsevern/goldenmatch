@@ -82,6 +82,7 @@ def dedupe_cmd(
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format (csv, parquet)"),
     run_name: Optional[str] = typer.Option(None, "--run-name", help="Run name for output files"),
     auto_fix: bool = typer.Option(False, "--auto-fix", help="Run auto-fix before matching"),
+    auto_block: bool = typer.Option(False, "--auto-block", help="Auto-suggest blocking keys"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress output"),
 ) -> None:
@@ -153,6 +154,14 @@ def dedupe_cmd(
             cfg.validation = ValidationConfig(auto_fix=True)
         else:
             cfg.validation.auto_fix = True
+
+    # Enable auto-block from CLI flag
+    if auto_block:
+        from goldenmatch.config.schemas import BlockingConfig
+        if cfg.blocking is None:
+            cfg.blocking = BlockingConfig(keys=[], auto_suggest=True)
+        else:
+            cfg.blocking.auto_suggest = True
 
     # Resolve column maps from config input.files section
     file_specs = _resolve_column_maps(parsed_files, cfg)

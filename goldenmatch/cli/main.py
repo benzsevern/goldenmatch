@@ -81,6 +81,85 @@ app = typer.Typer(
 app.command("dedupe", help="Run deduplication on one or more files.")(dedupe_cmd)
 app.command("match", help="Match a target file against reference files.")(match_cmd)
 
+
+@app.command("analyze-blocking")
+def analyze_blocking_cmd(
+    files: list[str] = typer.Argument(..., help="File(s) to analyze"),
+    config: str = typer.Option(..., "--config", "-c", help="Config file with matchkeys"),
+) -> None:
+    """Analyze data and suggest optimal blocking strategies."""
+    from pathlib import Path
+
+    import polars as pl
+
+    from goldenmatch.config.loader import load_config
+    from goldenmatch.core.block_analyzer import analyze_blocking
+    from goldenmatch.core.ingest import load_file
+
+    # Load config
+    try:
+        cfg = load_config(config)
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]Config error:[/red] {exc}")
+        raise typer.Exit(code=1)
+
+    # Extract matchkey columns
+    matchkey_columns = sorted({
+        f.field for mk in cfg.get_matchkeys() for f in mk.fields
+    })
+    if not matchkey_columns:
+        console.print("[red]Error:[/red] No matchkey columns found in config.")
+        raise typer.Exit(code=1)
+
+    # Load and concat files
+    frames = []
+    for file_path in files:
+        p = Path(file_path)
+        try:
+            lf = load_file(p)
+            frames.append(lf.collect())
+        except (FileNotFoundError, ValueError) as exc:
+            console.print(f"[red]Error loading {p.name}:[/red] {exc}")
+            raise typer.Exit(code=1)
+
+    combined_df = pl.concat(frames) if len(frames) > 1 else frames[0]
+
+    console.print(f"[cyan]Analyzing {combined_df.height} records across {len(files)} file(s)...[/cyan]")
+    console.print(f"[dim]Matchkey columns: {', '.join(matchkey_columns)}[/dim]\n")
+
+    # Run analyzer
+    suggestions = analyze_blocking(combined_df, matchkey_columns)
+
+    if not suggestions:
+        console.print("[yellow]No blocking suggestions found.[/yellow]")
+        raise typer.Exit(code=0)
+
+    # Display results as Rich table
+    table = Table(title="Blocking Strategy Suggestions")
+    table.add_column("#", style="bold", justify="right")
+    table.add_column("Strategy", style="cyan")
+    table.add_column("Blocks", justify="right")
+    table.add_column("Max Size", justify="right")
+    table.add_column("Est. Comparisons", justify="right")
+    table.add_column("Recall", justify="right")
+    table.add_column("Score", justify="right")
+    table.add_column("", style="bold green")
+
+    for i, s in enumerate(suggestions[:10]):
+        label = "recommended" if i == 0 else ""
+        table.add_row(
+            str(i + 1),
+            s.description,
+            f"{s.group_count:,}",
+            f"{s.max_group_size:,}",
+            f"{s.total_comparisons:,}",
+            f"{s.estimated_recall:.2%}",
+            f"{s.score:.4f}",
+            label,
+        )
+
+    console.print(table)
+
 # ── Config subcommands ─────────────────────────────────────────────────────
 
 config_app = typer.Typer(
