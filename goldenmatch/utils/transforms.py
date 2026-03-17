@@ -46,6 +46,20 @@ def apply_transform(value: str | None, transform: str) -> str | None:
         return re.sub(r"[^a-zA-Z]", "", value)
     elif transform == "normalize_whitespace":
         return re.sub(r"\s+", " ", value).strip()
+    elif transform == "token_sort":
+        tokens = value.strip().split()
+        return " ".join(sorted(tokens))
+    elif transform.startswith("qgram:"):
+        q = int(transform.split(":")[1])
+        padded = f"##{value}##"
+        grams = sorted(set(padded[i:i + q] for i in range(len(padded) - q + 1)))
+        return " ".join(grams[:5])
+    elif transform == "first_token":
+        tokens = value.strip().split()
+        return tokens[0] if tokens else value
+    elif transform == "last_token":
+        tokens = value.strip().split()
+        return tokens[-1] if tokens else value
     else:
         raise ValueError(f"Unknown transform: {transform!r}")
 

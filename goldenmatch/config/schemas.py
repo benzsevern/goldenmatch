@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 VALID_SIMPLE_TRANSFORMS = frozenset({
     "lowercase", "uppercase", "strip", "strip_all", "soundex", "metaphone",
     "digits_only", "alpha_only", "normalize_whitespace",
+    "token_sort", "first_token", "last_token",
 })
 
 VALID_SCORERS = frozenset({
@@ -23,6 +24,7 @@ VALID_STRATEGIES = frozenset({
 })
 
 _SUBSTRING_RE = re.compile(r"^substring:\d+:\d+$")
+_QGRAM_RE = re.compile(r"^qgram:\d+$")
 
 
 # ── FieldTransform ──────────────────────────────────────────────────────────
@@ -37,6 +39,8 @@ class FieldTransform(BaseModel):
         if t in VALID_SIMPLE_TRANSFORMS:
             return self
         if _SUBSTRING_RE.match(t):
+            return self
+        if _QGRAM_RE.match(t):
             return self
         raise ValueError(
             f"Invalid transform '{t}'. Must be one of {sorted(VALID_SIMPLE_TRANSFORMS)} "
@@ -125,11 +129,14 @@ class BlockingConfig(BaseModel):
     keys: list[BlockingKeyConfig]
     max_block_size: int = 5000
     skip_oversized: bool = False
-    strategy: Literal["static", "adaptive", "sorted_neighborhood"] = "static"
+    strategy: Literal["static", "adaptive", "sorted_neighborhood", "multi_pass"] = "static"
     auto_suggest: bool = False
     sub_block_keys: list[BlockingKeyConfig] | None = None
     window_size: int = 20
     sort_key: list[SortKeyField] | None = None
+    passes: list[BlockingKeyConfig] | None = None
+    union_mode: bool = True
+    max_total_comparisons: int | None = None
 
 
 # ── GoldenFieldRule / GoldenRulesConfig ─────────────────────────────────────
