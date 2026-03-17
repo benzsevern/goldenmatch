@@ -12,6 +12,7 @@ from rich.table import Table
 from goldenmatch.config.loader import load_config
 
 console = Console()
+err_console = Console(stderr=True)
 
 
 def _parse_file_source(raw: str) -> tuple[str, str]:
@@ -67,6 +68,9 @@ def dedupe_cmd(
     config: str = typer.Option(
         ..., "--config", "-c", help="Path to YAML config file"
     ),
+    preview: bool = typer.Option(False, "--preview", help="Preview results without writing files"),
+    preview_size: int = typer.Option(10000, "--preview-size", help="Number of records for preview sample"),
+    preview_random: bool = typer.Option(False, "--preview-random", help="Random sample instead of first N"),
     output_golden: bool = typer.Option(False, "--output-golden", help="Output golden records"),
     output_clusters: bool = typer.Option(False, "--output-clusters", help="Output cluster info"),
     output_dupes: bool = typer.Option(False, "--output-dupes", help="Output duplicate records"),
@@ -92,6 +96,40 @@ def dedupe_cmd(
         if not quiet:
             console.print(f"[red]Config error:[/red] {exc}")
         raise typer.Exit(code=1)
+
+    # ── Preview mode ──
+    if preview:
+        from goldenmatch.tui.engine import MatchEngine
+        from goldenmatch.core.preview import (
+            format_preview_stats,
+            format_preview_clusters,
+            format_preview_golden,
+            format_score_histogram,
+        )
+
+        file_paths = [fp for fp, _name in parsed_files]
+        engine = MatchEngine(file_paths)
+
+        if preview_size < engine.row_count:
+            err_console.print(
+                f"[yellow]Previewing {preview_size} of {engine.row_count} records.[/yellow]",
+            )
+
+        result = engine.run_sample(cfg, sample_size=preview_size)
+
+        err_console.print(format_preview_stats(result.stats))
+        err_console.print(
+            format_preview_clusters(result.clusters, engine.data, max_clusters=10),
+        )
+        err_console.print(format_preview_golden(result.golden, max_records=10))
+        err_console.print(
+            format_score_histogram([s for _, _, s in result.scored_pairs]),
+        )
+
+        run_full = typer.confirm("Run full job now?", default=False)
+        if not run_full:
+            raise typer.Exit(code=0)
+        # Fall through to normal dedupe
 
     # Apply CLI overrides
     if output_dir:
