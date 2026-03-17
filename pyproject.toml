@@ -19,6 +19,7 @@ dependencies = [
     "pydantic>=2.0",
     "rapidfuzz>=3.0",
     "jellyfish>=1.0",
+    "numpy>=1.26",
     "openpyxl>=3.1",
     "textual>=1.0",
 ]

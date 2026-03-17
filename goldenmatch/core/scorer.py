@@ -5,9 +5,11 @@ from __future__ import annotations
 from itertools import combinations
 
 import jellyfish
+import numpy as np
 import polars as pl
 from rapidfuzz.distance import JaroWinkler, Levenshtein
 from rapidfuzz.fuzz import token_sort_ratio
+from rapidfuzz.process import cdist
 
 from goldenmatch.config.schemas import MatchkeyConfig, MatchkeyField
 from goldenmatch.utils.transforms import apply_transforms
@@ -91,19 +93,169 @@ def find_exact_matches(
     return [(a, b, 1.0) for a, b in zip(ids_a, ids_b)]
 
 
+# ---------------------------------------------------------------------------
+# Vectorized helpers for find_fuzzy_matches
+# ---------------------------------------------------------------------------
+
+def _get_transformed_values(block_df: pl.DataFrame, field: MatchkeyField) -> list:
+    """Get transformed values for a field as a list."""
+    col = field.field
+    values = block_df[col].to_list()
+    return [apply_transforms(v, field.transforms) if v is not None else None for v in values]
+
+
+def _exact_score_matrix(values: list) -> np.ndarray:
+    """NxN exact match matrix."""
+    n = len(values)
+    scores = np.zeros((n, n))
+    for i in range(n):
+        if values[i] is None:
+            continue
+        for j in range(i, n):
+            if values[j] is None:
+                continue
+            s = 1.0 if values[i] == values[j] else 0.0
+            scores[i, j] = s
+            scores[j, i] = s
+    return scores
+
+
+def _fuzzy_score_matrix(values: list, scorer_name: str) -> np.ndarray:
+    """NxN fuzzy score matrix using rapidfuzz cdist."""
+    # Replace None with empty string for cdist (we handle nulls separately)
+    clean = [v if v is not None else "" for v in values]
+
+    if scorer_name == "jaro_winkler":
+        matrix = cdist(clean, clean, scorer=JaroWinkler.similarity)
+    elif scorer_name == "levenshtein":
+        matrix = cdist(clean, clean, scorer=Levenshtein.normalized_similarity)
+    elif scorer_name == "token_sort":
+        matrix = cdist(clean, clean, scorer=token_sort_ratio) / 100.0
+    else:
+        raise ValueError(f"Unknown fuzzy scorer: {scorer_name!r}")
+
+    return np.asarray(matrix, dtype=np.float64)
+
+
+def _soundex_score_matrix(values: list) -> np.ndarray:
+    """NxN soundex match matrix."""
+    codes = [jellyfish.soundex(v) if v is not None else None for v in values]
+    return _exact_score_matrix(codes)
+
+
+def _build_null_mask(values: list) -> np.ndarray:
+    """NxN boolean mask — True where either value is null."""
+    null_arr = np.array([v is None for v in values])
+    return null_arr[:, None] | null_arr[None, :]
+
+
 def find_fuzzy_matches(
-    block_df: pl.DataFrame, mk: MatchkeyConfig
+    block_df: pl.DataFrame,
+    mk: MatchkeyConfig,
+    exclude_pairs: set[tuple[int, int]] | None = None,
 ) -> list[tuple[int, int, float]]:
     """Find fuzzy matches within a block DataFrame.
 
-    Converts to dicts, compares all pairs, and keeps those >= mk.threshold.
-    """
-    rows = block_df.to_dicts()
-    results: list[tuple[int, int, float]] = []
+    Uses vectorized rapidfuzz cdist for batch scoring, with early termination
+    when exact fields make it mathematically impossible to reach the threshold.
 
-    for row_a, row_b in combinations(rows, 2):
-        score = score_pair(row_a, row_b, mk.fields)
-        if score >= mk.threshold:
-            results.append((row_a["__row_id__"], row_b["__row_id__"], score))
+    Args:
+        block_df: Block DataFrame with __row_id__ and field columns.
+        mk: Matchkey configuration with fields, weights, and threshold.
+        exclude_pairs: Optional set of (min_id, max_id) pairs to skip.
+
+    Returns:
+        List of (row_id_a, row_id_b, score) tuples above threshold.
+    """
+    n = block_df.height
+    if n < 2:
+        return []
+
+    row_ids = block_df["__row_id__"].to_list()
+
+    # Separate exact (cheap) and fuzzy (expensive) fields
+    exact_fields = [f for f in mk.fields if f.scorer == "exact" or f.scorer == "soundex_match"]
+    fuzzy_fields = [f for f in mk.fields if f.scorer not in ("exact", "soundex_match")]
+
+    total_weight = sum(f.weight for f in mk.fields)
+    if total_weight == 0.0:
+        return []
+
+    # Phase 1: Score cheap fields (exact + soundex) and build null masks
+    cheap_numerator = np.zeros((n, n))
+    cheap_denominator = np.zeros((n, n))
+
+    for f in exact_fields:
+        values = _get_transformed_values(block_df, f)
+        null_mask = _build_null_mask(values)
+        valid = ~null_mask
+
+        if f.scorer == "exact":
+            scores = _exact_score_matrix(values)
+        else:  # soundex_match
+            scores = _soundex_score_matrix(values)
+
+        cheap_numerator += scores * f.weight * valid
+        cheap_denominator += f.weight * valid
+
+    # Phase 2: Early termination check
+    # For each pair, the maximum possible score is:
+    #   (cheap_contribution + fuzzy_max_weight) / (cheap_denom + fuzzy_max_weight)
+    # where fuzzy_max_weight assumes all fuzzy fields score 1.0
+    fuzzy_total_weight = sum(f.weight for f in fuzzy_fields)
+
+    # If no fuzzy fields, just use cheap scores
+    if not fuzzy_fields:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            combined = np.where(cheap_denominator > 0, cheap_numerator / cheap_denominator, 0.0)
+    else:
+        # Check which pairs can possibly reach threshold even if all fuzzy fields score 1.0
+        max_possible_numerator = cheap_numerator + fuzzy_total_weight
+        max_possible_denominator = cheap_denominator + fuzzy_total_weight
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            max_possible = np.where(
+                max_possible_denominator > 0,
+                max_possible_numerator / max_possible_denominator,
+                0.0,
+            )
+
+        # Pairs that can't possibly reach threshold — mark them
+        impossible = max_possible < mk.threshold
+
+        # Phase 3: Score fuzzy fields
+        fuzzy_numerator = np.zeros((n, n))
+        fuzzy_denominator = np.zeros((n, n))
+
+        for f in fuzzy_fields:
+            values = _get_transformed_values(block_df, f)
+            null_mask = _build_null_mask(values)
+            valid = ~null_mask
+
+            scores = _fuzzy_score_matrix(values, f.scorer)
+
+            fuzzy_numerator += scores * f.weight * valid
+            fuzzy_denominator += f.weight * valid
+
+        # Combine cheap + fuzzy
+        total_numerator = cheap_numerator + fuzzy_numerator
+        total_denominator = cheap_denominator + fuzzy_denominator
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            combined = np.where(total_denominator > 0, total_numerator / total_denominator, 0.0)
+
+        # Zero out impossible pairs (early termination)
+        combined[impossible] = 0.0
+
+    # Extract upper triangle pairs above threshold
+    results = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            if combined[i, j] >= mk.threshold:
+                a, b = row_ids[i], row_ids[j]
+                pair_key = (min(a, b), max(a, b))
+                if exclude_pairs is not None and pair_key in exclude_pairs:
+                    continue
+                results.append((a, b, float(combined[i, j])))
 
     return results
