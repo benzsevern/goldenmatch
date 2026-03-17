@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 class Embedder:
@@ -41,6 +46,29 @@ class Embedder:
     def cosine_similarity_matrix(self, embeddings: np.ndarray) -> np.ndarray:
         """NxN cosine similarity matrix. Embeddings must be L2-normalized."""
         return embeddings @ embeddings.T
+
+    def save_cache(self, path: Path) -> None:
+        """Persist embedding cache to disk as .npy files."""
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        for key, arr in self._cache.items():
+            file_path = path / f"{key}.npy"
+            np.save(file_path, arr)
+        logger.info("Saved %d cached embeddings to %s", len(self._cache), path)
+
+    def load_cache(self, path: Path) -> None:
+        """Load embedding cache from disk (.npy files)."""
+        path = Path(path)
+        if not path.is_dir():
+            return
+        loaded = 0
+        for npy_file in path.glob("*.npy"):
+            key = npy_file.stem
+            if key not in self._cache:
+                self._cache[key] = np.load(npy_file)
+                loaded += 1
+        if loaded:
+            logger.info("Loaded %d cached embeddings from %s", loaded, path)
 
 
 # ---------------------------------------------------------------------------
