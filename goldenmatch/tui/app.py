@@ -104,6 +104,9 @@ class GoldenMatchApp(App):
         # Update sidebar
         sidebar = self.query_one(Sidebar)
         sidebar.update_config(event.config)
+        # Update export tab with current config
+        export_tab = self.query_one(ExportTab)
+        export_tab.set_config(event.config)
         # Run sample if engine is loaded
         if self.engine is not None:
             self.run_matching(event.config)
@@ -130,6 +133,9 @@ class GoldenMatchApp(App):
         # Update matches tab
         matches_tab = self.query_one(MatchesTab)
         matches_tab.update_results(result, self.engine.data)
+        # Update golden tab
+        golden_tab = self.query_one(GoldenTab)
+        golden_tab.update_results(result)
         self.notify("Sample matching complete.", severity="information")
 
     def action_help(self) -> None:
@@ -141,8 +147,13 @@ class GoldenMatchApp(App):
         )
 
     def action_save_config(self) -> None:
-        """Save current config to YAML."""
-        self.notify("Save config not yet implemented.", severity="warning")
+        """Save current config to YAML via the export tab."""
+        if self.current_config is None:
+            self.notify("No config to save.", severity="warning")
+            return
+        export_tab = self.query_one(ExportTab)
+        export_tab.set_config(self.current_config)
+        export_tab._handle_save_config()
 
     def action_run_sample(self) -> None:
         """Run matching on a sample of the data."""
@@ -161,4 +172,44 @@ class GoldenMatchApp(App):
 
     def action_save_preset(self) -> None:
         """Save config as a named preset."""
-        self.notify("Save preset not yet implemented.", severity="warning")
+        if self.current_config is None:
+            self.notify("No config to save.", severity="warning")
+            return
+        export_tab = self.query_one(ExportTab)
+        export_tab.set_config(self.current_config)
+        export_tab._handle_save_preset()
+
+    @work(thread=True)
+    def run_full_job(self, config, output_options: dict) -> None:
+        """Run full matching pipeline in a background thread."""
+        if self.engine is None:
+            return
+        try:
+            result = self.engine.run_full(config)
+            self.call_from_thread(self._on_full_job_complete, result, output_options)
+        except Exception as e:
+            self.call_from_thread(self._on_full_job_error, str(e))
+
+    def _on_full_job_complete(self, result, output_options: dict) -> None:
+        """Handle completion of a full job run."""
+        self.last_result = result
+        # Update sidebar stats
+        sidebar = self.query_one(Sidebar)
+        sidebar.update_stats(result.stats)
+        # Update matches and golden tabs
+        matches_tab = self.query_one(MatchesTab)
+        matches_tab.update_results(result, self.engine.data)
+        golden_tab = self.query_one(GoldenTab)
+        golden_tab.update_results(result)
+        # Update export status
+        export_tab = self.query_one(ExportTab)
+        run_status = export_tab.query_one("#run-status")
+        run_status.update("[green]Full job complete![/green]")
+        self.notify("Full job complete.", severity="information")
+
+    def _on_full_job_error(self, error_msg: str) -> None:
+        """Handle error from a full job run."""
+        export_tab = self.query_one(ExportTab)
+        run_status = export_tab.query_one("#run-status")
+        run_status.update(f"[red]Error: {error_msg}[/red]")
+        self.notify(f"Full job error: {error_msg}", severity="error")
