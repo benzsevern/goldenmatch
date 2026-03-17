@@ -87,3 +87,75 @@ class TestMatchEngineLoad:
         sample = engine.get_sample(3)
         assert isinstance(sample, pl.DataFrame)
         assert sample.height == 3
+
+
+from goldenmatch.config.schemas import (
+    GoldenMatchConfig, MatchkeyConfig, MatchkeyField,
+    OutputConfig, GoldenRulesConfig, GoldenFieldRule,
+)
+
+
+@pytest.fixture
+def exact_email_config(tmp_path):
+    return GoldenMatchConfig(
+        matchkeys=[
+            MatchkeyConfig(
+                name="email_key",
+                fields=[MatchkeyField(column="email", transforms=["lowercase"])],
+                comparison="exact",
+            )
+        ],
+        output=OutputConfig(format="csv", directory=str(tmp_path), run_name="test"),
+        golden_rules=GoldenRulesConfig(
+            default=GoldenFieldRule(strategy="most_complete"),
+        ),
+    )
+
+
+class TestMatchEngineRunSample:
+    def test_run_sample_dedupe(self, sample_csv, exact_email_config):
+        engine = MatchEngine([sample_csv])
+        result = engine.run_sample(exact_email_config, sample_size=5)
+        assert isinstance(result, EngineResult)
+        assert result.stats.total_records == 5
+        assert result.stats.total_clusters >= 1
+        assert len(result.scored_pairs) >= 1
+
+    def test_run_sample_small(self, sample_csv, exact_email_config):
+        engine = MatchEngine([sample_csv])
+        result = engine.run_sample(exact_email_config, sample_size=3)
+        assert result.stats.total_records == 3
+
+    def test_scored_pairs_cached(self, sample_csv, exact_email_config):
+        engine = MatchEngine([sample_csv])
+        result = engine.run_sample(exact_email_config)
+        assert engine._last_result is not None
+        assert engine._last_result.scored_pairs == result.scored_pairs
+
+    def test_golden_records_created(self, sample_csv, exact_email_config):
+        engine = MatchEngine([sample_csv])
+        result = engine.run_sample(exact_email_config, sample_size=5)
+        # sample_csv has john@example.com twice, so golden should exist
+        if result.stats.total_clusters > 0:
+            assert result.golden is not None
+
+
+class TestMatchEngineRecluster:
+    def test_recluster_at_threshold(self, sample_csv, exact_email_config):
+        engine = MatchEngine([sample_csv])
+        engine.run_sample(exact_email_config)
+        stats = engine.recluster_at_threshold(1.0)
+        assert isinstance(stats, EngineStats)
+        assert stats.total_records > 0
+
+    def test_recluster_without_run_raises(self, sample_csv):
+        engine = MatchEngine([sample_csv])
+        with pytest.raises(RuntimeError):
+            engine.recluster_at_threshold(0.8)
+
+
+class TestMatchEngineRunFull:
+    def test_run_full(self, sample_csv, exact_email_config):
+        engine = MatchEngine([sample_csv])
+        result = engine.run_full(exact_email_config)
+        assert result.stats.total_records == 5
