@@ -89,6 +89,7 @@ blocking:
       transforms: [lowercase, strip, soundex]
   max_block_size: 5000
   skip_oversized: false
+  # strategy: static | adaptive | sorted_neighborhood | multi_pass | ann | canopy
 
 # Golden record: how to merge duplicate clusters into a single record
 golden_rules:
@@ -122,7 +123,11 @@ Transforms are applied to field values before comparison. They can be chained in
 | `alpha_only`             | Keep only alphabetic characters        |
 | `soundex`                | Apply Soundex phonetic encoding        |
 | `metaphone`              | Apply Metaphone phonetic encoding      |
+| `token_sort`             | Sort tokens alphabetically (order-invariant) |
+| `first_token`            | Extract first word                     |
+| `last_token`             | Extract last word                      |
 | `substring:<start>:<end>`| Extract a substring by index           |
+| `qgram:<N>`              | Character n-grams (sorted, top 5)      |
 
 ## Available Scorers
 
@@ -135,6 +140,7 @@ Scorers compute similarity between two field values in weighted matchkeys.
 | `levenshtein`   | Normalized Levenshtein similarity (0.0 to 1.0) |
 | `token_sort`    | Token sort ratio via RapidFuzz (0.0 to 1.0)   |
 | `soundex_match` | 1.0 if Soundex codes match, 0.0 otherwise      |
+| `embedding`     | Cosine similarity of sentence-transformer embeddings (0.0 to 1.0) |
 
 ## Golden Record Strategies
 
@@ -218,24 +224,86 @@ Launch the interactive config wizard to generate a YAML config file.
 goldenmatch init [--output <path>]
 ```
 
+## Blocking Strategies
+
+GoldenMatch supports multiple blocking strategies to balance recall and performance:
+
+| Strategy | Description |
+|----------|-------------|
+| `static` | Group by blocking key (default) |
+| `adaptive` | Static + recursive sub-blocking for oversized blocks |
+| `sorted_neighborhood` | Sliding window over sorted records |
+| `multi_pass` | Union of blocks from multiple passes (best for noisy data) |
+| `ann` | Approximate nearest neighbor via FAISS on sentence-transformer embeddings |
+| `canopy` | TF-IDF canopy clustering with loose/tight thresholds |
+
+### Multi-Pass Blocking (Noisy Data)
+
+```yaml
+blocking:
+  strategy: multi_pass
+  passes:
+    - key_fields: [name]
+      transforms: [lowercase, "substring:0:8"]
+    - key_fields: [name]
+      transforms: [lowercase, token_sort, "substring:0:10"]
+    - key_fields: [name]
+      transforms: [lowercase, soundex]
+```
+
+### Embedding-Based Features
+
+Install optional dependencies for semantic matching:
+
+```bash
+pip install goldenmatch[embeddings]
+```
+
+**Embedding scorer** — cosine similarity of sentence-transformer embeddings for semantic matching:
+
+```yaml
+matchkeys:
+  - name: semantic_product
+    type: weighted
+    threshold: 0.75
+    fields:
+      - field: title
+        scorer: embedding
+        model: all-MiniLM-L6-v2
+        weight: 0.6
+      - field: manufacturer
+        scorer: exact
+        weight: 0.4
+```
+
+**ANN blocking** — approximate nearest neighbor blocking for large datasets:
+
+```yaml
+blocking:
+  strategy: ann
+  ann_column: title
+  ann_model: all-MiniLM-L6-v2
+  ann_top_k: 20
+```
+
 ## Performance
 
 ### 1M Record Benchmark
 
-GoldenMatch processes 1 million records in **9 seconds** (exact matching, full pipeline including auto-fix, standardization, matching, clustering, and golden record generation):
+GoldenMatch processes 1 million records in **~15 seconds** (exact matching, full pipeline including auto-fix, standardization, matching, clustering, and golden record generation):
 
 | Stage | Time | % |
 |-------|------|---|
-| Ingest | 0.12s | 1% |
-| Auto-fix | 1.85s | 20% |
-| Standardize | 1.45s | 16% |
-| Matchkeys | 0.14s | 2% |
-| **Matching** | **0.20s** | **2%** |
-| Clustering | 3.71s | 41% |
-| Golden records | 1.63s | 18% |
-| **Total** | **9.10s** | |
+| Ingest | 0.30s | 2% |
+| Auto-fix | 2.29s | 15% |
+| Standardize | 2.34s | 15% |
+| Matchkeys | 0.17s | 1% |
+| **Matching** | **0.29s** | **2%** |
+| Clustering | 7.25s | 48% |
+| Golden records | 2.51s | 17% |
+| **Total** | **15.15s** | |
 
-Results: 138,730 duplicate clusters found with **100% precision** and **100% recall** against known ground truth.
+Results: 138,730 duplicate clusters found (175,602 pairs) with **100% precision** and **100% recall** against known ground truth.
 
 ### Leipzig Benchmark Results
 
@@ -243,22 +311,25 @@ Evaluated against the standard [University of Leipzig entity resolution benchmar
 
 | Dataset | Strategy | Precision | Recall | F1 | Time |
 |---------|----------|-----------|--------|-----|------|
-| **DBLP-ACM** (2.6K vs 2.3K) | exact title | 88.5% | 88.3% | 88.4% | 0.07s |
-| **DBLP-ACM** | fuzzy title+authors+year | **97.0%** | **96.9%** | **97.0%** | 0.8s |
-| **DBLP-ACM** | cascaded exact+fuzzy | 87.6% | 98.1% | 92.5% | 0.9s |
-| **DBLP-Scholar** (2.6K vs 64K) | exact title | 76.7% | 47.8% | 58.9% | 0.4s |
-| **DBLP-Scholar** | fuzzy title+year | 37.0% | 77.7% | 50.1% | 7.5s |
-| **Abt-Buy** (1K vs 1K) | fuzzy name | 46.7% | 31.0% | 37.3% | 0.2s |
-| **Amazon-Google** (1.4K vs 3.2K) | fuzzy title+mfr | 32.2% | 26.3% | 29.0% | 0.6s |
+| **DBLP-ACM** (2.6K vs 2.3K) | exact title | 88.5% | 88.3% | 88.4% | 0.2s |
+| **DBLP-ACM** | fuzzy title+authors+year | **97.0%** | **96.9%** | **97.0%** | 0.9s |
+| **DBLP-ACM** | cascaded exact+fuzzy | 87.6% | 98.1% | 92.5% | 1.2s |
+| **DBLP-Scholar** (2.6K vs 64K) | exact title | 76.7% | 47.8% | 58.9% | 0.5s |
+| **DBLP-Scholar** | fuzzy title+year | 37.0% | 77.7% | 50.1% | 7.9s |
+| **Abt-Buy** (1K vs 1K) | exact name | 100.0% | 0.9% | 1.8% | 0.0s |
+| **Abt-Buy** | fuzzy name (token sort) | 46.7% | 31.0% | 37.3% | 0.3s |
+| **Amazon-Google** (1.4K vs 3.2K) | exact title | 43.1% | 3.4% | 6.3% | 0.1s |
+| **Amazon-Google** | fuzzy title+mfr | 32.2% | 26.3% | 29.0% | 0.8s |
 
-**DBLP-ACM** achieves 97% F1 — competitive with published results. The e-commerce datasets (Abt-Buy, Amazon-Google) are fundamentally semantic matching problems where the same product has completely different names across sources; these require embedding-based approaches which are on the roadmap.
+**DBLP-ACM** achieves 97% F1 — competitive with published results. The e-commerce datasets (Abt-Buy, Amazon-Google) are semantic matching problems where the same product has different names across sources; the `embedding` scorer with ANN blocking is available for these use cases.
 
 ### Performance Notes
 
 - **Polars**: All data loading and transformation runs on Polars with native expressions for maximum throughput.
 - **Exact matching**: Uses Polars self-join (hash-based, O(n)) instead of Python pairwise comparison.
 - **Fuzzy matching**: Uses vectorized `rapidfuzz.process.cdist` for NxN score matrices in C.
-- **Blocking**: Adaptive sub-blocking automatically splits oversized blocks. Sorted neighborhood available for skewed distributions.
+- **Embedding matching**: Sentence-transformer embeddings with FAISS ANN indexing for semantic similarity.
+- **Blocking**: Six strategies available — static, adaptive, sorted neighborhood, multi-pass, ANN, and canopy clustering.
 - **Cascading**: Exact matchkeys run first; matched pairs are excluded from expensive fuzzy comparisons.
 - **Output formats**: CSV, Parquet, and Excel supported.
 
