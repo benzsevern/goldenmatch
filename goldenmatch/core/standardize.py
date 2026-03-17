@@ -203,6 +203,78 @@ def get_standardizer(name: str):
     return STANDARDIZERS[name]
 
 
+# ── Native Polars expressions for simple standardizers ──────────────────────
+
+# Standardizers that can be expressed as native Polars (no Python UDF needed).
+# Each returns a function that takes a pl.Expr and returns a pl.Expr.
+# Must replicate exact behavior of the Python functions above, including
+# empty-string-to-null handling.
+
+
+def _null_if_empty(expr: pl.Expr) -> pl.Expr:
+    """Replace empty strings with null."""
+    return pl.when(expr.str.len_chars() == 0).then(None).otherwise(expr)
+
+
+def _native_strip(expr: pl.Expr) -> pl.Expr:
+    """Native equivalent of std_strip: strip whitespace, empty -> null."""
+    e = expr.str.strip_chars()
+    return _null_if_empty(e)
+
+
+def _native_name_upper(expr: pl.Expr) -> pl.Expr:
+    """Native equivalent of std_name_upper: strip + uppercase, empty -> null."""
+    e = expr.str.strip_chars().str.to_uppercase()
+    return _null_if_empty(e)
+
+
+def _native_name_lower(expr: pl.Expr) -> pl.Expr:
+    """Native equivalent of std_name_lower: strip + lowercase, empty -> null."""
+    e = expr.str.strip_chars().str.to_lowercase()
+    return _null_if_empty(e)
+
+
+def _native_state(expr: pl.Expr) -> pl.Expr:
+    """Native equivalent of std_state: strip + uppercase, empty -> null."""
+    e = expr.str.strip_chars().str.to_uppercase()
+    return _null_if_empty(e)
+
+
+def _native_trim_whitespace(expr: pl.Expr) -> pl.Expr:
+    """Native equivalent of std_trim_whitespace: strip + collapse whitespace, empty -> null."""
+    e = expr.str.strip_chars().str.replace_all(r"\s+", " ")
+    return _null_if_empty(e)
+
+
+# Map of standardizer names to native expression builders.
+# Each takes a pl.Expr and returns a pl.Expr.
+_NATIVE_STANDARDIZERS: dict[str, object] = {
+    "strip": _native_strip,
+    "name_upper": _native_name_upper,
+    "name_lower": _native_name_lower,
+    "state": _native_state,
+    "trim_whitespace": _native_trim_whitespace,
+}
+
+
+def _try_build_native_chain(column: str, std_names: list[str]) -> pl.Expr | None:
+    """Try to build a fully native Polars expression chain for the given standardizers.
+
+    Returns None if any standardizer in the chain requires map_elements.
+    """
+    # Only use native path if ALL standardizers in the chain are natively expressible
+    for name in std_names:
+        if name not in _NATIVE_STANDARDIZERS:
+            return None
+
+    expr = pl.col(column).cast(pl.Utf8)
+    for name in std_names:
+        native_fn = _NATIVE_STANDARDIZERS[name]
+        expr = native_fn(expr)
+
+    return expr.alias(column)
+
+
 # ── Apply to DataFrame ──────────────────────────────────────────────────────
 
 
@@ -231,7 +303,13 @@ def apply_standardization(
             )
             continue
 
-        # Build a chained function from the standardizer list
+        # Try native Polars expressions first (fast path)
+        native_expr = _try_build_native_chain(column, std_names)
+        if native_expr is not None:
+            exprs.append(native_expr)
+            continue
+
+        # Fall back to map_elements for complex standardizers
         funcs = [get_standardizer(name) for name in std_names]
 
         def chained_fn(val, _funcs=funcs):
