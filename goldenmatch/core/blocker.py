@@ -230,6 +230,31 @@ def _build_sorted_neighborhood_blocks(
     return results
 
 
+def _build_multi_pass_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
+    """Run multiple blocking passes and union candidate blocks.
+
+    Each pass uses a different BlockingKeyConfig. Blocks with duplicate keys
+    across passes are deduplicated so each unique block key appears once.
+    """
+    all_blocks: list[BlockResult] = []
+    seen_keys: set[str] = set()
+
+    for pass_config in config.passes or []:
+        temp_config = BlockingConfig(
+            keys=[pass_config],
+            max_block_size=config.max_block_size,
+            skip_oversized=config.skip_oversized,
+        )
+        blocks = _build_static_blocks(lf, temp_config)
+        for block in blocks:
+            if block.block_key not in seen_keys:
+                block.strategy = "multi_pass"
+                all_blocks.append(block)
+                seen_keys.add(block.block_key)
+
+    return all_blocks
+
+
 def build_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
     """Build blocks from a LazyFrame based on blocking configuration.
 
@@ -247,6 +272,9 @@ def build_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
     """
     if config.strategy == "sorted_neighborhood":
         return _build_sorted_neighborhood_blocks(lf, config)
+
+    if config.strategy == "multi_pass":
+        return _build_multi_pass_blocks(lf, config)
 
     if config.strategy == "static":
         return _build_static_blocks(lf, config)
