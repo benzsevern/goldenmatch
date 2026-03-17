@@ -130,8 +130,18 @@ def _exact_score_matrix(values: list) -> np.ndarray:
     return scores
 
 
-def _fuzzy_score_matrix(values: list, scorer_name: str) -> np.ndarray:
-    """NxN fuzzy score matrix using rapidfuzz cdist."""
+def _fuzzy_score_matrix(
+    values: list, scorer_name: str, model_name: str = "all-MiniLM-L6-v2",
+) -> np.ndarray:
+    """NxN fuzzy score matrix using rapidfuzz cdist or embedding cosine similarity."""
+    if scorer_name == "embedding":
+        from goldenmatch.core.embedder import get_embedder
+
+        embedder = get_embedder(model_name)
+        embeddings = embedder.embed_column(values, cache_key=f"_block_{id(values)}")
+        sim = embedder.cosine_similarity_matrix(embeddings)
+        return np.asarray(sim, dtype=np.float64)
+
     # Replace None with empty string for cdist (we handle nulls separately)
     clean = [v if v is not None else "" for v in values]
 
@@ -242,7 +252,7 @@ def find_fuzzy_matches(
             null_mask = _build_null_mask(values)
             valid = ~null_mask
 
-            scores = _fuzzy_score_matrix(values, f.scorer)
+            scores = _fuzzy_score_matrix(values, f.scorer, model_name=f.model or "all-MiniLM-L6-v2")
 
             fuzzy_numerator += scores * f.weight * valid
             fuzzy_denominator += f.weight * valid

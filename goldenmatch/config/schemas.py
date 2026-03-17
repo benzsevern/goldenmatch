@@ -16,7 +16,7 @@ VALID_SIMPLE_TRANSFORMS = frozenset({
 })
 
 VALID_SCORERS = frozenset({
-    "exact", "jaro_winkler", "levenshtein", "token_sort", "soundex_match",
+    "exact", "jaro_winkler", "levenshtein", "token_sort", "soundex_match", "embedding",
 })
 
 VALID_STRATEGIES = frozenset({
@@ -57,6 +57,7 @@ class MatchkeyField(BaseModel):
     transforms: list[str] = Field(default_factory=list)
     scorer: str | None = None
     weight: float | None = None
+    model: str | None = None  # for embedding scorer
 
     @model_validator(mode="after")
     def _resolve_field_column(self) -> "MatchkeyField":
@@ -125,11 +126,18 @@ class SortKeyField(BaseModel):
     transforms: list[str] = Field(default_factory=list)
 
 
+class CanopyConfig(BaseModel):
+    fields: list[str]
+    loose_threshold: float = 0.3
+    tight_threshold: float = 0.7
+    max_canopy_size: int = 500
+
+
 class BlockingConfig(BaseModel):
     keys: list[BlockingKeyConfig]
     max_block_size: int = 5000
     skip_oversized: bool = False
-    strategy: Literal["static", "adaptive", "sorted_neighborhood", "multi_pass"] = "static"
+    strategy: Literal["static", "adaptive", "sorted_neighborhood", "multi_pass", "ann", "canopy"] = "static"
     auto_suggest: bool = False
     sub_block_keys: list[BlockingKeyConfig] | None = None
     window_size: int = 20
@@ -137,6 +145,10 @@ class BlockingConfig(BaseModel):
     passes: list[BlockingKeyConfig] | None = None
     union_mode: bool = True
     max_total_comparisons: int | None = None
+    ann_column: str | None = None
+    ann_model: str = "all-MiniLM-L6-v2"
+    ann_top_k: int = 20
+    canopy: CanopyConfig | None = None
 
 
 # ── GoldenFieldRule / GoldenRulesConfig ─────────────────────────────────────

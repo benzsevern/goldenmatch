@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import polars as pl
 
-from goldenmatch.config.schemas import BlockingConfig, BlockingKeyConfig
+from goldenmatch.config.schemas import BlockingConfig, BlockingKeyConfig, CanopyConfig
 from goldenmatch.utils.transforms import apply_transforms
 
 logger = logging.getLogger(__name__)
@@ -255,6 +255,95 @@ def _build_multi_pass_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[B
     return all_blocks
 
 
+def _build_ann_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
+    """Build blocks using ANN (approximate nearest neighbor) on embeddings.
+
+    Embeds the configured column, queries top-K neighbors with FAISS,
+    then groups connected pairs into micro-blocks via Union-Find.
+    """
+    from goldenmatch.core.ann_blocker import ANNBlocker
+    from goldenmatch.core.cluster import UnionFind
+    from goldenmatch.core.embedder import get_embedder
+
+    if not config.ann_column:
+        raise ValueError("ANN blocking requires 'ann_column' to be set.")
+
+    df = lf.collect()
+    values = df[config.ann_column].to_list()
+
+    embedder = get_embedder(config.ann_model)
+    embeddings = embedder.embed_column(values, cache_key=f"ann_{config.ann_column}")
+
+    blocker = ANNBlocker(top_k=config.ann_top_k)
+    blocker.build_index(embeddings)
+    pairs = blocker.query(embeddings)
+
+    # Group nearby records into micro-blocks using Union-Find
+    row_ids = df["__row_id__"].to_list()
+    uf = UnionFind()
+    for a, b in pairs:
+        uf.add(a)
+        uf.add(b)
+        uf.union(a, b)
+
+    clusters = uf.get_clusters()
+    results: list[BlockResult] = []
+    for members in clusters:
+        if len(members) < 2:
+            continue
+        member_list = sorted(members)
+        block_df = df.filter(pl.col("__row_id__").is_in([row_ids[m] for m in member_list]))
+        results.append(BlockResult(
+            block_key=f"ann_{min(member_list)}",
+            df=block_df.lazy(),
+            strategy="ann",
+        ))
+
+    return results
+
+
+def _build_canopy_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
+    """Build blocks using TF-IDF canopy clustering.
+
+    Forms overlapping canopies based on cosine similarity of TF-IDF vectors.
+    Records can appear in multiple canopies.
+    """
+    from goldenmatch.core.canopy import build_canopies
+
+    if not config.canopy:
+        raise ValueError("Canopy blocking requires 'canopy' config to be set.")
+
+    df = lf.collect()
+    canopy_cfg = config.canopy
+
+    # Concatenate canopy fields into a single text value per record
+    text_values = []
+    for row in df.iter_rows(named=True):
+        parts = [str(row.get(f, "") or "") for f in canopy_cfg.fields]
+        text_values.append(" ".join(parts))
+
+    canopies = build_canopies(
+        text_values,
+        loose_threshold=canopy_cfg.loose_threshold,
+        tight_threshold=canopy_cfg.tight_threshold,
+        max_canopy_size=canopy_cfg.max_canopy_size,
+    )
+
+    row_ids = df["__row_id__"].to_list()
+    results: list[BlockResult] = []
+    for i, members in enumerate(canopies):
+        if len(members) < 2:
+            continue
+        block_df = df.filter(pl.col("__row_id__").is_in([row_ids[m] for m in members]))
+        results.append(BlockResult(
+            block_key=f"canopy_{i}",
+            df=block_df.lazy(),
+            strategy="canopy",
+        ))
+
+    return results
+
+
 def build_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
     """Build blocks from a LazyFrame based on blocking configuration.
 
@@ -262,6 +351,8 @@ def build_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
     - "static": original blocking behavior
     - "adaptive": primary blocks + recursive sub-blocking for oversized blocks
     - "sorted_neighborhood": sliding window over sorted data
+    - "ann": ANN blocking with FAISS on embeddings
+    - "canopy": TF-IDF canopy clustering
 
     Args:
         lf: Input LazyFrame.
@@ -270,6 +361,12 @@ def build_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
     Returns:
         List of BlockResult, one per valid block.
     """
+    if config.strategy == "canopy":
+        return _build_canopy_blocks(lf, config)
+
+    if config.strategy == "ann":
+        return _build_ann_blocks(lf, config)
+
     if config.strategy == "sorted_neighborhood":
         return _build_sorted_neighborhood_blocks(lf, config)
 

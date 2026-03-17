@@ -30,6 +30,10 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.4",
 ]
+embeddings = [
+    "sentence-transformers>=2.2",
+    "faiss-cpu>=1.7",
+]
 
 [project.scripts]
 goldenmatch = "goldenmatch.cli.main:app"
