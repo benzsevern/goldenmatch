@@ -98,25 +98,35 @@ def find_exact_matches(
 # ---------------------------------------------------------------------------
 
 def _get_transformed_values(block_df: pl.DataFrame, field: MatchkeyField) -> list:
-    """Get transformed values for a field as a list."""
+    """Get transformed values for a field as a list, using Polars expressions when possible."""
+    from goldenmatch.core.matchkey import _try_native_chain
     col = field.field
+
+    # Try native Polars transforms (fast path)
+    native_expr = _try_native_chain(col, field.transforms)
+    if native_expr is not None:
+        result_df = block_df.select(native_expr.alias("__tmp__"))
+        return result_df["__tmp__"].to_list()
+
+    # Fallback: Python per-row
     values = block_df[col].to_list()
     return [apply_transforms(v, field.transforms) if v is not None else None for v in values]
 
 
 def _exact_score_matrix(values: list) -> np.ndarray:
-    """NxN exact match matrix."""
+    """NxN exact match matrix using hash-based grouping."""
     n = len(values)
     scores = np.zeros((n, n))
-    for i in range(n):
-        if values[i] is None:
-            continue
-        for j in range(i, n):
-            if values[j] is None:
-                continue
-            s = 1.0 if values[i] == values[j] else 0.0
-            scores[i, j] = s
-            scores[j, i] = s
+    # Group indices by value (O(n) hash map)
+    groups: dict[str, list[int]] = {}
+    for i, v in enumerate(values):
+        if v is not None:
+            groups.setdefault(v, []).append(i)
+    # For each group, set all pairs to 1.0
+    for indices in groups.values():
+        if len(indices) > 1:
+            idx = np.array(indices)
+            scores[np.ix_(idx, idx)] = 1.0
     return scores
 
 
@@ -247,15 +257,25 @@ def find_fuzzy_matches(
         # Zero out impossible pairs (early termination)
         combined[impossible] = 0.0
 
-    # Extract upper triangle pairs above threshold
-    results = []
-    for i in range(n):
-        for j in range(i + 1, n):
-            if combined[i, j] >= mk.threshold:
-                a, b = row_ids[i], row_ids[j]
-                pair_key = (min(a, b), max(a, b))
-                if exclude_pairs is not None and pair_key in exclude_pairs:
-                    continue
-                results.append((a, b, float(combined[i, j])))
+    # Extract upper triangle pairs above threshold using numpy
+    # Zero out lower triangle and diagonal
+    upper = np.triu(combined, k=1)
+    rows_idx, cols_idx = np.where(upper >= mk.threshold)
 
-    return results
+    if len(rows_idx) == 0:
+        return []
+
+    row_id_arr = np.array(row_ids)
+    ids_a = row_id_arr[rows_idx]
+    ids_b = row_id_arr[cols_idx]
+    scores = upper[rows_idx, cols_idx]
+
+    if exclude_pairs is not None and len(exclude_pairs) > 0:
+        results = []
+        for a, b, s in zip(ids_a, ids_b, scores):
+            pair_key = (min(int(a), int(b)), max(int(a), int(b)))
+            if pair_key not in exclude_pairs:
+                results.append((int(a), int(b), float(s)))
+        return results
+
+    return [(int(a), int(b), float(s)) for a, b, s in zip(ids_a, ids_b, scores)]

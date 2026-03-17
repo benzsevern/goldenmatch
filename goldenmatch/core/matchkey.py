@@ -10,6 +10,21 @@ from goldenmatch.config.schemas import MatchkeyConfig
 from goldenmatch.utils.transforms import apply_transforms
 
 
+def _try_native_chain(column: str, transforms: list[str]) -> pl.Expr | None:
+    """Try to build a fully native Polars expression chain for transforms.
+
+    Returns a Polars expression if ALL transforms are natively expressible,
+    or None if any requires a Python UDF.
+    """
+    expr = pl.col(column).cast(pl.Utf8)
+    for t in transforms:
+        result = _try_native_transform(expr, t)
+        if result is None:
+            return None
+        expr = result
+    return expr
+
+
 def _try_native_transform(expr: pl.Expr, transform: str) -> pl.Expr | None:
     """Try to apply a transform using native Polars expressions.
 
