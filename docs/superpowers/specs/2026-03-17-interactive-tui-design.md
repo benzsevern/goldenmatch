@@ -76,7 +76,12 @@ Matchkey builder with live feedback:
 - Select transforms and scorers from dropdown lists
 - Adjust threshold with a slider — live counter updates in sidebar: "At 0.85: ~142 clusters | At 0.80: ~198 clusters"
 - Configure blocking keys (field selection + transforms)
-- Golden rules per field (strategy picker, source priority ordering)
+- Golden rules per field with conditional inputs:
+  - Strategy dropdown (most_complete, majority_vote, source_priority, most_recent, first_non_null)
+  - If `most_recent` selected: date_column dropdown appears (populated from available columns)
+  - If `source_priority` selected: sortable list of source names appears (drag to reorder priority)
+  - Default strategy selector for unconfigured fields
+  - max_cluster_size input
 - Each change triggers a background sample re-run
 
 ### Matches Tab
@@ -94,6 +99,29 @@ Golden record preview:
 - Per-field highlighting: which source/record won, confidence level
 - Click/select a golden record to see the cluster it was built from
 - Overall record confidence displayed
+
+## Interactive Mode: Dedupe vs. Match
+
+The `interactive` command supports both workflows. The user selects the mode in the Data tab after loading files.
+
+### Dedupe Mode
+
+Default when files are loaded without specifying target/reference roles. All files are combined and matched against each other. The Matches tab shows clusters, the Golden tab shows merged records.
+
+### Match Mode
+
+Activated when the user designates one file as "target" and one or more as "reference" in the Data tab (via a role dropdown per file). The TUI adapts:
+
+- **Config Tab**: Same matchkey builder. Blocking and golden rules sections are hidden (golden records don't apply in match mode).
+- **Matches Tab**: Shows a match pair list instead of clusters. Each row is a target record with its best (or all) reference match(es). Columns: target fields, ref fields, match score. Color-coded by score.
+- **Golden Tab**: Replaced with a **Coverage Tab** showing hit rate, score distribution, and unmatched targets.
+- **Sidebar stats**: Shows "Matched: 350/500 (70%)" instead of cluster counts.
+
+The `goldenmatch interactive` command itself takes files positionally. Mode is selected in the UI, not the CLI:
+
+```bash
+goldenmatch interactive customers.csv prospects.csv reference.csv
+```
 
 ### Export Tab
 
@@ -138,18 +166,60 @@ The core innovation. When the user changes config (adds a matchkey, adjusts thre
 
 If the user changes config while a run is in progress, the current worker is cancelled and a new one starts after the debounce.
 
+**Cancellation is cooperative.** Textual's `Worker.cancel()` sets a flag but does not interrupt blocking code. Since the pipeline is synchronous Polars (CPU-bound in a thread), the engine checks `worker.is_cancelled` between pipeline steps (after ingest, after scoring, after clustering) and bails out early if cancelled. For a 1000-record sample this is usually fast enough that cancellation latency is imperceptible.
+
+**Threshold slider optimization.** The dual-threshold display ("At 0.85: ~142 clusters | At 0.80: ~198 clusters") does NOT re-run the full pipeline twice. Instead, the engine caches all scored pairs from the most recent sample run. Re-clustering at a different threshold only requires re-running the cheap Union-Find step on the cached pairs with a new threshold filter. This makes slider interaction feel instant.
+
 ### Engine API
 
+`run_sample` and `run_full` are **synchronous** methods. The TUI dispatches them via Textual's `self.run_worker(engine.run_sample, thread=True)` which runs them in a background thread. This works because Polars releases the GIL during computation.
+
 ```python
+@dataclass
+class EngineResult:
+    """Result from a matching run."""
+    # Core outputs (from existing pipeline)
+    clusters: dict[int, dict]               # cluster_id -> {members, size, oversized, pair_scores}
+    golden: pl.DataFrame | None             # merged golden records with confidence
+    unique: pl.DataFrame | None             # records with no matches
+    dupes: pl.DataFrame | None              # records that had duplicates
+    quarantine: pl.DataFrame | None         # rows that failed validation
+    matched: pl.DataFrame | None            # for match mode: matched target+ref pairs
+    unmatched: pl.DataFrame | None          # for match mode: unmatched targets
+
+    # Scored pairs cache (for threshold re-clustering without re-scoring)
+    scored_pairs: list[tuple[int, int, float]]  # (id_a, id_b, score) — all pairs above blocking, before threshold
+
+    # Derived stats (computed by MatchEngine from pipeline output)
+    stats: EngineStats
+
+@dataclass
+class EngineStats:
+    total_records: int
+    total_clusters: int                     # clusters with size > 1
+    singleton_count: int                    # clusters with size == 1
+    match_rate: float                       # total_clusters / total_records
+    cluster_sizes: list[int]                # sizes of multi-member clusters
+    avg_cluster_size: float
+    max_cluster_size: int
+    oversized_count: int
+    # Match mode only
+    hit_rate: float | None = None           # matched / total_targets
+    avg_score: float | None = None
+
 class MatchEngine:
     def __init__(self, files: list[Path]):
         """Load files and profile them."""
 
     def run_sample(self, config: GoldenMatchConfig, sample_size: int = 1000) -> EngineResult:
-        """Run matching on a random sample. Returns clusters, golden records, stats."""
+        """Run matching pipeline on a sample. Synchronous — call via Worker thread."""
 
     def run_full(self, config: GoldenMatchConfig) -> EngineResult:
-        """Run full pipeline. Returns complete results."""
+        """Run full pipeline. Synchronous — call via Worker thread."""
+
+    def recluster_at_threshold(self, threshold: float) -> EngineStats:
+        """Re-run clustering on cached scored_pairs with a new threshold.
+        Fast operation (Union-Find only, no re-scoring). Returns updated stats."""
 
     @property
     def profile(self) -> dict:
@@ -164,7 +234,7 @@ class MatchEngine:
         """Total rows across all loaded files."""
 ```
 
-`EngineResult` is a dataclass containing: clusters dict, golden DataFrame, stats dict (total_records, total_clusters, match_rate, cluster_sizes), pairs list.
+**Sample size rationale.** Interactive mode defaults to 1000 records (needs sub-second response for slider/config changes). Preview mode defaults to 10,000 records (one-shot run, can take a few seconds). Both are configurable.
 
 ## Preview Mode (Batch CLI)
 
@@ -228,7 +298,7 @@ goldenmatch/
 
 Add to pyproject.toml:
 ```toml
-"textual>=0.80",
+"textual>=1.0",
 ```
 
 ### Module Responsibilities
