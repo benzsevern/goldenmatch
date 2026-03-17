@@ -52,3 +52,38 @@ class TestEngineResult:
             ),
         )
         assert len(result.scored_pairs) == 1
+
+
+from goldenmatch.tui.engine import MatchEngine
+
+
+class TestMatchEngineLoad:
+    def test_load_single_file(self, sample_csv):
+        engine = MatchEngine([sample_csv])
+        assert engine.row_count == 5
+        assert "email" in engine.columns
+        assert engine.profile is not None
+        assert engine.profile["total_rows"] == 5
+
+    def test_load_multiple_files(self, sample_csv, sample_csv_b):
+        engine = MatchEngine([sample_csv, sample_csv_b])
+        assert engine.row_count == 8
+
+    def test_load_nonexistent_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            MatchEngine([tmp_path / "missing.csv"])
+
+    def test_columns_property(self, sample_csv):
+        engine = MatchEngine([sample_csv])
+        cols = engine.columns
+        assert "first_name" in cols
+        assert "last_name" in cols
+        # Internal columns should not appear
+        assert "__source__" not in cols
+        assert "__row_id__" not in cols
+
+    def test_sample_extraction(self, sample_csv):
+        engine = MatchEngine([sample_csv])
+        sample = engine.get_sample(3)
+        assert isinstance(sample, pl.DataFrame)
+        assert sample.height == 3
