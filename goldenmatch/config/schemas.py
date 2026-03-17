@@ -116,10 +116,20 @@ class BlockingKeyConfig(BaseModel):
         return self
 
 
+class SortKeyField(BaseModel):
+    column: str
+    transforms: list[str] = Field(default_factory=list)
+
+
 class BlockingConfig(BaseModel):
     keys: list[BlockingKeyConfig]
     max_block_size: int = 5000
     skip_oversized: bool = False
+    strategy: Literal["static", "adaptive", "sorted_neighborhood"] = "static"
+    auto_suggest: bool = False
+    sub_block_keys: list[BlockingKeyConfig] | None = None
+    window_size: int = 20
+    sort_key: list[SortKeyField] | None = None
 
 
 # ── GoldenFieldRule / GoldenRulesConfig ─────────────────────────────────────

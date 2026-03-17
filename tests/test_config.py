@@ -139,6 +139,42 @@ class TestBlockingConfig:
             BlockingKeyConfig(fields=[])
 
 
+class TestBlockingConfigAdaptive:
+    def test_static_strategy_default(self):
+        from goldenmatch.config.schemas import BlockingConfig, BlockingKeyConfig
+        cfg = BlockingConfig(keys=[BlockingKeyConfig(fields=["zip"], transforms=["strip"])])
+        assert cfg.strategy == "static"
+
+    def test_adaptive_strategy(self):
+        from goldenmatch.config.schemas import BlockingConfig, BlockingKeyConfig
+        cfg = BlockingConfig(
+            keys=[BlockingKeyConfig(fields=["zip"], transforms=["strip"])],
+            strategy="adaptive",
+            sub_block_keys=[BlockingKeyConfig(fields=["first_name"], transforms=["lowercase"])],
+        )
+        assert cfg.strategy == "adaptive"
+        assert len(cfg.sub_block_keys) == 1
+
+    def test_sorted_neighborhood_strategy(self):
+        from goldenmatch.config.schemas import BlockingConfig, BlockingKeyConfig, SortKeyField
+        cfg = BlockingConfig(
+            keys=[],
+            strategy="sorted_neighborhood",
+            window_size=25,
+            sort_key=[
+                SortKeyField(column="last_name", transforms=["lowercase", "soundex"]),
+                SortKeyField(column="zip", transforms=["substring:0:3"]),
+            ],
+        )
+        assert cfg.window_size == 25
+        assert len(cfg.sort_key) == 2
+
+    def test_invalid_strategy_rejected(self):
+        from goldenmatch.config.schemas import BlockingConfig, BlockingKeyConfig
+        with pytest.raises(ValueError):
+            BlockingConfig(keys=[], strategy="invalid")
+
+
 # ── GoldenFieldRule ─────────────────────────────────────────────────────────
 
 
