@@ -12,6 +12,7 @@ from goldenmatch.config.loader import load_config
 from goldenmatch.cli.dedupe import _parse_file_source, _resolve_column_maps
 
 console = Console()
+err_console = Console(stderr=True)
 
 
 def match_cmd(
@@ -24,6 +25,9 @@ def match_cmd(
     config: str = typer.Option(
         ..., "--config", "-c", help="Path to YAML config file"
     ),
+    preview: bool = typer.Option(False, "--preview", help="Preview results without writing files"),
+    preview_size: int = typer.Option(10000, "--preview-size", help="Number of records for preview sample"),
+    preview_random: bool = typer.Option(False, "--preview-random", help="Random sample instead of first N"),
     output_matched: bool = typer.Option(False, "--output-matched", help="Output matched records"),
     output_unmatched: bool = typer.Option(False, "--output-unmatched", help="Output unmatched records"),
     output_scores: bool = typer.Option(False, "--output-scores", help="Output score details"),
@@ -49,6 +53,45 @@ def match_cmd(
         if not quiet:
             console.print(f"[red]Config error:[/red] {exc}")
         raise typer.Exit(code=1)
+
+    # ── Preview mode ──
+    if preview:
+        from goldenmatch.tui.engine import MatchEngine
+        from goldenmatch.core.preview import (
+            format_preview_stats,
+            format_preview_clusters,
+            format_preview_golden,
+            format_score_histogram,
+        )
+
+        # Load all files into engine for a dedupe-style preview
+        all_file_paths = [target_parsed[0]] + [fp for fp, _name in refs_parsed]
+        engine = MatchEngine(all_file_paths)
+
+        err_console.print(
+            "[cyan]Preview shows cross-file matching results.[/cyan]",
+        )
+
+        if preview_size < engine.row_count:
+            err_console.print(
+                f"[yellow]Previewing {preview_size} of {engine.row_count} records.[/yellow]",
+            )
+
+        result = engine.run_sample(cfg, sample_size=preview_size)
+
+        err_console.print(format_preview_stats(result.stats))
+        err_console.print(
+            format_preview_clusters(result.clusters, engine.data, max_clusters=10),
+        )
+        err_console.print(format_preview_golden(result.golden, max_records=10))
+        err_console.print(
+            format_score_histogram([s for _, _, s in result.scored_pairs]),
+        )
+
+        run_full = typer.confirm("Run full job now?", default=False)
+        if not run_full:
+            raise typer.Exit(code=0)
+        # Fall through to normal match
 
     # Apply CLI overrides
     if output_dir:
