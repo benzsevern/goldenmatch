@@ -155,22 +155,31 @@ class MatchEngine:
         matchkeys = config.get_matchkeys()
         combined_lf = compute_matchkeys(combined_lf, matchkeys)
 
-        # ── Score all pairs ──
+        # ── Score all pairs (cascading: exact first, then fuzzy) ──
         all_pairs: list[tuple[int, int, float]] = []
+        matched_pairs: set[tuple[int, int]] = set()
         collected_df = combined_lf.collect()
 
+        # Phase 1: Exact matchkeys (fast)
         for mk in matchkeys:
             if mk.type == "exact":
                 pairs = find_exact_matches(combined_lf, mk)
                 all_pairs.extend(pairs)
-            elif mk.type == "weighted":
+                for a, b, s in pairs:
+                    matched_pairs.add((min(a, b), max(a, b)))
+
+        # Phase 2: Fuzzy matchkeys (slow — skip already-matched pairs)
+        for mk in matchkeys:
+            if mk.type == "weighted":
                 if config.blocking is None:
                     continue
                 blocks = build_blocks(combined_lf, config.blocking)
                 for block in blocks:
                     block_df = block.df.collect()
-                    pairs = find_fuzzy_matches(block_df, mk)
+                    pairs = find_fuzzy_matches(block_df, mk, exclude_pairs=matched_pairs)
                     all_pairs.extend(pairs)
+                    for a, b, s in pairs:
+                        matched_pairs.add((min(a, b), max(a, b)))
 
         # ── Cluster ──
         all_ids = collected_df["__row_id__"].to_list()

@@ -127,8 +127,9 @@ def run_dedupe(
     # ── Step 2: TRANSFORM ──
     combined_lf = compute_matchkeys(combined_lf, matchkeys)
 
-    # ── Step 3: BLOCK + COMPARE ──
+    # ── Step 3: BLOCK + COMPARE (cascading: exact first, then fuzzy) ──
     all_pairs: list[tuple[int, int, float]] = []
+    matched_pairs: set[tuple[int, int]] = set()
     collected_df = combined_lf.collect()
 
     # Build source lookup for across_files_only filtering
@@ -137,6 +138,7 @@ def run_dedupe(
         for row in collected_df.select("__row_id__", "__source__").to_dicts():
             source_lookup[row["__row_id__"]] = row["__source__"]
 
+    # Phase 1: Exact matchkeys (fast)
     for mk in matchkeys:
         if mk.type == "exact":
             pairs = find_exact_matches(combined_lf, mk)
@@ -146,7 +148,14 @@ def run_dedupe(
                     if source_lookup.get(a) != source_lookup.get(b)
                 ]
             all_pairs.extend(pairs)
-        elif mk.type == "weighted":
+            for a, b, s in pairs:
+                matched_pairs.add((min(a, b), max(a, b)))
+
+    logger.info("Exact matching found %d pairs", len(all_pairs))
+
+    # Phase 2: Fuzzy matchkeys (slow — skip already-matched pairs)
+    for mk in matchkeys:
+        if mk.type == "weighted":
             if config.blocking is None:
                 continue
             blocks = build_blocks(combined_lf, config.blocking)
@@ -157,15 +166,17 @@ def run_dedupe(
                     sources_in_block = block_df["__source__"].unique().to_list()
                     if len(sources_in_block) < 2:
                         continue
-                    pairs = find_fuzzy_matches(block_df, mk)
+                    pairs = find_fuzzy_matches(block_df, mk, exclude_pairs=matched_pairs)
                     pairs = [
                         (a, b, s) for a, b, s in pairs
                         if source_lookup.get(a) != source_lookup.get(b)
                     ]
                 else:
                     block_df = block.df.collect()
-                    pairs = find_fuzzy_matches(block_df, mk)
+                    pairs = find_fuzzy_matches(block_df, mk, exclude_pairs=matched_pairs)
                 all_pairs.extend(pairs)
+                for a, b, s in pairs:
+                    matched_pairs.add((min(a, b), max(a, b)))
 
     # ── Step 4: CLUSTER ──
     all_ids = collected_df["__row_id__"].to_list()
@@ -371,9 +382,11 @@ def run_match(
     for row in combined_df.select("__row_id__", "__source__").to_dicts():
         source_lookup[row["__row_id__"]] = row["__source__"]
 
-    # ── Step 4: Find matches ──
+    # ── Step 4: Find matches (cascading: exact first, then fuzzy) ──
     all_pairs: list[tuple[int, int, float]] = []
+    matched_pairs: set[tuple[int, int]] = set()
 
+    # Phase 1: Exact matchkeys (fast)
     for mk in matchkeys:
         if mk.type == "exact":
             pairs = find_exact_matches(combined_lf, mk)
@@ -383,18 +396,25 @@ def run_match(
                 if (a in target_ids) != (b in target_ids)
             ]
             all_pairs.extend(pairs)
-        elif mk.type == "weighted":
+            for a, b, s in pairs:
+                matched_pairs.add((min(a, b), max(a, b)))
+
+    # Phase 2: Fuzzy matchkeys (slow — skip already-matched pairs)
+    for mk in matchkeys:
+        if mk.type == "weighted":
             if config.blocking is None:
                 continue
             blocks = build_blocks(combined_lf, config.blocking)
             for block in blocks:
                 block_df = block.df.collect()
-                pairs = find_fuzzy_matches(block_df, mk)
+                pairs = find_fuzzy_matches(block_df, mk, exclude_pairs=matched_pairs)
                 pairs = [
                     (a, b, s) for a, b, s in pairs
                     if (a in target_ids) != (b in target_ids)
                 ]
                 all_pairs.extend(pairs)
+                for a, b, s in pairs:
+                    matched_pairs.add((min(a, b), max(a, b)))
 
     # ── Step 5: Normalize pairs so target ID is always first ──
     normalized: list[tuple[int, int, float]] = []
