@@ -184,6 +184,14 @@ def init_cmd(
 # ── Profile command ───────────────────────────────────────────────────────
 
 
+@app.command("interactive")
+def interactive_cmd(
+    files: list[str] = typer.Argument(..., help="File(s) to load"),
+) -> None:
+    """Launch the interactive TUI for building configs with live feedback."""
+    console.print("[yellow]Interactive TUI coming soon. Use --preview for now.[/yellow]")
+
+
 @app.command("profile")
 def profile_cmd(
     files: list[str] = typer.Argument(..., help="File(s) to profile"),

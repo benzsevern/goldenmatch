@@ -20,6 +20,7 @@ dependencies = [
     "rapidfuzz>=3.0",
     "jellyfish>=1.0",
     "openpyxl>=3.1",
+    "textual>=1.0",
 ]
 
 [project.optional-dependencies]
