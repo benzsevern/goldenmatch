@@ -246,6 +246,50 @@ def _native_trim_whitespace(expr: pl.Expr) -> pl.Expr:
     return _null_if_empty(e)
 
 
+def _native_phone(expr: pl.Expr) -> pl.Expr:
+    """Native equivalent of std_phone: digits only, strip US country code, null if < 7 digits."""
+    digits = expr.str.replace_all(r"\D", "")
+    # Strip leading "1" if 11 digits
+    stripped = (
+        pl.when(digits.str.len_chars() == 11)
+        .then(digits.str.slice(1))
+        .otherwise(digits)
+    )
+    # Null if < 7 digits or empty
+    return (
+        pl.when(stripped.str.len_chars() < 7)
+        .then(None)
+        .otherwise(stripped)
+    )
+
+
+def _native_zip5(expr: pl.Expr) -> pl.Expr:
+    """Native equivalent of std_zip5: first 5 digits, zero-padded."""
+    # Split on dash/space, take first part, extract digits, pad to 5
+    digits = expr.str.replace_all(r"[^0-9]", "")
+    sliced = digits.str.slice(0, 5)
+    padded = sliced.str.pad_start(5, "0")
+    return (
+        pl.when(digits.str.len_chars() == 0)
+        .then(None)
+        .otherwise(padded)
+    )
+
+
+def _native_email(expr: pl.Expr) -> pl.Expr:
+    """Native equivalent of std_email: lowercase, strip, null if invalid."""
+    cleaned = expr.str.strip_chars().str.to_lowercase()
+    # Valid if contains @ and has a dot after @
+    has_at = cleaned.str.contains("@")
+    # Check dot after @ using regex
+    has_dot_after_at = cleaned.str.contains(r"@[^@]+\.")
+    return (
+        pl.when(has_at & has_dot_after_at & (cleaned.str.len_chars() > 0))
+        .then(cleaned)
+        .otherwise(None)
+    )
+
+
 # Map of standardizer names to native expression builders.
 # Each takes a pl.Expr and returns a pl.Expr.
 _NATIVE_STANDARDIZERS: dict[str, object] = {
@@ -254,6 +298,9 @@ _NATIVE_STANDARDIZERS: dict[str, object] = {
     "name_lower": _native_name_lower,
     "state": _native_state,
     "trim_whitespace": _native_trim_whitespace,
+    "phone": _native_phone,
+    "zip5": _native_zip5,
+    "email": _native_email,
 }
 
 
@@ -303,27 +350,52 @@ def apply_standardization(
             )
             continue
 
-        # Try native Polars expressions first (fast path)
+        # Try fully native chain first (fastest)
         native_expr = _try_build_native_chain(column, std_names)
         if native_expr is not None:
             exprs.append(native_expr)
             continue
 
-        # Fall back to map_elements for complex standardizers
-        funcs = [get_standardizer(name) for name in std_names]
+        # If only one standardizer has no native, use native for the ones that do
+        # and map_elements only for the non-native ones
+        non_native = [n for n in std_names if n not in _NATIVE_STANDARDIZERS]
+        if len(non_native) < len(std_names):
+            # Split into native prefix, non-native middle, native suffix
+            # For simplicity: apply native ones as expressions, non-native as map_elements
+            native_names = [n for n in std_names if n in _NATIVE_STANDARDIZERS]
+            non_native_names = [n for n in std_names if n not in _NATIVE_STANDARDIZERS]
 
-        def chained_fn(val, _funcs=funcs):
-            for fn in _funcs:
-                val = fn(val)
-            return val
+            # Apply native first
+            expr = pl.col(column).cast(pl.Utf8)
+            for name in native_names:
+                expr = _NATIVE_STANDARDIZERS[name](expr)
 
-        expr = (
-            pl.col(column)
-            .cast(pl.Utf8)
-            .map_elements(chained_fn, return_dtype=pl.Utf8)
-            .alias(column)
-        )
-        exprs.append(expr)
+            # Then apply non-native via map_elements
+            funcs = [get_standardizer(name) for name in non_native_names]
+
+            def chained_fn(val, _funcs=funcs):
+                for fn in _funcs:
+                    val = fn(val)
+                return val
+
+            expr = expr.map_elements(chained_fn, return_dtype=pl.Utf8).alias(column)
+            exprs.append(expr)
+        else:
+            # All non-native, pure map_elements
+            funcs = [get_standardizer(name) for name in std_names]
+
+            def chained_fn(val, _funcs=funcs):
+                for fn in _funcs:
+                    val = fn(val)
+                return val
+
+            expr = (
+                pl.col(column)
+                .cast(pl.Utf8)
+                .map_elements(chained_fn, return_dtype=pl.Utf8)
+                .alias(column)
+            )
+            exprs.append(expr)
 
     if exprs:
         lf = lf.with_columns(exprs)
