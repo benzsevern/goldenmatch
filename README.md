@@ -218,13 +218,49 @@ Launch the interactive config wizard to generate a YAML config file.
 goldenmatch init [--output <path>]
 ```
 
-## Performance Notes
+## Performance
 
-- **Polars**: All data loading and transformation runs on Polars LazyFrames for memory-efficient, multi-threaded execution.
-- **Blocking**: Weighted/fuzzy matchkeys require blocking keys to avoid O(n^2) comparisons. Choose blocking fields that group likely matches together (e.g., zip code, phonetic last name).
-- **Max block size**: Oversized blocks (default > 5,000 records) can be skipped to prevent runaway comparisons.
-- **Output formats**: Parquet output is significantly smaller and faster to write than CSV for large result sets.
-- **Scalability**: Tested on datasets with 100k+ records. For millions of records, use tight blocking keys and exact matchkeys where possible.
+### 1M Record Benchmark
+
+GoldenMatch processes 1 million records in **9 seconds** (exact matching, full pipeline including auto-fix, standardization, matching, clustering, and golden record generation):
+
+| Stage | Time | % |
+|-------|------|---|
+| Ingest | 0.12s | 1% |
+| Auto-fix | 1.85s | 20% |
+| Standardize | 1.45s | 16% |
+| Matchkeys | 0.14s | 2% |
+| **Matching** | **0.20s** | **2%** |
+| Clustering | 3.71s | 41% |
+| Golden records | 1.63s | 18% |
+| **Total** | **9.10s** | |
+
+Results: 138,730 duplicate clusters found with **100% precision** and **100% recall** against known ground truth.
+
+### Leipzig Benchmark Results
+
+Evaluated against the standard [University of Leipzig entity resolution benchmark datasets](https://dbs.uni-leipzig.de/research/projects/benchmark-datasets-for-entity-resolution):
+
+| Dataset | Strategy | Precision | Recall | F1 | Time |
+|---------|----------|-----------|--------|-----|------|
+| **DBLP-ACM** (2.6K vs 2.3K) | exact title | 88.5% | 88.3% | 88.4% | 0.07s |
+| **DBLP-ACM** | fuzzy title+authors+year | **97.0%** | **96.9%** | **97.0%** | 0.8s |
+| **DBLP-ACM** | cascaded exact+fuzzy | 87.6% | 98.1% | 92.5% | 0.9s |
+| **DBLP-Scholar** (2.6K vs 64K) | exact title | 76.7% | 47.8% | 58.9% | 0.4s |
+| **DBLP-Scholar** | fuzzy title+year | 37.0% | 77.7% | 50.1% | 7.5s |
+| **Abt-Buy** (1K vs 1K) | fuzzy name | 46.7% | 31.0% | 37.3% | 0.2s |
+| **Amazon-Google** (1.4K vs 3.2K) | fuzzy title+mfr | 32.2% | 26.3% | 29.0% | 0.6s |
+
+**DBLP-ACM** achieves 97% F1 — competitive with published results. The e-commerce datasets (Abt-Buy, Amazon-Google) are fundamentally semantic matching problems where the same product has completely different names across sources; these require embedding-based approaches which are on the roadmap.
+
+### Performance Notes
+
+- **Polars**: All data loading and transformation runs on Polars with native expressions for maximum throughput.
+- **Exact matching**: Uses Polars self-join (hash-based, O(n)) instead of Python pairwise comparison.
+- **Fuzzy matching**: Uses vectorized `rapidfuzz.process.cdist` for NxN score matrices in C.
+- **Blocking**: Adaptive sub-blocking automatically splits oversized blocks. Sorted neighborhood available for skewed distributions.
+- **Cascading**: Exact matchkeys run first; matched pairs are excluded from expensive fuzzy comparisons.
+- **Output formats**: CSV, Parquet, and Excel supported.
 
 ## License
 
