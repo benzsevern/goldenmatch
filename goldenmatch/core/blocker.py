@@ -19,6 +19,9 @@ class BlockResult:
 
     block_key: str
     df: pl.LazyFrame
+    strategy: str = "static"
+    depth: int = 0
+    parent_key: str | None = None
 
 
 def build_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:

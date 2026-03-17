@@ -8,6 +8,25 @@ from goldenmatch.core.blocker import build_blocks, BlockResult
 from goldenmatch.config.schemas import BlockingConfig, BlockingKeyConfig
 
 
+class TestBlockResultMetadata:
+    def test_default_metadata(self):
+        from goldenmatch.core.blocker import BlockResult
+        br = BlockResult(block_key="test", df=pl.DataFrame({"a": [1]}).lazy())
+        assert br.strategy == "static"
+        assert br.depth == 0
+        assert br.parent_key is None
+
+    def test_custom_metadata(self):
+        from goldenmatch.core.blocker import BlockResult
+        br = BlockResult(
+            block_key="sub", df=pl.DataFrame({"a": [1]}).lazy(),
+            strategy="adaptive", depth=1, parent_key="parent"
+        )
+        assert br.strategy == "adaptive"
+        assert br.depth == 1
+        assert br.parent_key == "parent"
+
+
 class TestBuildBlocks:
     """Tests for build_blocks."""
 
