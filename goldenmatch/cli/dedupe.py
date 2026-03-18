@@ -65,9 +65,11 @@ def dedupe_cmd(
     files: list[str] = typer.Argument(
         ..., help="Input files as path or path:source_name"
     ),
-    config: str = typer.Option(
-        ..., "--config", "-c", help="Path to YAML config file"
+    config: Optional[str] = typer.Option(
+        None, "--config", "-c", help="Path to YAML config file (optional — auto-detects if omitted)"
     ),
+    no_tui: bool = typer.Option(False, "--no-tui", help="Skip TUI, run with auto-config directly"),
+    model: Optional[str] = typer.Option(None, "--model", help="Override embedding model selection"),
     preview: bool = typer.Option(False, "--preview", help="Preview results without writing files"),
     preview_size: int = typer.Option(10000, "--preview-size", help="Number of records for preview sample"),
     preview_random: bool = typer.Option(False, "--preview-random", help="Random sample instead of first N"),
@@ -90,13 +92,57 @@ def dedupe_cmd(
     # Parse file:source pairs
     parsed_files = [_parse_file_source(f) for f in files]
 
-    # Load config
-    try:
-        cfg = load_config(config)
-    except (FileNotFoundError, ValueError) as exc:
-        if not quiet:
-            console.print(f"[red]Config error:[/red] {exc}")
-        raise typer.Exit(code=1)
+    # Load config — from file, project settings, or auto-detect
+    if config:
+        try:
+            cfg = load_config(config)
+        except (FileNotFoundError, ValueError) as exc:
+            if not quiet:
+                console.print(f"[red]Config error:[/red] {exc}")
+            raise typer.Exit(code=1)
+    else:
+        # Try project settings first
+        from goldenmatch.config.settings import load_project_settings
+        project = load_project_settings()
+        if project and "matchkeys" in project:
+            try:
+                from goldenmatch.config.schemas import GoldenMatchConfig
+                cfg = GoldenMatchConfig(**project)
+                if not quiet:
+                    console.print("[green]Loaded project settings from .goldenmatch.yaml[/green]")
+            except Exception:
+                project = None
+
+        if not project or "matchkeys" not in (project or {}):
+            # Auto-configure from input files
+            try:
+                from goldenmatch.core.autoconfig import auto_configure
+                if not quiet:
+                    console.print("[yellow]No config file — auto-detecting column types...[/yellow]")
+                cfg = auto_configure(parsed_files)
+                if not quiet:
+                    from goldenmatch.core.autoconfig import profile_columns
+                    console.print("[green]Auto-config complete. Launching TUI for review...[/green]")
+            except Exception as exc:
+                if not quiet:
+                    console.print(f"[red]Auto-config error:[/red] {exc}")
+                raise typer.Exit(code=1)
+
+            # Override model if specified
+            if model:
+                for mk in cfg.get_matchkeys():
+                    for f in mk.fields:
+                        if f.scorer in ("embedding", "record_embedding"):
+                            f.model = model
+
+            # Launch TUI for review (unless --no-tui)
+            if not no_tui and not preview:
+                from goldenmatch.tui.app import GoldenMatchApp
+                file_paths = [fp for fp, _name in parsed_files]
+                tui_app = GoldenMatchApp(files=file_paths)
+                tui_app.current_config = cfg
+                tui_app.run()
+                raise typer.Exit(code=0)
 
     # ── Preview mode ──
     if preview:

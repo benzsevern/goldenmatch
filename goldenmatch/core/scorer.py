@@ -145,7 +145,13 @@ def _fuzzy_score_matrix(
     # Replace None with empty string for cdist (we handle nulls separately)
     clean = [v if v is not None else "" for v in values]
 
-    if scorer_name == "jaro_winkler":
+    if scorer_name == "ensemble":
+        # Combine multiple scorers, take element-wise max
+        jw = np.asarray(cdist(clean, clean, scorer=JaroWinkler.similarity), dtype=np.float64)
+        ts = np.asarray(cdist(clean, clean, scorer=token_sort_ratio), dtype=np.float64) / 100.0
+        sx = _soundex_score_matrix(values) * 0.8
+        matrix = np.maximum(np.maximum(jw, ts), sx)
+    elif scorer_name == "jaro_winkler":
         matrix = cdist(clean, clean, scorer=JaroWinkler.similarity)
     elif scorer_name == "levenshtein":
         matrix = cdist(clean, clean, scorer=Levenshtein.normalized_similarity)
