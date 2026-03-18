@@ -22,6 +22,7 @@ class BlockResult:
     strategy: str = "static"
     depth: int = 0
     parent_key: str | None = None
+    pre_scored_pairs: list[tuple[int, int, float]] | None = None
 
 
 def _build_block_key_expr(key_config: BlockingKeyConfig) -> pl.Expr:
@@ -302,6 +303,43 @@ def _build_ann_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockRes
     return results
 
 
+def _build_ann_pair_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
+    """Build direct-pair ANN blocks without Union-Find.
+
+    Returns a single BlockResult with pre_scored_pairs set.
+    FAISS similarity scores are propagated directly.
+    """
+    from goldenmatch.core.ann_blocker import ANNBlocker
+    from goldenmatch.core.embedder import get_embedder
+
+    if not config.ann_column:
+        raise ValueError("ann_pairs blocking requires 'ann_column' to be set.")
+
+    df = lf.collect()
+    values = df[config.ann_column].to_list()
+
+    embedder = get_embedder(config.ann_model)
+    embeddings = embedder.embed_column(values, cache_key=f"ann_{config.ann_column}")
+
+    blocker = ANNBlocker(top_k=config.ann_top_k)
+    blocker.build_index(embeddings)
+    scored_pairs = blocker.query_with_scores(embeddings)
+
+    # Map positional indices to __row_id__ values
+    row_ids = df["__row_id__"].to_list()
+    mapped_pairs = [
+        (int(row_ids[a]), int(row_ids[b]), score)
+        for a, b, score in scored_pairs
+    ]
+
+    return [BlockResult(
+        block_key="ann_pairs",
+        df=df.lazy(),
+        strategy="ann_pairs",
+        pre_scored_pairs=mapped_pairs,
+    )]
+
+
 def _build_canopy_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
     """Build blocks using TF-IDF canopy clustering.
 
@@ -363,6 +401,9 @@ def build_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
     """
     if config.strategy == "canopy":
         return _build_canopy_blocks(lf, config)
+
+    if config.strategy == "ann_pairs":
+        return _build_ann_pair_blocks(lf, config)
 
     if config.strategy == "ann":
         return _build_ann_blocks(lf, config)

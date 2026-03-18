@@ -95,7 +95,10 @@ def _get_required_columns(config: GoldenMatchConfig) -> list[str]:
     cols = set()
     for mk in config.get_matchkeys():
         for f in mk.fields:
-            cols.add(f.field)
+            if f.columns:
+                cols.update(f.columns)
+            elif f.field and f.field != "__record__":
+                cols.add(f.field)
     if config.blocking:
         for key_config in config.blocking.keys:
             for field_name in key_config.fields:
@@ -225,14 +228,14 @@ def run_dedupe(
                     sources_in_block = block_df["__source__"].unique().to_list()
                     if len(sources_in_block) < 2:
                         continue
-                    pairs = find_fuzzy_matches(block_df, mk, exclude_pairs=matched_pairs)
+                    pairs = find_fuzzy_matches(block_df, mk, exclude_pairs=matched_pairs, pre_scored_pairs=block.pre_scored_pairs)
                     pairs = [
                         (a, b, s) for a, b, s in pairs
                         if source_lookup.get(a) != source_lookup.get(b)
                     ]
                 else:
                     block_df = block.df.collect()
-                    pairs = find_fuzzy_matches(block_df, mk, exclude_pairs=matched_pairs)
+                    pairs = find_fuzzy_matches(block_df, mk, exclude_pairs=matched_pairs, pre_scored_pairs=block.pre_scored_pairs)
                 all_pairs.extend(pairs)
                 for a, b, s in pairs:
                     matched_pairs.add((min(a, b), max(a, b)))
@@ -469,7 +472,7 @@ def run_match(
             blocks = build_blocks(combined_lf, config.blocking)
             for block in blocks:
                 block_df = block.df.collect()
-                pairs = find_fuzzy_matches(block_df, mk, exclude_pairs=matched_pairs)
+                pairs = find_fuzzy_matches(block_df, mk, exclude_pairs=matched_pairs, pre_scored_pairs=block.pre_scored_pairs)
                 pairs = [
                     (a, b, s) for a, b, s in pairs
                     if (a in target_ids) != (b in target_ids)

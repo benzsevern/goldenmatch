@@ -181,7 +181,7 @@ class MatchEngine:
                 blocks = build_blocks(combined_lf, config.blocking)
                 for block in blocks:
                     block_df = block.df.collect()
-                    pairs = find_fuzzy_matches(block_df, mk, exclude_pairs=matched_pairs)
+                    pairs = find_fuzzy_matches(block_df, mk, exclude_pairs=matched_pairs, pre_scored_pairs=block.pre_scored_pairs)
                     all_pairs.extend(pairs)
                     for a, b, s in pairs:
                         matched_pairs.add((min(a, b), max(a, b)))

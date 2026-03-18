@@ -16,7 +16,8 @@ VALID_SIMPLE_TRANSFORMS = frozenset({
 })
 
 VALID_SCORERS = frozenset({
-    "exact", "jaro_winkler", "levenshtein", "token_sort", "soundex_match", "embedding",
+    "exact", "jaro_winkler", "levenshtein", "token_sort", "soundex_match",
+    "embedding", "record_embedding",
 })
 
 VALID_STRATEGIES = frozenset({
@@ -58,9 +59,18 @@ class MatchkeyField(BaseModel):
     scorer: str | None = None
     weight: float | None = None
     model: str | None = None  # for embedding scorer
+    columns: list[str] | None = None  # for record_embedding scorer
 
     @model_validator(mode="after")
     def _resolve_field_column(self) -> "MatchkeyField":
+        # record_embedding uses columns (plural), not field
+        if self.scorer == "record_embedding":
+            if not self.columns:
+                raise ValueError(
+                    "record_embedding scorer requires 'columns' (list of column names)."
+                )
+            self.field = "__record__"
+            return self
         # Allow 'column' as alias for 'field'
         if self.field is None and self.column is not None:
             self.field = self.column
@@ -84,6 +94,7 @@ class MatchkeyConfig(BaseModel):
     comparison: str | None = None
     fields: list[MatchkeyField]
     threshold: float | None = None
+    auto_threshold: bool = False
 
     @model_validator(mode="after")
     def _validate_weighted(self) -> "MatchkeyConfig":
@@ -137,7 +148,7 @@ class BlockingConfig(BaseModel):
     keys: list[BlockingKeyConfig]
     max_block_size: int = 5000
     skip_oversized: bool = False
-    strategy: Literal["static", "adaptive", "sorted_neighborhood", "multi_pass", "ann", "canopy"] = "static"
+    strategy: Literal["static", "adaptive", "sorted_neighborhood", "multi_pass", "ann", "canopy", "ann_pairs"] = "static"
     auto_suggest: bool = False
     sub_block_keys: list[BlockingKeyConfig] | None = None
     window_size: int = 20

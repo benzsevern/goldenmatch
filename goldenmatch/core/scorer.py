@@ -157,6 +157,34 @@ def _fuzzy_score_matrix(
     return np.asarray(matrix, dtype=np.float64)
 
 
+def _record_embedding_score_matrix(
+    block_df: pl.DataFrame, columns: list[str], model_name: str = "all-MiniLM-L6-v2",
+) -> np.ndarray:
+    """NxN score matrix from record-level embeddings.
+
+    Concatenates columns into a single text string per record,
+    embeds the full string, and computes cosine similarity.
+    """
+    from goldenmatch.core.embedder import get_embedder
+
+    concat_values = []
+    for row in block_df.iter_rows(named=True):
+        parts = []
+        for col in columns:
+            val = row.get(col)
+            if val is not None:
+                parts.append(f"{col}: {val}")
+        concat_values.append(" | ".join(parts) if parts else "")
+
+    row_ids = block_df["__row_id__"].to_list()
+    cache_key = f"_rec_emb_{hash(tuple(columns))}_{hash(tuple(row_ids))}"
+
+    embedder = get_embedder(model_name)
+    embeddings = embedder.embed_column(concat_values, cache_key=cache_key)
+    sim = embedder.cosine_similarity_matrix(embeddings)
+    return np.asarray(sim, dtype=np.float64)
+
+
 def _soundex_score_matrix(values: list) -> np.ndarray:
     """NxN soundex match matrix."""
     codes = [jellyfish.soundex(v) if v is not None else None for v in values]
@@ -173,6 +201,7 @@ def find_fuzzy_matches(
     block_df: pl.DataFrame,
     mk: MatchkeyConfig,
     exclude_pairs: set[tuple[int, int]] | None = None,
+    pre_scored_pairs: list[tuple[int, int, float]] | None = None,
 ) -> list[tuple[int, int, float]]:
     """Find fuzzy matches within a block DataFrame.
 
@@ -183,19 +212,33 @@ def find_fuzzy_matches(
         block_df: Block DataFrame with __row_id__ and field columns.
         mk: Matchkey configuration with fields, weights, and threshold.
         exclude_pairs: Optional set of (min_id, max_id) pairs to skip.
+        pre_scored_pairs: Optional pre-computed (id_a, id_b, score) pairs
+            from ANN blocking. When set, skip NxN scoring.
 
     Returns:
         List of (row_id_a, row_id_b, score) tuples above threshold.
     """
+    # Fast path: pre-scored pairs from ANN (skip NxN scoring)
+    if pre_scored_pairs is not None:
+        results = []
+        for a, b, score in pre_scored_pairs:
+            if score >= mk.threshold:
+                pair_key = (min(a, b), max(a, b))
+                if exclude_pairs and pair_key in exclude_pairs:
+                    continue
+                results.append((pair_key[0], pair_key[1], score))
+        return results
+
     n = block_df.height
     if n < 2:
         return []
 
     row_ids = block_df["__row_id__"].to_list()
 
-    # Separate exact (cheap) and fuzzy (expensive) fields
+    # Separate exact (cheap), record_embedding, and fuzzy (expensive) fields
     exact_fields = [f for f in mk.fields if f.scorer == "exact" or f.scorer == "soundex_match"]
-    fuzzy_fields = [f for f in mk.fields if f.scorer not in ("exact", "soundex_match")]
+    record_emb_fields = [f for f in mk.fields if f.scorer == "record_embedding"]
+    fuzzy_fields = [f for f in mk.fields if f.scorer not in ("exact", "soundex_match", "record_embedding")]
 
     total_weight = sum(f.weight for f in mk.fields)
     if total_weight == 0.0:
@@ -222,10 +265,10 @@ def find_fuzzy_matches(
     # For each pair, the maximum possible score is:
     #   (cheap_contribution + fuzzy_max_weight) / (cheap_denom + fuzzy_max_weight)
     # where fuzzy_max_weight assumes all fuzzy fields score 1.0
-    fuzzy_total_weight = sum(f.weight for f in fuzzy_fields)
+    fuzzy_total_weight = sum(f.weight for f in fuzzy_fields) + sum(f.weight for f in record_emb_fields)
 
-    # If no fuzzy fields, just use cheap scores
-    if not fuzzy_fields:
+    # If no fuzzy or record_embedding fields, just use cheap scores
+    if not fuzzy_fields and not record_emb_fields:
         with np.errstate(divide="ignore", invalid="ignore"):
             combined = np.where(cheap_denominator > 0, cheap_numerator / cheap_denominator, 0.0)
     else:
@@ -256,6 +299,13 @@ def find_fuzzy_matches(
 
             fuzzy_numerator += scores * f.weight * valid
             fuzzy_denominator += f.weight * valid
+
+        for f in record_emb_fields:
+            scores = _record_embedding_score_matrix(
+                block_df, f.columns, model_name=f.model or "all-MiniLM-L6-v2"
+            )
+            fuzzy_numerator += scores * f.weight
+            fuzzy_denominator += f.weight
 
         # Combine cheap + fuzzy
         total_numerator = cheap_numerator + fuzzy_numerator

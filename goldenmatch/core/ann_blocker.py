@@ -37,3 +37,22 @@ class ANNBlocker:
                 if neighbor != i and neighbor >= 0:
                     pairs.add((min(i, neighbor), max(i, neighbor)))
         return list(pairs)
+
+    def query_with_scores(self, query_embeddings: np.ndarray) -> list[tuple[int, int, float]]:
+        """Find top-K neighbors with similarity scores.
+
+        Returns (idx_a, idx_b, cosine_similarity) tuples, ordered so idx_a < idx_b.
+        """
+        scores_matrix, indices = self._index.search(
+            query_embeddings.astype(np.float32), self.top_k,
+        )
+        pairs: dict[tuple[int, int], float] = {}
+        for i in range(len(query_embeddings)):
+            for j_idx in range(self.top_k):
+                neighbor = int(indices[i][j_idx])
+                if neighbor != i and neighbor >= 0:
+                    pair = (min(i, neighbor), max(i, neighbor))
+                    score = float(scores_matrix[i][j_idx])
+                    if pair not in pairs or score > pairs[pair]:
+                        pairs[pair] = score
+        return [(a, b, s) for (a, b), s in pairs.items()]
