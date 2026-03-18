@@ -26,9 +26,19 @@ pip install -e ".[dev]"
 
 ## Quick Start
 
-### Dedupe Mode
+### Zero-Config Mode (New)
 
-Find and merge duplicate records across one or more files:
+Just point GoldenMatch at a file — it auto-detects column types, picks scorers, and launches the TUI:
+
+```bash
+goldenmatch dedupe customers.csv
+```
+
+No config file needed. GoldenMatch profiles your data, assigns appropriate matchers (exact for emails, fuzzy for names, embeddings for product descriptions), and shows results in an interactive TUI for review.
+
+### Dedupe Mode (with config)
+
+For full control, provide a YAML config:
 
 ```bash
 goldenmatch dedupe customers.csv \
@@ -312,34 +322,49 @@ Evaluated against the standard [University of Leipzig entity resolution benchmar
 | Dataset | Strategy | Precision | Recall | F1 | Time |
 |---------|----------|-----------|--------|-----|------|
 | **DBLP-ACM** (2.6K vs 2.3K) | exact title | 88.5% | 88.3% | 88.4% | 0.1s |
-| **DBLP-ACM** | fuzzy title+authors+year | 97.0% | 96.9% | 97.0% | 0.7s |
-| **DBLP-ACM** | multi-pass + fuzzy (0.85) | 96.4% | 98.0% | **97.2%** | 2.5s |
+| **DBLP-ACM** | multi-pass + fuzzy (0.85) | 96.4% | 98.0% | **97.2%** | 2.7s |
+| **DBLP-ACM** | multi-pass + ensemble (0.85) | 94.8% | **99.1%** | 96.9% | 3.1s |
 | **DBLP-Scholar** (2.6K vs 64K) | exact title | 76.7% | 47.8% | 58.9% | 0.3s |
-| **DBLP-Scholar** | multi-pass + fuzzy (0.80) | 67.2% | 84.1% | **74.7%** | 93.7s |
-| **Abt-Buy** (1K vs 1K) | fuzzy name (token sort) | 46.7% | 31.0% | 37.3% | 0.2s |
+| **DBLP-Scholar** | multi-pass + fuzzy (0.80) | 67.2% | 84.1% | **74.7%** | 83.9s |
+| **Abt-Buy** (1K vs 1K) | fuzzy name (token sort) | 46.7% | 31.0% | 37.3% | 0.3s |
 | **Abt-Buy** | rec_emb + ann_pairs (0.80) | 35.5% | 59.4% | **44.5%** | 0.1s |
-| **Abt-Buy** | embedding + ANN (0.85) | 45.8% | 40.7% | 43.1% | 5.6s |
-| **Amazon-Google** (1.4K vs 3.2K) | fuzzy title+mfr (0.70) | 32.2% | 26.3% | 29.0% | 0.5s |
+| **Abt-Buy** | embedding + ANN (0.85) | 45.8% | 40.7% | 43.1% | 6.7s |
+| **Amazon-Google** (1.4K vs 3.2K) | fuzzy title+mfr (0.70) | 32.2% | 26.3% | 29.0% | 0.4s |
 | **Amazon-Google** | rec_emb + ann_pairs (0.80) | 40.2% | 40.9% | **40.5%** | 0.3s |
-| **Amazon-Google** | embedding + ANN (0.75) | 31.7% | 53.1% | 39.7% | 0.3s |
+| **Amazon-Google** | embedding + ANN (0.80) | 40.2% | 40.9% | 40.5% | 12.3s |
 
 **Key findings:**
-- **DBLP-ACM**: 97.2% F1 with multi-pass blocking — competitive with published state-of-the-art
+- **DBLP-ACM**: 97.2% F1 with multi-pass blocking — competitive with published state-of-the-art. Ensemble scorer achieves **99.1% recall** (best)
 - **DBLP-Scholar**: Multi-pass blocking improved F1 from 50.1% to **74.7%** (+49% relative gain)
-- **Abt-Buy**: Record embedding + ann_pairs improved F1 from 37.3% to **44.5%** (+19% relative gain) in **0.1s**
-- **Amazon-Google**: Record embedding + ann_pairs improved F1 from 29.0% to **40.5%** (+40% relative gain) in **0.3s**
-- The `ann_pairs` strategy is 50-100x faster than the original `ann` strategy by eliminating Union-Find mega-blocks and skipping redundant NxN scoring
-- E-commerce datasets remain hard — SOTA uses fine-tuned models for 70-90% F1; GoldenMatch uses general-purpose pretrained embeddings
+- **Abt-Buy**: Record embedding + ann_pairs: **44.5% F1 in 0.1s** (was 37.3% with fuzzy-only)
+- **Amazon-Google**: Record embedding + ann_pairs: **40.5% F1 in 0.3s** (was 29.0% with fuzzy-only)
+- `ann_pairs` is 50-100x faster than `ann` by eliminating Union-Find mega-blocks
+- E-commerce datasets remain hard — SOTA uses fine-tuned models for 70-90% F1; GoldenMatch uses general-purpose pretrained embeddings with zero training
+
+### Available Scorers
+
+| Scorer | Description | Best For |
+|--------|-------------|----------|
+| `exact` | Binary match | Email, phone, ID |
+| `jaro_winkler` | Edit distance similarity | Names |
+| `levenshtein` | Normalized Levenshtein | General strings |
+| `token_sort` | Order-invariant token matching | Names, addresses |
+| `soundex_match` | Phonetic match | Names |
+| `ensemble` | max(jaro_winkler, token_sort, soundex) | Names (catches reordering) |
+| `embedding` | Cosine similarity of sentence embeddings | Semantic matching |
+| `record_embedding` | Embed concatenated fields | Cross-field semantic matching |
 
 ### Performance Notes
 
-- **Polars**: All data loading and transformation runs on Polars with native expressions for maximum throughput.
-- **Exact matching**: Uses Polars self-join (hash-based, O(n)) instead of Python pairwise comparison.
-- **Fuzzy matching**: Uses vectorized `rapidfuzz.process.cdist` for NxN score matrices in C.
-- **Embedding matching**: Sentence-transformer embeddings with FAISS ANN indexing for semantic similarity.
-- **Blocking**: Six strategies available — static, adaptive, sorted neighborhood, multi-pass, ANN, and canopy clustering.
-- **Cascading**: Exact matchkeys run first; matched pairs are excluded from expensive fuzzy comparisons.
-- **Output formats**: CSV, Parquet, and Excel supported.
+- **Zero-config**: Auto-detects column types, assigns scorers, picks blocking strategy — no YAML needed
+- **Polars**: All data loading and transformation runs on Polars with native expressions for maximum throughput
+- **Exact matching**: Uses Polars self-join (hash-based, O(n)) instead of Python pairwise comparison
+- **Fuzzy matching**: Uses vectorized `rapidfuzz.process.cdist` for NxN score matrices in C
+- **Embedding matching**: Sentence-transformer embeddings with FAISS ANN indexing for semantic similarity
+- **ann_pairs**: Direct-pair scoring from FAISS (no Union-Find), 50-100x faster than block-based ANN
+- **Blocking**: Seven strategies — static, adaptive, sorted neighborhood, multi-pass, ANN, ann_pairs, canopy
+- **Cascading**: Exact matchkeys run first; matched pairs are excluded from expensive fuzzy comparisons
+- **Settings persistence**: Global (`~/.goldenmatch/settings.yaml`) + project (`.goldenmatch.yaml`) with TUI save
 
 ## License
 

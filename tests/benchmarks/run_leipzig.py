@@ -300,6 +300,36 @@ def run_dblp_acm():
     print_result(r)
     results.append(r)
 
+    # Multi-pass + ensemble scorer
+    found, elapsed = run_matching(df_a, df_b, matchkeys=[
+        MatchkeyConfig(
+            name="ensemble_mp",
+            fields=[
+                MatchkeyField(column="title", transforms=["lowercase", "strip"],
+                              scorer="ensemble", weight=0.5),
+                MatchkeyField(column="authors", transforms=["lowercase", "strip"],
+                              scorer="ensemble", weight=0.3),
+                MatchkeyField(column="year", transforms=["strip"],
+                              scorer="exact", weight=0.2),
+            ],
+            comparison="weighted",
+            threshold=0.85,
+        ),
+    ], blocking=BlockingConfig(
+        keys=[BlockingKeyConfig(fields=["title"], transforms=["lowercase", "substring:0:3"])],
+        strategy="multi_pass",
+        passes=[
+            BlockingKeyConfig(fields=["title"], transforms=["lowercase", "substring:0:5"]),
+            BlockingKeyConfig(fields=["title"], transforms=["lowercase", "token_sort", "substring:0:8"]),
+            BlockingKeyConfig(fields=["title"], transforms=["lowercase", "soundex"]),
+            BlockingKeyConfig(fields=["authors"], transforms=["lowercase", "first_token"]),
+        ],
+        max_block_size=500,
+    ), standardization={"title": ["strip", "trim_whitespace"], "authors": ["strip", "trim_whitespace"]})
+    r = evaluate("DBLP-ACM", "multi_pass+ensemble(0.85)", found, gt, len(df_a), len(df_b), elapsed)
+    print_result(r)
+    results.append(r)
+
     return results
 
 
@@ -397,6 +427,36 @@ def run_dblp_scholar():
     print_result(r)
     results.append(r)
 
+    # Multi-pass + ensemble scorer
+    found, elapsed = run_matching(df_a, df_b, matchkeys=[
+        MatchkeyConfig(
+            name="ensemble_mp",
+            fields=[
+                MatchkeyField(column="title", transforms=["lowercase", "strip"],
+                              scorer="ensemble", weight=0.6),
+                MatchkeyField(column="authors", transforms=["lowercase", "strip"],
+                              scorer="ensemble", weight=0.2),
+                MatchkeyField(column="year", transforms=["strip"],
+                              scorer="exact", weight=0.2),
+            ],
+            comparison="weighted",
+            threshold=0.80,
+        ),
+    ], blocking=BlockingConfig(
+        keys=[BlockingKeyConfig(fields=["title"], transforms=["lowercase", "substring:0:3"])],
+        strategy="multi_pass",
+        passes=[
+            BlockingKeyConfig(fields=["title"], transforms=["lowercase", "substring:0:6"]),
+            BlockingKeyConfig(fields=["title"], transforms=["lowercase", "token_sort", "substring:0:8"]),
+            BlockingKeyConfig(fields=["title"], transforms=["lowercase", "soundex"]),
+            BlockingKeyConfig(fields=["authors"], transforms=["lowercase", "first_token"]),
+        ],
+        max_block_size=500,
+    ), standardization={"title": ["strip", "trim_whitespace"], "authors": ["strip", "trim_whitespace"]})
+    r = evaluate("DBLP-Scholar", "multi_pass+ensemble(0.80)", found, gt, len(df_a), len(df_b), elapsed)
+    print_result(r)
+    results.append(r)
+
     return results
 
 
@@ -445,6 +505,31 @@ def run_abt_buy():
         max_block_size=200,
     ), standardization={"name": ["strip", "trim_whitespace"]})
     r = evaluate("Abt-Buy", "fuzzy_name(token_sort,0.75)", found, gt, len(df_a), len(df_b), elapsed)
+    print_result(r)
+    results.append(r)
+
+    # Ensemble scorer + multi-pass
+    found, elapsed = run_matching(df_a, df_b, matchkeys=[
+        MatchkeyConfig(
+            name="ensemble_name",
+            fields=[
+                MatchkeyField(column="name", transforms=["lowercase", "strip"],
+                              scorer="ensemble", weight=1.0),
+            ],
+            comparison="weighted",
+            threshold=0.75,
+        ),
+    ], blocking=BlockingConfig(
+        keys=[BlockingKeyConfig(fields=["name"], transforms=["lowercase", "substring:0:3"])],
+        strategy="multi_pass",
+        passes=[
+            BlockingKeyConfig(fields=["name"], transforms=["lowercase", "substring:0:5"]),
+            BlockingKeyConfig(fields=["name"], transforms=["lowercase", "token_sort", "substring:0:8"]),
+            BlockingKeyConfig(fields=["name"], transforms=["lowercase", "soundex"]),
+        ],
+        max_block_size=500,
+    ), standardization={"name": ["strip", "trim_whitespace"]})
+    r = evaluate("Abt-Buy", "ensemble+multi_pass(0.75)", found, gt, len(df_a), len(df_b), elapsed)
     print_result(r)
     results.append(r)
 
@@ -582,6 +667,34 @@ def run_amazon_google():
         ),
     ], standardization={"title": ["strip", "trim_whitespace"]})
     r = evaluate("Amazon-Google", "exact_title", found, gt, len(df_a), len(df_b), elapsed)
+    print_result(r)
+    results.append(r)
+
+    # Ensemble + multi-pass
+    found, elapsed = run_matching(df_a, df_b, matchkeys=[
+        MatchkeyConfig(
+            name="ensemble_title",
+            fields=[
+                MatchkeyField(column="title", transforms=["lowercase", "strip"],
+                              scorer="ensemble", weight=0.7),
+                MatchkeyField(column="manufacturer", transforms=["lowercase", "strip"],
+                              scorer="ensemble", weight=0.3),
+            ],
+            comparison="weighted",
+            threshold=0.65,
+        ),
+    ], blocking=BlockingConfig(
+        keys=[BlockingKeyConfig(fields=["title"], transforms=["lowercase", "substring:0:3"])],
+        strategy="multi_pass",
+        passes=[
+            BlockingKeyConfig(fields=["title"], transforms=["lowercase", "substring:0:5"]),
+            BlockingKeyConfig(fields=["title"], transforms=["lowercase", "token_sort", "substring:0:8"]),
+            BlockingKeyConfig(fields=["title"], transforms=["lowercase", "soundex"]),
+            BlockingKeyConfig(fields=["manufacturer"], transforms=["lowercase", "substring:0:3"]),
+        ],
+        max_block_size=500,
+    ), standardization={"title": ["strip", "trim_whitespace"], "manufacturer": ["strip", "trim_whitespace"]})
+    r = evaluate("Amazon-Google", "ensemble+multi_pass(0.65)", found, gt, len(df_a), len(df_b), elapsed)
     print_result(r)
     results.append(r)
 
