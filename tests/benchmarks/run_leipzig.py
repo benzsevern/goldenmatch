@@ -108,7 +108,7 @@ def run_matching(
             blocks = build_blocks(combined.lazy(), blocking)
             for block in blocks:
                 bdf = block.df.collect()
-                pairs = find_fuzzy_matches(bdf, mk)
+                pairs = find_fuzzy_matches(bdf, mk, pre_scored_pairs=block.pre_scored_pairs)
                 all_pairs.extend(pairs)
 
     # Filter to cross-source pairs only, convert to original IDs
@@ -522,6 +522,32 @@ def run_abt_buy():
         r = evaluate("Abt-Buy", "hybrid_emb+ts(0.70)", found, gt, len(df_a), len(df_b), elapsed)
         print_result(r)
         results.append(r)
+        # Record-level embedding + ann_pairs (no Union-Find)
+        for thresh in [0.75, 0.80, 0.85]:
+            found, elapsed = run_matching(df_a, df_b, matchkeys=[
+                MatchkeyConfig(
+                    name="rec_emb_name",
+                    fields=[
+                        MatchkeyField(
+                            scorer="record_embedding",
+                            columns=["name"],
+                            weight=1.0,
+                            model="all-MiniLM-L6-v2",
+                        ),
+                    ],
+                    comparison="weighted",
+                    threshold=thresh,
+                ),
+            ], blocking=BlockingConfig(
+                keys=[BlockingKeyConfig(fields=["name"], transforms=["lowercase", "substring:0:3"])],
+                strategy="ann_pairs",
+                ann_column="name",
+                ann_model="all-MiniLM-L6-v2",
+                ann_top_k=20,
+            ), standardization={"name": ["strip", "trim_whitespace"]})
+            r = evaluate("Abt-Buy", f"rec_emb+ann_pairs({thresh})", found, gt, len(df_a), len(df_b), elapsed)
+            print_result(r)
+            results.append(r)
     except ImportError as e:
         print(f"\n  [SKIPPED embedding strategies: {e}]")
 
@@ -659,6 +685,33 @@ def run_amazon_google():
         r = evaluate("Amazon-Google", "emb+mfr_hybrid(0.70)", found, gt, len(df_a), len(df_b), elapsed)
         print_result(r)
         results.append(r)
+
+        # Record-level embedding + ann_pairs
+        for thresh in [0.75, 0.80, 0.85]:
+            found, elapsed = run_matching(df_a, df_b, matchkeys=[
+                MatchkeyConfig(
+                    name="rec_emb_title",
+                    fields=[
+                        MatchkeyField(
+                            scorer="record_embedding",
+                            columns=["title", "manufacturer"],
+                            weight=1.0,
+                            model="all-MiniLM-L6-v2",
+                        ),
+                    ],
+                    comparison="weighted",
+                    threshold=thresh,
+                ),
+            ], blocking=BlockingConfig(
+                keys=[BlockingKeyConfig(fields=["title"], transforms=["lowercase", "substring:0:3"])],
+                strategy="ann_pairs",
+                ann_column="title",
+                ann_model="all-MiniLM-L6-v2",
+                ann_top_k=20,
+            ), standardization={"title": ["strip", "trim_whitespace"], "manufacturer": ["strip", "trim_whitespace"]})
+            r = evaluate("Amazon-Google", f"rec_emb+ann_pairs({thresh})", found, gt, len(df_a), len(df_b), elapsed)
+            print_result(r)
+            results.append(r)
     except ImportError as e:
         print(f"\n  [SKIPPED embedding strategies: {e}]")
 

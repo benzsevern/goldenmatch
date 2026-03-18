@@ -313,23 +313,23 @@ Evaluated against the standard [University of Leipzig entity resolution benchmar
 |---------|----------|-----------|--------|-----|------|
 | **DBLP-ACM** (2.6K vs 2.3K) | exact title | 88.5% | 88.3% | 88.4% | 0.1s |
 | **DBLP-ACM** | fuzzy title+authors+year | 97.0% | 96.9% | 97.0% | 0.7s |
-| **DBLP-ACM** | multi-pass + fuzzy (0.85) | 96.4% | 98.0% | **97.2%** | 2.7s |
+| **DBLP-ACM** | multi-pass + fuzzy (0.85) | 96.4% | 98.0% | **97.2%** | 2.5s |
 | **DBLP-Scholar** (2.6K vs 64K) | exact title | 76.7% | 47.8% | 58.9% | 0.3s |
-| **DBLP-Scholar** | fuzzy title+year (0.85) | 37.0% | 77.7% | 50.1% | 4.9s |
-| **DBLP-Scholar** | multi-pass + fuzzy (0.80) | 67.2% | 84.1% | **74.7%** | 88.8s |
+| **DBLP-Scholar** | multi-pass + fuzzy (0.80) | 67.2% | 84.1% | **74.7%** | 93.7s |
 | **Abt-Buy** (1K vs 1K) | fuzzy name (token sort) | 46.7% | 31.0% | 37.3% | 0.2s |
-| **Abt-Buy** | embedding + ANN (0.85) | 45.8% | 40.7% | **43.1%** | 6.3s |
-| **Abt-Buy** | embedding + ANN (0.80) | 32.7% | 59.4% | 42.2% | 6.0s |
+| **Abt-Buy** | rec_emb + ann_pairs (0.80) | 35.5% | 59.4% | **44.5%** | 0.1s |
+| **Abt-Buy** | embedding + ANN (0.85) | 45.8% | 40.7% | 43.1% | 5.6s |
 | **Amazon-Google** (1.4K vs 3.2K) | fuzzy title+mfr (0.70) | 32.2% | 26.3% | 29.0% | 0.5s |
-| **Amazon-Google** | embedding + ANN (0.80) | 40.2% | 40.9% | **40.5%** | 12.6s |
-| **Amazon-Google** | embedding + ANN (0.75) | 31.2% | 53.1% | 39.3% | 23.2s |
+| **Amazon-Google** | rec_emb + ann_pairs (0.80) | 40.2% | 40.9% | **40.5%** | 0.3s |
+| **Amazon-Google** | embedding + ANN (0.75) | 31.7% | 53.1% | 39.7% | 0.3s |
 
 **Key findings:**
 - **DBLP-ACM**: 97.2% F1 with multi-pass blocking — competitive with published state-of-the-art
 - **DBLP-Scholar**: Multi-pass blocking improved F1 from 50.1% to **74.7%** (+49% relative gain)
-- **Abt-Buy**: Embedding scorer improved F1 from 37.3% to **43.1%** (+16% relative gain)
-- **Amazon-Google**: Embedding scorer improved F1 from 29.0% to **40.5%** (+40% relative gain)
-- The e-commerce datasets remain hard — state-of-the-art systems (Ditto, Sudowoodo) achieve 70-90% F1 using fine-tuned models, while GoldenMatch uses general-purpose pretrained embeddings
+- **Abt-Buy**: Record embedding + ann_pairs improved F1 from 37.3% to **44.5%** (+19% relative gain) in **0.1s**
+- **Amazon-Google**: Record embedding + ann_pairs improved F1 from 29.0% to **40.5%** (+40% relative gain) in **0.3s**
+- The `ann_pairs` strategy is 50-100x faster than the original `ann` strategy by eliminating Union-Find mega-blocks and skipping redundant NxN scoring
+- E-commerce datasets remain hard — SOTA uses fine-tuned models for 70-90% F1; GoldenMatch uses general-purpose pretrained embeddings
 
 ### Performance Notes
 
