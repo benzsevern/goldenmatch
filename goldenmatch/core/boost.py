@@ -47,18 +47,37 @@ def extract_feature_matrix(
     pairs: list[tuple[int, int, float]],
     df: pl.DataFrame,
     columns: list[str],
+    include_embeddings: bool = False,
 ) -> np.ndarray:
-    """Build (n_pairs, n_features) matrix for all candidate pairs."""
+    """Build (n_pairs, n_features) matrix for all candidate pairs.
+
+    If include_embeddings is True and sentence-transformers is available,
+    adds cosine similarity features per column (6 features per column instead of 5).
+    """
     row_ids = df["__row_id__"].to_list()
     id_to_idx = {rid: i for i, rid in enumerate(row_ids)}
     rows = df.to_dicts()
+
+    # Try to compute embeddings for each column
+    embeddings_per_col: dict[str, np.ndarray | None] = {}
+    if include_embeddings:
+        try:
+            from goldenmatch.core.embedder import get_embedder
+            embedder = get_embedder("all-MiniLM-L6-v2")
+            for col in columns:
+                values = [str(row.get(col, "") or "") for row in rows]
+                embeddings_per_col[col] = embedder.embed_column(values, cache_key=f"boost_{col}_{len(rows)}")
+        except ImportError:
+            pass
+
+    n_feats_per_col = 6 if embeddings_per_col else 5
 
     features = []
     for id_a, id_b, _score in pairs:
         idx_a = id_to_idx.get(id_a)
         idx_b = id_to_idx.get(id_b)
         if idx_a is None or idx_b is None:
-            features.append([0.0] * (5 * len(columns)))
+            features.append([0.0] * (n_feats_per_col * len(columns)))
             continue
 
         row_a = rows[idx_a]
@@ -69,6 +88,15 @@ def extract_feature_matrix(
             val_a = str(row_a.get(col, "") or "")
             val_b = str(row_b.get(col, "") or "")
             pair_feats.extend(_compute_pair_features(val_a, val_b))
+
+            # Add embedding cosine similarity if available
+            if col in embeddings_per_col:
+                emb = embeddings_per_col[col]
+                if idx_a < len(emb) and idx_b < len(emb):
+                    cos_sim = float(np.dot(emb[idx_a], emb[idx_b]))
+                else:
+                    cos_sim = 0.0
+                pair_feats.append(cos_sim)
 
         features.append(pair_feats)
 
@@ -232,7 +260,7 @@ def boost_accuracy(
 
     # Extract features
     logger.info("Extracting features for %d candidate pairs...", len(candidate_pairs))
-    all_features = extract_feature_matrix(candidate_pairs, df, matchable_columns)
+    all_features = extract_feature_matrix(candidate_pairs, df, matchable_columns, include_embeddings=True)
 
     # Build row lookup
     rows = df.to_dicts()

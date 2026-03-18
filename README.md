@@ -339,7 +339,25 @@ Evaluated against the standard [University of Leipzig entity resolution benchmar
 - **Abt-Buy**: Record embedding + ann_pairs: **44.5% F1 in 0.1s** (was 37.3% with fuzzy-only)
 - **Amazon-Google**: Record embedding + ann_pairs: **40.5% F1 in 0.3s** (was 29.0% with fuzzy-only)
 - `ann_pairs` is 50-100x faster than `ann` by eliminating Union-Find mega-blocks
-- E-commerce datasets remain hard — SOTA uses fine-tuned models for 70-90% F1; GoldenMatch uses general-purpose pretrained embeddings with zero training
+
+### LLM Boost (Optional)
+
+For harder datasets, add `--llm-boost` to use an LLM (Claude/GPT-4) to label ~100-500 pairs and train a local classifier. Requires `pip install goldenmatch[llm]` and an API key.
+
+```bash
+goldenmatch dedupe products.csv --llm-boost    # first run: ~$0.30, labels pairs
+goldenmatch dedupe products.csv --llm-boost    # subsequent: $0, uses saved model
+```
+
+**Simulated LLM boost results** (using ground truth with 5% noise to simulate LLM accuracy):
+
+| Dataset | Without Boost | With Boost (100 labels) | With Boost (500 labels) | Cost |
+|---------|--------------|------------------------|------------------------|------|
+| **DBLP-ACM** | 94.8% | **96.2%** | **96.9%** | ~$0.10-$0.50 |
+| **Abt-Buy** | 39.6% | 29.3% | **40.5%** | ~$0.10-$0.50 |
+| **Amazon-Google** | 30.3% | 16.8% | 13.3% | ~$0.10-$0.50 |
+
+LLM boost is most effective on **bibliographic/structured data** where string similarity features are discriminative. On semantic matching tasks (e-commerce products), the classifier needs more than string features — embedding similarity features help but the blocking recall ceiling limits overall improvement. For e-commerce, use `rec_emb + ann_pairs` without boost for best results.
 
 ### Available Scorers
 
