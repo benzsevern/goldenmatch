@@ -85,6 +85,10 @@ def dedupe_cmd(
     run_name: Optional[str] = typer.Option(None, "--run-name", help="Run name for output files"),
     auto_fix: bool = typer.Option(False, "--auto-fix", help="Run auto-fix before matching"),
     auto_block: bool = typer.Option(False, "--auto-block", help="Auto-suggest blocking keys"),
+    llm_boost: bool = typer.Option(False, "--llm-boost", help="Boost accuracy with LLM-labeled training data"),
+    llm_retrain: bool = typer.Option(False, "--llm-retrain", help="Force re-labeling (ignore saved model)"),
+    llm_provider: Optional[str] = typer.Option(None, "--llm-provider", help="LLM provider: auto, anthropic, or openai"),
+    llm_max_labels: int = typer.Option(500, "--llm-max-labels", help="Max pairs to label with LLM"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress output"),
 ) -> None:
@@ -209,6 +213,10 @@ def dedupe_cmd(
         else:
             cfg.blocking.auto_suggest = True
 
+    # Enable LLM boost from CLI flag
+    if llm_boost or llm_retrain:
+        cfg.llm_boost = True
+
     # Resolve column maps from config input.files section
     file_specs = _resolve_column_maps(parsed_files, cfg)
 
@@ -225,6 +233,9 @@ def dedupe_cmd(
             output_unique=output_unique,
             output_report=output_report,
             across_files_only=across_files_only,
+            llm_retrain=llm_retrain,
+            llm_provider=llm_provider,
+            llm_max_labels=llm_max_labels,
         )
     except Exception as exc:
         if not quiet:

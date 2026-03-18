@@ -291,6 +291,7 @@ class GoldenMatchConfig(BaseModel):
     golden_rules: GoldenRulesConfig | None = None
     standardization: StandardizationConfig | None = None
     validation: ValidationConfig | None = None
+    llm_boost: bool = False
 
     @model_validator(mode="after")
     def _validate_fuzzy_needs_blocking(self) -> "GoldenMatchConfig":

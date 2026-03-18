@@ -115,6 +115,9 @@ def run_dedupe(
     output_unique: bool = False,
     output_report: bool = False,
     across_files_only: bool = False,
+    llm_retrain: bool = False,
+    llm_provider: str | None = None,
+    llm_max_labels: int = 500,
 ) -> dict:
     """Run the dedupe pipeline.
 
@@ -239,6 +242,24 @@ def run_dedupe(
                 all_pairs.extend(pairs)
                 for a, b, s in pairs:
                     matched_pairs.add((min(a, b), max(a, b)))
+
+    # ── Step 3.5: LLM BOOST (optional) ──
+    if config.llm_boost and all_pairs:
+        try:
+            from goldenmatch.core.boost import boost_accuracy
+            matchable_cols = [
+                c for c in collected_df.columns if not c.startswith("__")
+            ]
+            all_pairs = boost_accuracy(
+                all_pairs, collected_df, matchable_cols,
+                provider=llm_provider,
+                api_key=None,  # auto-detect from env/settings
+                model_name=None,  # auto-detect
+                max_labels=llm_max_labels,
+                retrain=llm_retrain,
+            )
+        except ImportError as e:
+            logger.warning("LLM boost unavailable: %s", e)
 
     # ── Step 4: CLUSTER ──
     all_ids = collected_df["__row_id__"].to_list()
