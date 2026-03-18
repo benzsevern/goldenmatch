@@ -519,35 +519,136 @@ def boost_accuracy(
         logger.warning("Cannot train — all labels identical. Returning original pairs.")
         return candidate_pairs
 
-    # Try fine-tuning sentence-transformer (best for semantic matching)
+    # ── Level 2: Bi-encoder fine-tuning ──
+    level2_result = candidate_pairs
+    level2_f1 = 0.0
+
     try:
         from sentence_transformers import SentenceTransformer
-        logger.info("Fine-tuning sentence-transformer on %d labeled pairs...", len(all_labels))
-        result = finetune_and_rescore(
+        logger.info("Level 2: Fine-tuning bi-encoder on %d labeled pairs...", len(all_labels))
+        level2_result = finetune_and_rescore(
             candidate_pairs, df, matchable_columns,
             all_labeled_indices, all_labels,
             base_model="all-MiniLM-L6-v2",
             epochs=3,
         )
-        return result
+        # Estimate quality from cross-val
+        X_cv = np.array(all_labeled_features)
+        y_cv = np.array(all_labels, dtype=int)
+        if len(set(y_cv)) >= 2:
+            cv_folds = min(5, min(sum(y_cv), sum(1 - y_cv)))
+            if cv_folds >= 2:
+                clf_cv = LogisticRegression(class_weight="balanced", max_iter=1000)
+                cv_scores = cross_val_score(clf_cv, X_cv, y_cv, cv=cv_folds, scoring="f1")
+                level2_f1 = cv_scores.mean()
+                logger.info("Level 2 cross-val F1: %.1f%%", level2_f1 * 100)
     except ImportError:
-        logger.info("sentence-transformers not available. Falling back to logistic regression.")
+        logger.info("sentence-transformers not available. Using logistic regression.")
+        X = np.array(all_labeled_features)
+        y = np.array(all_labels, dtype=int)
+        clf = LogisticRegression(class_weight="balanced", max_iter=1000)
+        clf.fit(X, y)
+        save_model(clf, matchable_columns)
+        probs = clf.predict_proba(all_features)[:, 1]
+        return [(a, b, float(prob)) for (a, b, _), prob in zip(candidate_pairs, probs)]
     except Exception as e:
-        logger.warning("Fine-tuning failed: %s. Falling back to logistic regression.", e)
+        logger.warning("Level 2 fine-tuning failed: %s", e)
 
-    # Fallback: logistic regression on scorer features
-    X = np.array(all_labeled_features)
-    y = np.array(all_labels, dtype=int)
+    # ── Level 3 escalation check ──
+    if level2_f1 >= 0.60:
+        logger.info("Level 2 sufficient (F1=%.1f%%). No escalation needed.", level2_f1 * 100)
+        return level2_result
 
-    clf = LogisticRegression(class_weight="balanced", max_iter=1000)
-    clf.fit(X, y)
+    logger.info("Level 2 F1=%.1f%% — escalating to Level 3 (cross-encoder)...", level2_f1 * 100)
 
-    save_model(clf, matchable_columns)
+    try:
+        from goldenmatch.core.cross_encoder import (
+            serialize_record, train_cross_encoder, score_pairs as ce_score_pairs,
+            augment_training_data, merge_scores, CROSS_ENCODER_DIR,
+        )
 
-    probs = clf.predict_proba(all_features)[:, 1]
-    logger.info("Re-scored %d pairs with logistic regression classifier.", len(candidate_pairs))
+        # Label 300 more pairs for Level 3
+        logger.info("Labeling 300 additional pairs for Level 3...")
+        uncertain_scores = np.array([s for _, _, s in level2_result])
+        uncertain_indices = _sample_uncertain_pairs(uncertain_scores, labeled_indices, n=300)
 
-    return [
-        (a, b, float(prob))
-        for (a, b, _), prob in zip(candidate_pairs, probs)
-    ]
+        extra_pairs_to_label = []
+        extra_indices = []
+        for idx in uncertain_indices:
+            if idx in labeled_indices or idx >= len(candidate_pairs):
+                continue
+            id_a, id_b, _ = candidate_pairs[idx]
+            idx_a = id_to_idx.get(id_a)
+            idx_b = id_to_idx.get(id_b)
+            if idx_a is not None and idx_b is not None:
+                extra_pairs_to_label.append((rows[idx_a], rows[idx_b]))
+                extra_indices.append(idx)
+                labeled_indices.add(idx)
+
+        if extra_pairs_to_label:
+            extra_labels = label_pairs(
+                extra_pairs_to_label, matchable_columns, context,
+                provider, api_key, model_name, progress_callback,
+            )
+            for idx, label in zip(extra_indices, extra_labels):
+                all_labels.append(label)
+                all_labeled_indices.append(idx)
+
+        # Build serialized training pairs
+        train_pairs = []
+        for idx, label in zip(all_labeled_indices, all_labels):
+            id_a, id_b, _ = candidate_pairs[idx]
+            idx_a = id_to_idx.get(id_a)
+            idx_b = id_to_idx.get(id_b)
+            if idx_a is not None and idx_b is not None:
+                text_a = serialize_record(rows[idx_a], matchable_columns)
+                text_b = serialize_record(rows[idx_b], matchable_columns)
+                train_pairs.append((text_a, text_b, label))
+
+        # Augment: 500 → ~2000
+        augmented = augment_training_data(train_pairs, n_augments=3)
+        logger.info("Training cross-encoder on %d examples (%d original + %d augmented)...",
+                     len(augmented), len(train_pairs), len(augmented) - len(train_pairs))
+
+        # Train cross-encoder
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = Path(tmpdir) / "model"
+            cross_model = train_cross_encoder(
+                augmented, epochs=10, save_dir=save_path,
+            )
+
+            # Save to project directory
+            project_save = Path.cwd() / CROSS_ENCODER_DIR
+            cross_model.save(str(project_save))
+
+        # Score uncertain pairs with cross-encoder
+        uncertain_pairs_to_score = []
+        uncertain_keys = []
+        for a, b, score in level2_result:
+            if 0.3 <= score <= 0.8:
+                idx_a = id_to_idx.get(a)
+                idx_b = id_to_idx.get(b)
+                if idx_a is not None and idx_b is not None:
+                    text_a = serialize_record(rows[idx_a], matchable_columns)
+                    text_b = serialize_record(rows[idx_b], matchable_columns)
+                    uncertain_pairs_to_score.append((text_a, text_b))
+                    uncertain_keys.append((min(a, b), max(a, b)))
+
+        logger.info("Cross-encoder scoring %d uncertain pairs...", len(uncertain_pairs_to_score))
+        cross_scores_list = ce_score_pairs(cross_model, uncertain_pairs_to_score)
+
+        cross_score_map = {
+            key: score for key, score in zip(uncertain_keys, cross_scores_list)
+        }
+
+        final = merge_scores(level2_result, cross_score_map)
+        logger.info("Level 3 complete. Re-scored %d pairs.", len(final))
+        return final
+
+    except ImportError as e:
+        logger.warning("Cross-encoder not available: %s. Returning Level 2 results.", e)
+        return level2_result
+    except Exception as e:
+        logger.warning("Level 3 failed: %s. Returning Level 2 results.", e)
+        return level2_result
