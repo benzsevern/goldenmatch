@@ -22,7 +22,7 @@ from goldenmatch.core.standardize import apply_standardization
 from goldenmatch.core.matchkey import compute_matchkeys
 from goldenmatch.core.blocker import build_blocks
 from goldenmatch.core.scorer import find_exact_matches, find_fuzzy_matches
-from goldenmatch.core.boost import extract_feature_matrix, _sample_initial_pairs
+from goldenmatch.core.boost import extract_feature_matrix, _sample_initial_pairs, finetune_and_rescore
 from goldenmatch.config.schemas import (
     GoldenMatchConfig, MatchkeyConfig, MatchkeyField,
     BlockingConfig, BlockingKeyConfig, OutputConfig,
@@ -191,7 +191,7 @@ def pairs_to_id_set(pairs, combined_df, threshold):
     return found
 
 
-def run_boost_sim(dataset_name, df_a, df_b, gt, matchkeys, blocking, standardization, columns, include_embeddings=False):
+def run_boost_sim(dataset_name, df_a, df_b, gt, matchkeys, blocking, standardization, columns, include_embeddings=False, try_finetune=False):
     """Run boost simulation at different label budgets."""
     print(f"\n{'='*70}")
     print(f"{dataset_name} — LLM Boost Simulation")
@@ -240,6 +240,47 @@ def run_boost_sim(dataset_name, df_a, df_b, gt, matchkeys, blocking, standardiza
 
             noise_label = f"{noise:.0%}" if noise > 0 else "0%"
             print(f"  {n_labels:<8} {noise_label:<8} {cv_f1:<7.1%} {best_p:<7.1%} {best_r:<7.1%} {best_f1:<7.1%} {best_thresh}")
+
+    # Fine-tuning simulation
+    if try_finetune:
+        print(f"\n  --- Fine-Tuning Results ---")
+        print(f"  {'Labels':<8} {'Noise':<8} {'Prec':<8} {'Rec':<8} {'F1':<8} {'Best Thresh'}")
+        print(f"  {'-'*8} {'-'*8} {'-'*8} {'-'*8} {'-'*8} {'-'*11}")
+
+        for n_labels in [100, 200, 300, 500]:
+            if n_labels > len(pairs):
+                continue
+            for noise in [0.0, 0.05]:
+                indices, labels = simulate_llm_labels(pairs, combined, gt, n_labels, noise)
+
+                try:
+                    import tempfile
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        rescored = finetune_and_rescore(
+                            pairs, combined, combined.columns,
+                            indices, labels,
+                            base_model="all-MiniLM-L6-v2",
+                            epochs=3,
+                            save_dir=Path(tmpdir) / "model",
+                        )
+
+                    best_f1 = 0
+                    best_thresh = 0.5
+                    best_p = 0
+                    best_r = 0
+                    for thresh in [0.50, 0.60, 0.70, 0.80, 0.85, 0.90]:
+                        found = pairs_to_id_set(rescored, combined, thresh)
+                        p, r, f1 = evaluate(found, gt)
+                        if f1 > best_f1:
+                            best_f1 = f1
+                            best_thresh = thresh
+                            best_p = p
+                            best_r = r
+
+                    noise_label = f"{noise:.0%}" if noise > 0 else "0%"
+                    print(f"  {n_labels:<8} {noise_label:<8} {best_p:<7.1%} {best_r:<7.1%} {best_f1:<7.1%} {best_thresh}")
+                except Exception as e:
+                    print(f"  {n_labels:<8} — Fine-tuning failed: {e}")
 
 
 def main():
@@ -302,6 +343,7 @@ def main():
         standardization={"name": ["strip", "trim_whitespace"]},
         columns=["name"],
         include_embeddings=True,
+        try_finetune=True,
     )
 
     # Amazon-Google
@@ -331,6 +373,7 @@ def main():
         standardization={"title": ["strip", "trim_whitespace"], "manufacturer": ["strip", "trim_whitespace"]},
         columns=["title", "manufacturer"],
         include_embeddings=True,
+        try_finetune=True,
     )
 
 
