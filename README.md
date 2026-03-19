@@ -226,23 +226,7 @@ GoldenMatch includes a gold-themed interactive terminal UI:
 - **Live threshold slider** — arrow keys adjust threshold in 0.05 increments with instant cluster count preview
 - **Keyboard shortcuts** — `1-5` jump to tabs, `F5` run, `?` show all shortcuts, `Ctrl+E` export
 
-```
-  GoldenMatch Interactive TUI
-  ===========================
-
-  Clusters (1,247)  |  Cluster #42 - 3 records
-                    |
-  > #42   3r  0.94  |  Golden Record:
-    #107  2r  0.91  |    name:  John Smith
-    #23   4r  0.88  |    email: john@test.com
-    ...             |
-                    |  Members:
-                    |    John Smith   john@test.com
-                    |    Jon Smith    jon@test.com
-                    |    J. Smith     js@test.com
-
-  F5:Run  1-5:Tabs  ?:Help  Q:Quit
-```
+![GoldenMatch TUI](docs/screenshots/tui-main.svg)
 
 ## Settings Persistence
 
