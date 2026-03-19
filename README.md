@@ -7,6 +7,16 @@ Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![Tests](https://img.shields.io/badge/tests-605%2B%20passing-brightgreen)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/benzsevern/goldenmatch/blob/main/scripts/gpu_colab_notebook.ipynb)
+
+### See it in action
+
+![GoldenMatch Demo](docs/screenshots/demo.svg)
+
+```bash
+pip install goldenmatch
+goldenmatch demo
+```
 
 ---
 

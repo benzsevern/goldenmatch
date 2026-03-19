@@ -5,12 +5,25 @@ build-backend = "hatchling.build"
 [project]
 name = "goldenmatch"
 version = "0.1.0"
-description = "High-performance CLI for record deduplication, list matching, and golden record creation"
+description = "Entity resolution toolkit — deduplicate records, match across sources, and maintain golden records"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "Ben Severn", email = "benzsevern@gmail.com" }]
-
+keywords = ["entity-resolution", "deduplication", "record-matching", "golden-record", "data-quality"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Typing :: Typed",
+]
 dependencies = [
     "polars>=1.0",
     "typer>=0.12",
@@ -24,15 +37,35 @@ dependencies = [
     "textual>=1.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/benzsevern/goldenmatch"
+Documentation = "https://github.com/benzsevern/goldenmatch/tree/main/docs/wiki"
+Repository = "https://github.com/benzsevern/goldenmatch"
+Issues = "https://github.com/benzsevern/goldenmatch/issues"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    "pytest-asyncio>=0.23",
     "ruff>=0.4",
 ]
 embeddings = [
     "sentence-transformers>=2.2",
     "faiss-cpu>=1.7",
+]
+llm = [
+    "anthropic>=0.30",
+    "openai>=1.30",
+]
+postgres = [
+    "psycopg2-binary>=2.9",
+]
+mcp = [
+    "mcp>=1.0",
+]
+all = [
+    "goldenmatch[embeddings,llm,postgres,mcp]",
 ]
 
 [project.scripts]
