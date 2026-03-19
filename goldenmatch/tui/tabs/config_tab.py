@@ -5,7 +5,7 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
-from textual.widgets import Button, Input, Label, Select, Static
+from textual.widgets import Button, Input, Label, Select, Static, Switch
 
 
 # ── Available options ────────────────────────────────────────────────────────
@@ -312,6 +312,20 @@ class ConfigTab(Static):
                     placeholder="blocking fields (comma-sep, e.g. zip,state)",
                     id="blocking-fields",
                 )
+                yield Select(
+                    [
+                        ("Static", "static"),
+                        ("Adaptive", "adaptive"),
+                        ("Sorted Neighborhood", "sorted_neighborhood"),
+                        ("Multi-Pass", "multi_pass"),
+                        ("ANN (Embeddings)", "ann"),
+                        ("ANN Pairs", "ann_pairs"),
+                        ("Canopy", "canopy"),
+                    ],
+                    prompt="Blocking Strategy",
+                    value="static",
+                    id="blocking-strategy",
+                )
 
             # ── Golden rules section ──
             with Vertical(classes="config-section"):
@@ -322,6 +336,38 @@ class ConfigTab(Static):
                     value="most_complete",
                     id="golden-strategy",
                 )
+
+            # ── Pipeline options ──
+            with Vertical(classes="config-section"):
+                yield Label("Pipeline Options", classes="section-title")
+                with Horizontal():
+                    yield Switch(value=True, id="sw-autofix")
+                    yield Label("Auto-fix data quality")
+                with Horizontal():
+                    yield Switch(value=False, id="sw-autoblock")
+                    yield Label("Auto-suggest blocking keys")
+                with Horizontal():
+                    yield Switch(value=False, id="sw-llm-boost")
+                    yield Label("LLM Boost (requires API key)")
+                with Horizontal():
+                    yield Switch(value=False, id="sw-chunked")
+                    yield Label("Large dataset mode (chunked)")
+                with Horizontal():
+                    yield Switch(value=False, id="sw-across-files")
+                    yield Label("Match across files only")
+
+            # ── Report options ──
+            with Vertical(classes="config-section"):
+                yield Label("Reports", classes="section-title")
+                with Horizontal():
+                    yield Switch(value=False, id="sw-html-report")
+                    yield Label("HTML Report")
+                with Horizontal():
+                    yield Switch(value=False, id="sw-dashboard")
+                    yield Label("Before/After Dashboard")
+                with Horizontal():
+                    yield Switch(value=False, id="sw-graph")
+                    yield Label("Cluster Graph")
 
             # ── Apply button ──
             yield Button(
@@ -409,8 +455,11 @@ class ConfigTab(Static):
                     f.strip() for f in blocking_fields_str.split(",") if f.strip()
                 ]
                 if blocking_fields:
+                    strategy_sel = self.query_one("#blocking-strategy", Select)
+                    strategy = strategy_sel.value if strategy_sel.value is not Select.BLANK else "static"
                     blocking = BlockingConfig(
-                        keys=[BlockingKeyConfig(fields=blocking_fields)]
+                        keys=[BlockingKeyConfig(fields=blocking_fields)],
+                        strategy=strategy,
                     )
 
             if blocking is None:

@@ -87,6 +87,15 @@ class ExportTab(Static):
             with Horizontal(classes="switch-row"):
                 yield Switch(value=True, id="sw-report")
                 yield Static("Output report", classes="switch-label")
+            with Horizontal(classes="switch-row"):
+                yield Switch(value=False, id="sw-html-report-export")
+                yield Static("HTML Report", classes="switch-label")
+            with Horizontal(classes="switch-row"):
+                yield Switch(value=False, id="sw-dashboard-export")
+                yield Static("Before/After Dashboard", classes="switch-label")
+            with Horizontal(classes="switch-row"):
+                yield Switch(value=False, id="sw-graph-export")
+                yield Static("Cluster Graph", classes="switch-label")
 
             yield Static("")
             yield Button("Run Full Job", id="btn-run-full", variant="warning")
