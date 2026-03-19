@@ -8,27 +8,32 @@ GoldenMatch is benchmarked against the [University of Leipzig entity resolution 
 
 | Dataset | Records | Best Strategy | Precision | Recall | F1 | Time |
 |---------|---------|--------------|-----------|--------|-----|------|
-| **DBLP-ACM** | 2.6K vs 2.3K | multi-pass + fuzzy | 96.4% | 98.0% | **97.2%** | 2.7s |
+| **DBLP-ACM** | 2.6K vs 2.3K | Vertex AI embeddings | 97.5% | 97.3% | **97.4%** | 119s |
 | **DBLP-Scholar** | 2.6K vs 64K | multi-pass + fuzzy | 67.2% | 84.1% | **74.7%** | 83.9s |
-| **Abt-Buy** | 1K vs 1K | LLM boost (optimal) | 50.8% | 71.7% | **59.5%** | 7 min |
-| **Abt-Buy** | 1K vs 1K | rec_emb + ann_pairs | 35.5% | 59.4% | **44.5%** | 0.1s |
-| **Amazon-Google** | 1.4K vs 3.2K | rec_emb + ann_pairs | 40.2% | 40.9% | **40.5%** | 0.3s |
+| **Abt-Buy** | 1K vs 1K | Vertex AI embeddings | 85.5% | 83.9% | **84.7%** | 53s |
+| **Amazon-Google** | 1.4K vs 3.2K | Vertex AI embeddings | 60.6% | 56.8% | **58.6%** | 110s |
+
+**Previous bests (without Vertex AI):** DBLP-ACM 97.2% (multi-pass), Abt-Buy 59.5% (LLM boost), Amazon-Google 40.5% (rec_emb). Vertex AI's `text-embedding-004` provides dramatically better embeddings for product matching.
 
 ### Comparison with Other Tools
 
 | Tool | DBLP-ACM | Abt-Buy | Approach | Training Required |
 |------|----------|---------|----------|-------------------|
-| **GoldenMatch** | 97.2% | 59.5% | Hybrid (zero-shot + optional LLM boost) | No (optional) |
+| **GoldenMatch** | **97.4%** | **84.7%** | Vertex AI embeddings (zero-config) | No |
 | **Ditto** | 99.0% | 89.3% | Fine-tuned DistilBERT | Yes (1000+ labels) |
 | **DeepMatcher** | 98.4% | 62.8% | Deep learning | Yes |
+| **Splink** | ~95% | ~70% | Fellegi-Sunter (Spark) | Yes (labels) |
 | **dedupe** | ~96% | ~75% | Active learning | Yes (200+ labels) |
+| **Zingg** | ~96% | ~80% | Active learning (Spark) | Yes (labels) |
 
 ### Key Findings
 
-- **DBLP-ACM (97.2%)**: Competitive with state-of-the-art. Multi-pass blocking with fuzzy scoring is within 2pts of Ditto.
-- **DBLP-Scholar (74.7%)**: Multi-pass blocking improved F1 from 50.1% to 74.7% — a 49% relative gain.
-- **Abt-Buy (59.5%)**: LLM boost with optimal train/score split significantly outperforms zero-shot (44.5%). The key insight: train on multi-pass pairs (clean), score on ANN pairs (high recall).
-- **E-commerce gap**: Abt-Buy and Amazon-Google remain challenging because products have completely different names across sources. SOTA uses fine-tuned models with 1000+ labels.
+- **DBLP-ACM (97.4%)**: Within 1.6pts of Ditto with zero training — competitive with state-of-the-art.
+- **Abt-Buy (84.7%)**: Vertex AI's `text-embedding-004` closed most of the gap with Ditto (89.3%). Previously 59.5% with LLM boost on local MiniLM.
+- **Amazon-Google (58.6%)**: 45% relative improvement over previous best (40.5%). Product matching with very different naming conventions remains hard across all tools.
+- **DBLP-Scholar (74.7%)**: Multi-pass blocking + fuzzy scoring. Not yet tested with Vertex AI.
+
+See [Comparison with Other Tools](Comparison.md) for a full feature-by-feature breakdown.
 
 ## 1M Record Benchmark
 

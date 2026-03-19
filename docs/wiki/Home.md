@@ -24,6 +24,7 @@ Welcome to the GoldenMatch wiki. GoldenMatch is an entity resolution toolkit for
 - [Settings & Persistence](Settings.md)
 
 ### Reference
+- [Comparison with Other Tools](Comparison.md)
 - [Config File Reference](Config-Reference.md)
 - [CLI Reference](CLI-Reference.md)
 - [Transforms Reference](Transforms.md)

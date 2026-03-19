@@ -230,6 +230,21 @@ Best result: **Abt-Buy 59.5% F1** (up from 44.5% zero-shot) with 300 LLM labels 
 
 1 million records deduplicated in **~15 seconds** on a laptop (exact matching, full pipeline).
 
+### How GoldenMatch Compares
+
+| | **GoldenMatch** | **dedupe** | **Splink** | **Zingg** | **Ditto** |
+|---|---|---|---|---|---|
+| Abt-Buy F1 | **84.7%** | ~75% | ~70% | ~80% | 89.3% |
+| DBLP-ACM F1 | **97.4%** | ~96% | ~95% | ~96% | 99.0% |
+| Training required | No | Yes | Yes | Yes | Yes (1000+) |
+| Zero-config | Yes | No | No | No | No |
+| Interactive TUI | Yes | No | No | No | No |
+| Database sync | Postgres | Cloud (paid) | No | No | No |
+| REST API / MCP | Both | Cloud only | No | No | No |
+| GPU required | No | No | No | Spark | Yes |
+
+GoldenMatch's sweet spot is **ease of use + competitive accuracy**. Ditto has higher F1 but requires 1000+ manual labels and a GPU. Splink scales to billions on Spark but needs label training. GoldenMatch auto-configures from your data and reaches 85%+ F1 with zero labels.
+
 ## Interactive TUI
 
 GoldenMatch includes a gold-themed interactive terminal UI:
