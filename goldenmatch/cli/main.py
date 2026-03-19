@@ -15,6 +15,7 @@ from rich.text import Text
 from goldenmatch import __version__
 from goldenmatch.cli.dedupe import dedupe_cmd
 from goldenmatch.cli.match import match_cmd
+from goldenmatch.cli.sync import sync_cmd
 from goldenmatch.prefs.store import PresetStore
 
 LOGO = r"""[bold bright_yellow]
@@ -80,6 +81,7 @@ app = typer.Typer(
 
 app.command("dedupe", help="Run deduplication on one or more files.")(dedupe_cmd)
 app.command("match", help="Match a target file against reference files.")(match_cmd)
+app.command("sync", help="Sync database table — match new records against existing.")(sync_cmd)
 
 
 @app.command("analyze-blocking")
