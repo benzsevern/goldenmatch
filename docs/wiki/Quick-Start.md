@@ -1,5 +1,17 @@
 # Quick Start Guide
 
+## 0. First-Time Setup (Optional)
+
+Run the setup wizard to configure GPU, API keys, and database:
+
+```bash
+goldenmatch setup
+```
+
+![Setup Wizard](../screenshots/setup-welcome.svg)
+
+This is optional — GoldenMatch works out of the box with CPU-safe mode.
+
 ## 1. Simplest Usage (Zero-Config)
 
 Point GoldenMatch at a CSV and it figures out the rest:

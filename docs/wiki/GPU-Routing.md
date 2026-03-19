@@ -14,6 +14,24 @@ GoldenMatch checks these in order and uses the first available:
 | 4 | **Local GPU** | CUDA or MPS detected | Machine has a GPU |
 | 5 | **CPU-safe** | Fallback | Lightweight scorers only (no embeddings) |
 
+## Setup Wizard
+
+The easiest way to configure GPU routing is the interactive wizard:
+
+```bash
+goldenmatch setup
+```
+
+![Setup Welcome](../screenshots/setup-welcome.svg)
+
+Select your GPU mode:
+
+![GPU Selection](../screenshots/setup-gpu.svg)
+
+Get mode-specific setup instructions with copy-paste commands:
+
+![Vertex AI Config](../screenshots/setup-vertex.svg)
+
 ## Quick Start
 
 ### Option A: Vertex AI (Recommended — no GPU needed)

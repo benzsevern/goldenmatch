@@ -28,10 +28,19 @@ pip install goldenmatch[embeddings]        # + sentence-transformers, FAISS
 pip install goldenmatch[llm]               # + Claude/OpenAI for LLM boost
 pip install goldenmatch[postgres]          # + Postgres database sync
 
-# For Vertex AI embeddings (recommended — no GPU needed):
-export GOOGLE_CLOUD_PROJECT=your-project-id
-# See docs/wiki/GPU-Routing.md for setup guide
+# Run the setup wizard to configure GPU, API keys, and database:
+goldenmatch setup
 ```
+
+## Setup Wizard
+
+Run `goldenmatch setup` for an interactive walkthrough:
+
+![Setup Wizard](docs/screenshots/setup-welcome.svg)
+
+Guides you through GPU mode selection, Vertex AI / Colab / local GPU configuration, LLM boost API keys, and database sync — with copy-paste commands at every step.
+
+![GPU Selection](docs/screenshots/setup-gpu.svg)
 
 ## Quick Start
 

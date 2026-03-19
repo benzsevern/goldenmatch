@@ -6,6 +6,18 @@ GoldenMatch includes a professional terminal UI built with [Textual](https://tex
 
 ![Matches Tab](../screenshots/tui-matches.svg)
 
+## Setup Wizard
+
+First-time users should run the setup wizard:
+
+```bash
+goldenmatch setup
+```
+
+![Setup Wizard](../screenshots/setup-welcome.svg)
+
+Walks through GPU mode, API keys, and database configuration with copy-paste commands at every step. See [GPU Routing](GPU-Routing.md) for details.
+
 ## Launching the TUI
 
 ```bash
