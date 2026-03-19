@@ -6,3 +6,19 @@ dist/
 build/
 .pytest_cache/
 .ruff_cache/
+
+# Credentials and secrets — NEVER commit
+.testing/
+.env
+*.env
+credentials/
+secrets/
+*.json.key
+service-account*.json
+
+# GoldenMatch local state
+.goldenmatch_model.json
+.goldenmatch_finetuned_model/
+.goldenmatch_cross_encoder/
+.goldenmatch_faiss/
+.superpowers/
