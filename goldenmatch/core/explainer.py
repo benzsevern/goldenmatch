@@ -75,8 +75,10 @@ def explain_pair(
             continue
 
         field_name = f.field or ""
-        val_a = record_a.get(field_name)
-        val_b = record_b.get(field_name)
+        raw_a = record_a.get(field_name)
+        raw_b = record_b.get(field_name)
+        val_a = str(raw_a) if raw_a is not None else None
+        val_b = str(raw_b) if raw_b is not None else None
 
         # Apply transforms
         trans_a = apply_transforms(val_a, f.transforms) if val_a is not None else None

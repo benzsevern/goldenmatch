@@ -1,0 +1,1 @@
+"""GoldenMatch REST API."""
