@@ -86,12 +86,12 @@ app = typer.Typer(
 
 app.command("dedupe", help="Run deduplication on one or more files.")(dedupe_cmd)
 app.command("match", help="Match a target file against reference files.")(match_cmd)
-app.command("sync", help="Sync database table — match new records against existing.")(sync_cmd)
+app.command("sync", help="Sync database table, match new records against existing.")(sync_cmd)
 app.command("serve", help="Start REST API server for real-time matching.")(serve_cmd)
 app.command("mcp-serve", help="Start MCP server for Claude Desktop integration.")(mcp_serve_cmd)
 app.command("watch", help="Watch database table and match new records continuously.")(watch_cmd)
 app.command("setup", help="Interactive setup wizard for GPU, API keys, and database.")(setup_cmd)
-app.command("demo", help="Run built-in demo with sample data — no files needed.")(demo_cmd)
+app.command("demo", help="Run built-in demo with sample data, no files needed.")(demo_cmd)
 
 
 @app.command("analyze-blocking")

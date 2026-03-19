@@ -66,7 +66,7 @@ def dedupe_cmd(
         ..., help="Input files as path or path:source_name"
     ),
     config: Optional[str] = typer.Option(
-        None, "--config", "-c", help="Path to YAML config file (optional — auto-detects if omitted)"
+        None, "--config", "-c", help="Path to YAML config file (optional - auto-detects if omitted)"
     ),
     no_tui: bool = typer.Option(False, "--no-tui", help="Skip TUI, run with auto-config directly"),
     model: Optional[str] = typer.Option(None, "--model", help="Override embedding model selection"),
@@ -87,7 +87,7 @@ def dedupe_cmd(
     run_name: Optional[str] = typer.Option(None, "--run-name", help="Run name for output files"),
     auto_fix: bool = typer.Option(False, "--auto-fix", help="Run auto-fix before matching"),
     auto_block: bool = typer.Option(False, "--auto-block", help="Auto-suggest blocking keys"),
-    chunked: bool = typer.Option(False, "--chunked", help="Large dataset mode — process in chunks for files >1M records"),
+    chunked: bool = typer.Option(False, "--chunked", help="Large dataset mode - process in chunks for files >1M records"),
     chunk_size: int = typer.Option(100000, "--chunk-size", help="Records per chunk in chunked mode"),
     llm_boost: bool = typer.Option(False, "--llm-boost", help="Boost accuracy with LLM-labeled training data"),
     llm_retrain: bool = typer.Option(False, "--llm-retrain", help="Force re-labeling (ignore saved model)"),
@@ -100,7 +100,7 @@ def dedupe_cmd(
     # Parse file:source pairs
     parsed_files = [_parse_file_source(f) for f in files]
 
-    # Load config — from file, project settings, or auto-detect
+    # Load config - from file, project settings, or auto-detect
     if config:
         try:
             cfg = load_config(config)
@@ -126,7 +126,7 @@ def dedupe_cmd(
             try:
                 from goldenmatch.core.autoconfig import auto_configure
                 if not quiet:
-                    console.print("[yellow]No config file — auto-detecting column types...[/yellow]")
+                    console.print("[yellow]No config file - auto-detecting column types...[/yellow]")
                 cfg = auto_configure(parsed_files)
                 if not quiet:
                     from goldenmatch.core.autoconfig import profile_columns
