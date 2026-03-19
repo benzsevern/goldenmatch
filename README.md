@@ -12,13 +12,13 @@ Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode
 
 ## Features
 
-- **Zero-config** — `goldenmatch dedupe file.csv` auto-detects columns, picks scorers, launches TUI
+- **Zero-config** — `goldenmatch dedupe file.csv` auto-detects columns, picks scorers, shows auto-config summary
+- **Gold-themed TUI** — professional interactive interface with keyboard shortcuts, live threshold tuning, split-view results
 - **8 scoring methods** — exact, Jaro-Winkler, Levenshtein, token sort, soundex, ensemble, embedding, record embedding
 - **7 blocking strategies** — static, adaptive, sorted neighborhood, multi-pass, ANN, ann_pairs, canopy
 - **Database sync** — incremental matching against Postgres with persistent ANN index and golden record versioning
 - **LLM boost** — optional Claude/GPT-4 labeling + sentence-transformer fine-tuning for harder datasets
 - **Golden records** — 5 merge strategies (most_complete, majority_vote, source_priority, most_recent, first_non_null)
-- **Interactive TUI** — explore results, tune thresholds, save settings
 
 ## Installation
 
@@ -215,6 +215,34 @@ Best result: **Abt-Buy 59.5% F1** (up from 44.5% zero-shot) with 300 LLM labels 
 ### 1M Record Benchmark
 
 1 million records deduplicated in **~15 seconds** on a laptop (exact matching, full pipeline).
+
+## Interactive TUI
+
+GoldenMatch includes a gold-themed interactive terminal UI:
+
+- **Auto-config summary** — first screen shows detected columns, scorers, and blocking strategy with Run/Edit/Save options
+- **Pipeline progress** — full-screen progress with stage tracker (✓/●/○) on first run, footer bar on re-runs
+- **Split-view matches** — cluster list on the left, golden record + member details on the right
+- **Live threshold slider** — arrow keys adjust threshold in 0.05 increments with instant cluster count preview
+- **Keyboard shortcuts** — `1-5` jump to tabs, `F5` run, `?` show all shortcuts, `Ctrl+E` export
+
+```
+┌─────────────────────────────────────────────────┐
+│  ⚡ GoldenMatch                                 │
+├──────────────────┬──────────────────────────────┤
+│ Clusters (1,247) │ Cluster #42 — 3 records      │
+│                  │                              │
+│ ▸ #42  3r  0.94 │ Golden: John Smith            │
+│   #107 2r  0.91 │         john@test.com         │
+│   #23  4r  0.88 │                              │
+│   ...            │ Members:                      │
+│                  │  John Smith  john@test.com    │
+│                  │  Jon Smith   jon@test.com     │
+│                  │  J. Smith    js@test.com      │
+├──────────────────┴──────────────────────────────┤
+│ F5:Run │ 1-5:Tabs │ ?:Help │ Q:Quit            │
+└─────────────────────────────────────────────────┘
+```
 
 ## Settings Persistence
 

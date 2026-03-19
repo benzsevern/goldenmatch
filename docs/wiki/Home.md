@@ -16,6 +16,7 @@ Welcome to the GoldenMatch wiki. GoldenMatch is an entity resolution toolkit for
 - [Golden Records](Golden-Records.md)
 
 ### Advanced Features
+- [Interactive TUI](Interactive-TUI.md)
 - [Database Integration](Database-Integration.md)
 - [LLM Boost](LLM-Boost.md)
 - [Embedding & Semantic Matching](Embeddings.md)

@@ -12,8 +12,10 @@ GoldenMatch will:
 1. Analyze your columns (detect names, emails, phones, etc.)
 2. Pick appropriate scorers for each column type
 3. Choose a blocking strategy
-4. Launch the TUI showing auto-detected config
-5. Let you adjust settings before running
+4. Show a gold-themed auto-config summary screen
+5. Let you run immediately, adjust settings, or save for next time
+
+Press `F5` to run, `E` to edit config, or `?` to see all keyboard shortcuts.
 
 ## 2. With a Config File
 

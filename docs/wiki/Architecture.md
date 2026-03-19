@@ -49,8 +49,15 @@ goldenmatch/
 │   └── reconcile.py        # Merge-back + conflict resolution
 │
 ├── tui/                    # Interactive TUI (Textual)
-│   ├── app.py              # GoldenMatchApp (5-tab interface)
-│   └── engine.py           # MatchEngine (no Textual dependency)
+│   ├── app.py              # GoldenMatchApp (gold theme, bindings, routing)
+│   ├── sidebar.py          # Persistent stats sidebar
+│   ├── engine.py           # MatchEngine (no Textual dependency)
+│   ├── screens/
+│   │   └── autoconfig_screen.py  # Zero-config summary screen
+│   ├── widgets/
+│   │   ├── progress_overlay.py   # Full-screen pipeline progress
+│   │   └── threshold_slider.py   # Live threshold with arrow keys
+│   └── tabs/               # Data, Config, Matches, Golden, Export
 │
 └── utils/
     └── transforms.py       # Transform implementations
