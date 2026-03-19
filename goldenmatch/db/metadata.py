@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS gm_match_log (
     record_id_b BIGINT NOT NULL,
     score DOUBLE PRECISION,
     action TEXT NOT NULL,
-    run_id UUID NOT NULL,
+    run_id TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT NOW()
 );
 """
@@ -56,14 +56,28 @@ CREATE TABLE IF NOT EXISTS gm_golden_records (
     source_table TEXT NOT NULL,
     source_ids BIGINT[] NOT NULL,
     record_data JSONB NOT NULL,
-    merged_at TIMESTAMP DEFAULT NOW()
+    merged_at TIMESTAMP DEFAULT NOW(),
+    is_current BOOLEAN DEFAULT TRUE,
+    version INT DEFAULT 1,
+    run_id TEXT
+);
+"""
+
+_CLUSTERS_DDL = """
+CREATE TABLE IF NOT EXISTS gm_clusters (
+    cluster_id BIGINT NOT NULL,
+    record_id BIGINT NOT NULL,
+    source_table TEXT NOT NULL,
+    added_at TIMESTAMP DEFAULT NOW(),
+    run_id TEXT,
+    PRIMARY KEY (cluster_id, record_id, source_table)
 );
 """
 
 
 def ensure_metadata_tables(connector: DatabaseConnector) -> None:
     """Create gm_* tables if they don't exist."""
-    for ddl in [_STATE_DDL, _EMBEDDINGS_DDL, _MATCH_LOG_DDL, _GOLDEN_RECORDS_DDL]:
+    for ddl in [_STATE_DDL, _EMBEDDINGS_DDL, _MATCH_LOG_DDL, _GOLDEN_RECORDS_DDL, _CLUSTERS_DDL]:
         connector.execute(ddl)
     logger.info("GoldenMatch metadata tables ready")
 

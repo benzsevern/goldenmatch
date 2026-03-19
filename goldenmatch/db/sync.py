@@ -236,20 +236,25 @@ def _full_scan_pipeline(
 def _incremental_pipeline(
     connector, new_df, source_table, config, matchkeys,
     output_mode, dry_run, run_id, cfg_hash, total_rows,
-    embed_chunk_size=100000,
+    embed_chunk_size=100000, merge_mode="recompute",
 ):
-    """Match new records against existing database using hybrid blocking."""
+    """Match new records against existing database using hybrid blocking + reconciliation."""
     from goldenmatch.core.scorer import score_pair
     from goldenmatch.db.ann_index import PersistentANNIndex
+    from goldenmatch.db.clusters import get_cluster_for_record
     from goldenmatch.db.hybrid_blocking import find_candidates
+    from goldenmatch.db.reconcile import reconcile_match
 
     all_pairs = []
     match_actions = []
-    new_embeddings_ids = []
-    new_embeddings_vecs = []
 
     id_col = "id" if "id" in new_df.columns else new_df.columns[0]
     matchable_cols = [c for c in new_df.columns if not c.startswith("__")]
+
+    golden_rules = config.golden_rules
+    max_cluster_size = 100
+    if golden_rules and hasattr(golden_rules, "max_cluster_size"):
+        max_cluster_size = golden_rules.max_cluster_size
 
     # Load or build ANN index
     ann_index = None
@@ -280,12 +285,19 @@ def _incremental_pipeline(
         )
 
         if candidates.height == 0:
-            match_actions.append((record_id, 0, 0.0, "new"))
+            if not dry_run:
+                result = reconcile_match(
+                    row, record_id, [], {},
+                    connector, source_table, golden_rules,
+                    max_cluster_size, merge_mode, run_id, id_col,
+                )
+                match_actions.append((record_id, 0, 0.0, result.action))
+            else:
+                match_actions.append((record_id, 0, 0.0, "new"))
             continue
 
         # Score against each candidate
-        best_score = 0.0
-        best_match_id = None
+        matched_ids_with_scores: dict[int, float] = {}
 
         for mk in matchkeys:
             if mk.type != "weighted":
@@ -295,20 +307,48 @@ def _incremental_pipeline(
                 cand_id = candidate.get(id_col)
                 score = score_pair(row, candidate, mk.fields)
 
-                if score >= (mk.threshold or 0.0) and score > best_score:
-                    best_score = score
-                    best_match_id = cand_id
+                if score >= (mk.threshold or 0.0):
+                    if cand_id not in matched_ids_with_scores or score > matched_ids_with_scores[cand_id]:
+                        matched_ids_with_scores[cand_id] = score
 
-        if best_match_id is not None:
-            all_pairs.append((record_id, best_match_id, best_score))
-            match_actions.append((record_id, best_match_id, best_score, "merged"))
+        if not matched_ids_with_scores:
+            if not dry_run:
+                result = reconcile_match(
+                    row, record_id, [], {},
+                    connector, source_table, golden_rules,
+                    max_cluster_size, merge_mode, run_id, id_col,
+                )
+                match_actions.append((record_id, 0, 0.0, result.action))
+            else:
+                match_actions.append((record_id, 0, 0.0, "new"))
+            continue
+
+        if not dry_run:
+            # Look up clusters for matched records
+            matched_cluster_ids = []
+            cluster_scores: dict[int, float] = {}
+            for match_id, score in matched_ids_with_scores.items():
+                cid = get_cluster_for_record(connector, match_id, source_table)
+                if cid is not None:
+                    if cid not in cluster_scores or score > cluster_scores[cid]:
+                        cluster_scores[cid] = score
+                    if cid not in matched_cluster_ids:
+                        matched_cluster_ids.append(cid)
+
+            # Reconcile
+            result = reconcile_match(
+                row, record_id, matched_cluster_ids, cluster_scores,
+                connector, source_table, golden_rules,
+                max_cluster_size, merge_mode, run_id, id_col,
+            )
+
+            best_match = max(matched_ids_with_scores.items(), key=lambda x: x[1])
+            all_pairs.append((record_id, best_match[0], best_match[1]))
+            match_actions.append((record_id, best_match[0], best_match[1], result.action))
         else:
-            match_actions.append((record_id, 0, 0.0, "new"))
-
-    # Add new record embeddings to index
-    if ann_index is not None and new_embeddings_ids:
-        import numpy as np
-        ann_index.add(new_embeddings_ids, np.array(new_embeddings_vecs))
+            best_match = max(matched_ids_with_scores.items(), key=lambda x: x[1])
+            all_pairs.append((record_id, best_match[0], best_match[1]))
+            match_actions.append((record_id, best_match[0], best_match[1], "merged"))
 
     # Progressive: embed next chunk of existing records
     if ann_index is not None:
