@@ -227,9 +227,9 @@ GoldenMatch includes a gold-themed interactive terminal UI:
 - **Keyboard shortcuts** — `1-5` jump to tabs, `F5` run, `?` show all shortcuts, `Ctrl+E` export
 
 ```
-┌─────────────────────────────────────────────────┐
-│  ⚡ GoldenMatch                                 │
-├──────────────────┬──────────────────────────────┤
+┌──────────────────┬──────────────────────────────┐
+│  ⚡ GoldenMatch  │                              │
+├──────────────────┼──────────────────────────────┤
 │ Clusters (1,247) │ Cluster #42 — 3 records      │
 │                  │                              │
 │ ▸ #42  3r  0.94 │ Golden: John Smith            │
@@ -240,7 +240,7 @@ GoldenMatch includes a gold-themed interactive terminal UI:
 │                  │  Jon Smith   jon@test.com     │
 │                  │  J. Smith    js@test.com      │
 ├──────────────────┴──────────────────────────────┤
-│ F5:Run │ 1-5:Tabs │ ?:Help │ Q:Quit            │
+│ F5:Run  1-5:Tabs  ?:Help  Q:Quit               │
 └─────────────────────────────────────────────────┘
 ```
 
