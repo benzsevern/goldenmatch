@@ -27,6 +27,10 @@ pip install goldenmatch                    # core (files only)
 pip install goldenmatch[embeddings]        # + sentence-transformers, FAISS
 pip install goldenmatch[llm]               # + Claude/OpenAI for LLM boost
 pip install goldenmatch[postgres]          # + Postgres database sync
+
+# For Vertex AI embeddings (recommended — no GPU needed):
+export GOOGLE_CLOUD_PROJECT=your-project-id
+# See docs/wiki/GPU-Routing.md for setup guide
 ```
 
 ## Quick Start
@@ -206,11 +210,12 @@ Best result: **Abt-Buy 59.5% F1** (up from 44.5% zero-shot) with 300 LLM labels 
 
 | Dataset | Best Strategy | F1 | Time |
 |---------|--------------|-----|------|
-| **DBLP-ACM** (2.6K vs 2.3K) | multi-pass + fuzzy | **97.2%** | 2.7s |
+| **DBLP-ACM** (2.6K vs 2.3K) | Vertex AI embeddings | **97.4%** | 119s |
 | **DBLP-Scholar** (2.6K vs 64K) | multi-pass + fuzzy | **74.7%** | 83.9s |
-| **Abt-Buy** (1K vs 1K) | LLM boost (optimal) | **59.5%** | 7 min |
-| **Abt-Buy** | rec_emb + ann_pairs | 44.5% | 0.1s |
-| **Amazon-Google** (1.4K vs 3.2K) | rec_emb + ann_pairs | **40.5%** | 0.3s |
+| **Abt-Buy** (1K vs 1K) | Vertex AI embeddings | **84.7%** | 53s |
+| **Amazon-Google** (1.4K vs 3.2K) | Vertex AI embeddings | **58.6%** | 110s |
+
+**Previous best without Vertex AI:** Abt-Buy 59.5% (LLM boost), Amazon-Google 40.5% (rec_emb). Vertex AI's `text-embedding-004` model provides dramatically better embeddings with no local GPU needed.
 
 ### 1M Record Benchmark
 

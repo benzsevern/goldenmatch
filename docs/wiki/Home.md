@@ -17,6 +17,7 @@ Welcome to the GoldenMatch wiki. GoldenMatch is an entity resolution toolkit for
 
 ### Advanced Features
 - [Interactive TUI](Interactive-TUI.md)
+- [GPU Routing & Vertex AI](GPU-Routing.md)
 - [Database Integration](Database-Integration.md)
 - [LLM Boost](LLM-Boost.md)
 - [Embedding & Semantic Matching](Embeddings.md)
