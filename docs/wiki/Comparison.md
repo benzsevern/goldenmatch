@@ -54,7 +54,7 @@ Vertex AI provides state-of-the-art embeddings via API. Other tools (Ditto, Zing
 - **Match explainer** shows exactly why records matched
 
 ### Interactive Experience
-Gold-themed TUI with keyboard shortcuts, live threshold tuning, split-view results, and setup wizard. No other ER tool has an interactive interface.
+Gold-themed TUI with keyboard shortcuts, live threshold tuning, split-view results, and setup wizard. No other deduplication tool has an interactive interface.
 
 ## Where Others Win
 
