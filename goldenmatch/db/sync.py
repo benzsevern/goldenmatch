@@ -236,33 +236,48 @@ def _full_scan_pipeline(
 def _incremental_pipeline(
     connector, new_df, source_table, config, matchkeys,
     output_mode, dry_run, run_id, cfg_hash, total_rows,
+    embed_chunk_size=100000,
 ):
-    """Match new records against existing database using DB-side blocking."""
+    """Match new records against existing database using hybrid blocking."""
     from goldenmatch.core.scorer import score_pair
+    from goldenmatch.db.ann_index import PersistentANNIndex
+    from goldenmatch.db.hybrid_blocking import find_candidates
 
     all_pairs = []
     match_actions = []
+    new_embeddings_ids = []
+    new_embeddings_vecs = []
 
     id_col = "id" if "id" in new_df.columns else new_df.columns[0]
+    matchable_cols = [c for c in new_df.columns if not c.startswith("__")]
+
+    # Load or build ANN index
+    ann_index = None
+    try:
+        ann_index = PersistentANNIndex(
+            connector=connector, source_table=source_table,
+        )
+        ann_index.load_or_build()
+    except Exception as e:
+        logger.debug("ANN index not available: %s", e)
 
     for row in new_df.iter_rows(named=True):
         record_id = row.get(id_col)
 
         if not config.blocking:
-            continue
-
-        # Build blocking query
-        query = build_blocking_query(
-            source_table, row, config.blocking,
-            exclude_id=record_id, id_column=id_col,
-        )
-
-        if not query:
             match_actions.append((record_id, 0, 0.0, "new"))
             continue
 
-        # Pull candidates from DB
-        candidates = connector.read_query(query)
+        # Hybrid blocking: SQL + ANN union
+        candidates = find_candidates(
+            new_record=row,
+            connector=connector,
+            ann_index=ann_index,
+            blocking_config=config.blocking,
+            source_table=source_table,
+            columns=matchable_cols,
+            id_column=id_col,
+        )
 
         if candidates.height == 0:
             match_actions.append((record_id, 0, 0.0, "new"))
@@ -290,6 +305,22 @@ def _incremental_pipeline(
         else:
             match_actions.append((record_id, 0, 0.0, "new"))
 
+    # Add new record embeddings to index
+    if ann_index is not None and new_embeddings_ids:
+        import numpy as np
+        ann_index.add(new_embeddings_ids, np.array(new_embeddings_vecs))
+
+    # Progressive: embed next chunk of existing records
+    if ann_index is not None:
+        _embed_next_chunk(connector, ann_index, source_table, matchable_cols, embed_chunk_size)
+
+    # Save index
+    if ann_index is not None:
+        try:
+            ann_index.save()
+        except Exception as e:
+            logger.debug("Failed to save ANN index: %s", e)
+
     if not dry_run:
         log_matches_batch(connector, match_actions, run_id)
         update_state(
@@ -298,18 +329,74 @@ def _incremental_pipeline(
         )
 
     merged = sum(1 for _, _, _, a in match_actions if a == "merged")
-    new = sum(1 for _, _, _, a in match_actions if a == "new")
+    new_entities = sum(1 for _, _, _, a in match_actions if a == "new")
 
     logger.info(
         "Incremental sync: %d new records — %d merged, %d new entities",
-        new_df.height, merged, new,
+        new_df.height, merged, new_entities,
     )
 
     return {
         "new_records": new_df.height,
         "matches": len(all_pairs),
         "merged": merged,
-        "new_entities": new,
+        "new_entities": new_entities,
         "actions": match_actions,
         "run_id": run_id,
     }
+
+
+def _embed_next_chunk(
+    connector: DatabaseConnector,
+    ann_index: PersistentANNIndex,
+    source_table: str,
+    columns: list[str],
+    chunk_size: int = 100000,
+) -> int:
+    """Embed next chunk of existing records for progressive ANN coverage."""
+    try:
+        from goldenmatch.core.embedder import get_embedder
+        from goldenmatch.db.connector import _quote_ident
+
+        # Find records not yet embedded
+        already_embedded = ann_index.record_count
+        query = (
+            f"SELECT id FROM {_quote_ident(source_table)} "
+            f"WHERE id NOT IN ("
+            f"  SELECT record_id FROM gm_embeddings "
+            f"  WHERE source_table = '{source_table}'"
+            f") ORDER BY id LIMIT {chunk_size}"
+        )
+
+        df = connector.read_query(query)
+        if df.height == 0:
+            logger.info("All records already embedded.")
+            return 0
+
+        record_ids = df["id"].to_list()
+
+        # Fetch full records for embedding
+        id_list = ", ".join(str(int(i)) for i in record_ids)
+        records_df = connector.read_query(
+            f"SELECT * FROM {_quote_ident(source_table)} WHERE id IN ({id_list})"
+        )
+
+        # Build text for embedding
+        texts = []
+        for row in records_df.iter_rows(named=True):
+            parts = [f"{c}: {row.get(c, '')}" for c in columns if row.get(c) is not None]
+            texts.append(" | ".join(parts) if parts else "")
+
+        embedder = get_embedder(ann_index.model_name)
+        embeddings = embedder.embed_column(texts, cache_key=f"_progressive_{source_table}")
+
+        ann_index.add(record_ids, embeddings)
+        logger.info("Progressive embedding: added %d records (%d total)", len(record_ids), ann_index.record_count)
+        return len(record_ids)
+
+    except ImportError:
+        logger.debug("sentence-transformers not available for progressive embedding")
+        return 0
+    except Exception as e:
+        logger.warning("Progressive embedding failed: %s", e)
+        return 0
