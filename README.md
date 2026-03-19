@@ -226,7 +226,17 @@ GoldenMatch includes a gold-themed interactive terminal UI:
 - **Live threshold slider** — arrow keys adjust threshold in 0.05 increments with instant cluster count preview
 - **Keyboard shortcuts** — `1-5` jump to tabs, `F5` run, `?` show all shortcuts, `Ctrl+E` export
 
-![GoldenMatch TUI](docs/screenshots/tui-main.svg)
+**Data profiling:**
+
+![Data Tab](docs/screenshots/tui-data.svg)
+
+**Match results with cluster detail:**
+
+![Matches Tab](docs/screenshots/tui-matches.svg)
+
+**Golden records:**
+
+![Golden Tab](docs/screenshots/tui-golden.svg)
 
 ## Settings Persistence
 

@@ -2,6 +2,10 @@
 
 GoldenMatch includes a professional terminal UI built with [Textual](https://textual.textualize.io/), featuring a gold/amber theme and keyboard-driven workflows.
 
+![Data Tab](../screenshots/tui-data.svg)
+
+![Matches Tab](../screenshots/tui-matches.svg)
+
 ## Launching the TUI
 
 ```bash
