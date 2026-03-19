@@ -149,12 +149,11 @@ def train_cross_encoder(
     ]
 
     # Build evaluator
-    val_sentences_1 = [a for a, b, _ in val_data]
-    val_sentences_2 = [b for a, b, _ in val_data]
+    val_sentence_pairs = [[a, b] for a, b, _ in val_data]
     val_labels = [int(label) for _, _, label in val_data]
 
     evaluator = CEBinaryClassificationEvaluator(
-        val_sentences_1, val_sentences_2, val_labels,
+        val_sentence_pairs, val_labels,
         name="val",
     )
 
