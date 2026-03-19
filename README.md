@@ -1,70 +1,88 @@
 # GoldenMatch
 
-**High-performance CLI for record deduplication, list matching, and golden record creation.**
+**Entity resolution toolkit — deduplicate records, match across sources, and maintain golden records. Works on files or live databases.**
 
-Built with Polars, RapidFuzz, and Typer for fast, configurable entity resolution workflows.
+Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode auto-detects your data; optional LLM boost for harder datasets.
 
-<!-- Badges -->
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Tests](https://img.shields.io/badge/tests-605%2B%20passing-brightgreen)
 
 ---
+
+## Features
+
+- **Zero-config** — `goldenmatch dedupe file.csv` auto-detects columns, picks scorers, launches TUI
+- **8 scoring methods** — exact, Jaro-Winkler, Levenshtein, token sort, soundex, ensemble, embedding, record embedding
+- **7 blocking strategies** — static, adaptive, sorted neighborhood, multi-pass, ANN, ann_pairs, canopy
+- **Database sync** — incremental matching against Postgres with persistent ANN index and golden record versioning
+- **LLM boost** — optional Claude/GPT-4 labeling + sentence-transformer fine-tuning for harder datasets
+- **Golden records** — 5 merge strategies (most_complete, majority_vote, source_priority, most_recent, first_non_null)
+- **Interactive TUI** — explore results, tune thresholds, save settings
 
 ## Installation
 
 ```bash
-pip install goldenmatch
-```
-
-For development:
-
-```bash
-git clone https://github.com/benzsevern/goldenmatch.git
-cd goldenmatch
-pip install -e ".[dev]"
+pip install goldenmatch                    # core (files only)
+pip install goldenmatch[embeddings]        # + sentence-transformers, FAISS
+pip install goldenmatch[llm]               # + Claude/OpenAI for LLM boost
+pip install goldenmatch[postgres]          # + Postgres database sync
 ```
 
 ## Quick Start
 
-### Zero-Config Mode (New)
-
-Just point GoldenMatch at a file — it auto-detects column types, picks scorers, and launches the TUI:
+### Zero-Config (no YAML needed)
 
 ```bash
 goldenmatch dedupe customers.csv
 ```
 
-No config file needed. GoldenMatch profiles your data, assigns appropriate matchers (exact for emails, fuzzy for names, embeddings for product descriptions), and shows results in an interactive TUI for review.
+Auto-detects column types (name, email, phone, zip, address, description), assigns appropriate scorers, picks blocking strategy, and launches the TUI for review.
 
-### Dedupe Mode (with config)
-
-For full control, provide a YAML config:
+### With Config
 
 ```bash
-goldenmatch dedupe customers.csv \
-  --config config.yaml \
-  --output-all \
-  --output-dir results/
+goldenmatch dedupe customers.csv --config config.yaml --output-all --output-dir results/
 ```
 
 ### Match Mode
 
-Match a target file against one or more reference files:
-
 ```bash
-goldenmatch match targets.csv \
-  --against reference.csv \
-  --config config.yaml \
-  --output-all \
-  --output-dir results/
+goldenmatch match targets.csv --against reference.csv --config config.yaml --output-all
 ```
 
-## Config File Reference
+### Database Sync
 
-GoldenMatch is driven by a YAML config file that defines matchkeys, blocking, and golden record strategies.
+```bash
+# First run: full scan, create metadata tables
+goldenmatch sync --table customers --connection-string "$DATABASE_URL" --config config.yaml
+
+# Subsequent runs: incremental (only new records)
+goldenmatch sync --table customers --connection-string "$DATABASE_URL"
+```
+
+## How It Works
+
+```
+Files/DB → Ingest → Standardize → Block → Score → Cluster → Golden Records → Output
+                                     ↑        ↑
+                              SQL blocking   8 scorers
+                              ANN blocking   ensemble
+                              7 strategies   embeddings
+```
+
+**Pipeline:**
+1. **Ingest** — CSV, Excel, Parquet, or Postgres table
+2. **Standardize** — configurable per-column transforms
+3. **Block** — reduce comparison space (multi-pass, ANN, canopy, etc.)
+4. **Score** — compare record pairs with appropriate scorer
+5. **Cluster** — group matches via Union-Find
+6. **Golden** — merge each cluster into one canonical record
+7. **Output** — files (CSV/Parquet) or database tables
+
+## Config Reference
 
 ```yaml
-# Exact matchkey: records sharing the same transformed value are duplicates
 matchkeys:
   - name: exact_email
     type: exact
@@ -72,295 +90,41 @@ matchkeys:
       - field: email
         transforms: [lowercase, strip]
 
-  # Weighted matchkey: fuzzy scoring across multiple fields
   - name: fuzzy_name_zip
     type: weighted
     threshold: 0.85
     fields:
       - field: first_name
-        transforms: [lowercase, strip]
         scorer: jaro_winkler
         weight: 0.4
+        transforms: [lowercase, strip]
       - field: last_name
-        transforms: [lowercase, strip]
         scorer: jaro_winkler
         weight: 0.4
+        transforms: [lowercase, strip]
       - field: zip
-        transforms: [strip]
         scorer: exact
         weight: 0.2
 
-# Blocking reduces comparison space for weighted matchkeys
 blocking:
+  strategy: multi_pass  # static | adaptive | sorted_neighborhood | multi_pass | ann | ann_pairs | canopy
   keys:
     - fields: [zip]
-      transforms: [strip]
     - fields: [last_name]
-      transforms: [lowercase, strip, soundex]
-  max_block_size: 5000
-  skip_oversized: false
-  # strategy: static | adaptive | sorted_neighborhood | multi_pass | ann | canopy
+      transforms: [lowercase, soundex]
 
-# Golden record: how to merge duplicate clusters into a single record
 golden_rules:
   default_strategy: most_complete
   field_rules:
-    email:
-      strategy: majority_vote
-    first_name:
-      strategy: source_priority
-      source_priority: [crm, marketing, web]
+    email: { strategy: majority_vote }
+    first_name: { strategy: source_priority, source_priority: [crm, marketing] }
 
-# Output settings
 output:
   directory: ./output
   format: csv
-  run_name: my_run
 ```
 
-## Available Transforms
-
-Transforms are applied to field values before comparison. They can be chained in order.
-
-| Transform                | Description                            |
-| ------------------------ | -------------------------------------- |
-| `lowercase`              | Convert to lowercase                   |
-| `uppercase`              | Convert to uppercase                   |
-| `strip`                  | Remove leading/trailing whitespace     |
-| `strip_all`              | Remove all whitespace                  |
-| `normalize_whitespace`   | Collapse runs of whitespace to single space |
-| `digits_only`            | Keep only numeric characters           |
-| `alpha_only`             | Keep only alphabetic characters        |
-| `soundex`                | Apply Soundex phonetic encoding        |
-| `metaphone`              | Apply Metaphone phonetic encoding      |
-| `token_sort`             | Sort tokens alphabetically (order-invariant) |
-| `first_token`            | Extract first word                     |
-| `last_token`             | Extract last word                      |
-| `substring:<start>:<end>`| Extract a substring by index           |
-| `qgram:<N>`              | Character n-grams (sorted, top 5)      |
-
-## Available Scorers
-
-Scorers compute similarity between two field values in weighted matchkeys.
-
-| Scorer          | Description                                    |
-| --------------- | ---------------------------------------------- |
-| `exact`         | 1.0 if values are identical, 0.0 otherwise     |
-| `jaro_winkler`  | Jaro-Winkler string similarity (0.0 to 1.0)   |
-| `levenshtein`   | Normalized Levenshtein similarity (0.0 to 1.0) |
-| `token_sort`    | Token sort ratio via RapidFuzz (0.0 to 1.0)   |
-| `soundex_match` | 1.0 if Soundex codes match, 0.0 otherwise      |
-| `embedding`     | Cosine similarity of sentence-transformer embeddings (0.0 to 1.0) |
-
-## Golden Record Strategies
-
-When duplicates are found, GoldenMatch merges each cluster into a single golden record using per-field strategies.
-
-| Strategy          | Description                                           |
-| ----------------- | ----------------------------------------------------- |
-| `most_complete`   | Pick the longest (most complete) non-null value       |
-| `majority_vote`   | Pick the most frequent value across the cluster       |
-| `source_priority` | Pick from a ranked list of source labels              |
-| `most_recent`     | Pick from the row with the latest date                |
-| `first_non_null`  | Pick the first non-null value encountered             |
-
-## CLI Reference
-
-### `goldenmatch dedupe`
-
-Run deduplication on one or more input files.
-
-```
-goldenmatch dedupe FILE [FILE ...] [OPTIONS]
-```
-
-| Flag                 | Description                              |
-| -------------------- | ---------------------------------------- |
-| `--config`, `-c`     | Path to YAML config file (required)      |
-| `--output-golden`    | Output golden records                    |
-| `--output-clusters`  | Output cluster membership                |
-| `--output-dupes`     | Output duplicate records                 |
-| `--output-unique`    | Output unique (non-duplicate) records    |
-| `--output-all`       | Enable all output types                  |
-| `--output-report`    | Print summary report to console          |
-| `--across-files-only`| Only match across different source files |
-| `--output-dir`       | Output directory                         |
-| `--format`, `-f`     | Output format: `csv` or `parquet`        |
-| `--run-name`         | Prefix for output filenames              |
-| `--verbose`, `-v`    | Verbose output                           |
-| `--quiet`, `-q`      | Suppress console output                  |
-
-### `goldenmatch match`
-
-Match a target file against one or more reference files.
-
-```
-goldenmatch match TARGET [OPTIONS]
-```
-
-| Flag                | Description                              |
-| ------------------- | ---------------------------------------- |
-| `--against`, `-a`   | Reference file(s) (required, repeatable) |
-| `--config`, `-c`    | Path to YAML config file (required)      |
-| `--output-matched`  | Output matched records                   |
-| `--output-unmatched`| Output unmatched records                 |
-| `--output-scores`   | Output score details                     |
-| `--output-all`      | Enable all output types                  |
-| `--output-report`   | Print summary report to console          |
-| `--match-mode`      | `best` (default) or `all`               |
-| `--output-dir`      | Output directory                         |
-| `--format`, `-f`    | Output format: `csv` or `parquet`        |
-| `--run-name`        | Prefix for output filenames              |
-| `--verbose`, `-v`   | Verbose output                           |
-| `--quiet`, `-q`     | Suppress console output                  |
-
-### `goldenmatch config`
-
-Manage saved config presets.
-
-```
-goldenmatch config save <name> <config_path>
-goldenmatch config load <name> [--dest <path>]
-goldenmatch config list
-goldenmatch config delete <name>
-goldenmatch config show <name>
-```
-
-### `goldenmatch init`
-
-Launch the interactive config wizard to generate a YAML config file.
-
-```
-goldenmatch init [--output <path>]
-```
-
-## Blocking Strategies
-
-GoldenMatch supports multiple blocking strategies to balance recall and performance:
-
-| Strategy | Description |
-|----------|-------------|
-| `static` | Group by blocking key (default) |
-| `adaptive` | Static + recursive sub-blocking for oversized blocks |
-| `sorted_neighborhood` | Sliding window over sorted records |
-| `multi_pass` | Union of blocks from multiple passes (best for noisy data) |
-| `ann` | Approximate nearest neighbor via FAISS on sentence-transformer embeddings |
-| `canopy` | TF-IDF canopy clustering with loose/tight thresholds |
-
-### Multi-Pass Blocking (Noisy Data)
-
-```yaml
-blocking:
-  strategy: multi_pass
-  passes:
-    - key_fields: [name]
-      transforms: [lowercase, "substring:0:8"]
-    - key_fields: [name]
-      transforms: [lowercase, token_sort, "substring:0:10"]
-    - key_fields: [name]
-      transforms: [lowercase, soundex]
-```
-
-### Embedding-Based Features
-
-Install optional dependencies for semantic matching:
-
-```bash
-pip install goldenmatch[embeddings]
-```
-
-**Embedding scorer** — cosine similarity of sentence-transformer embeddings for semantic matching:
-
-```yaml
-matchkeys:
-  - name: semantic_product
-    type: weighted
-    threshold: 0.75
-    fields:
-      - field: title
-        scorer: embedding
-        model: all-MiniLM-L6-v2
-        weight: 0.6
-      - field: manufacturer
-        scorer: exact
-        weight: 0.4
-```
-
-**ANN blocking** — approximate nearest neighbor blocking for large datasets:
-
-```yaml
-blocking:
-  strategy: ann
-  ann_column: title
-  ann_model: all-MiniLM-L6-v2
-  ann_top_k: 20
-```
-
-## Performance
-
-### 1M Record Benchmark
-
-GoldenMatch processes 1 million records in **~15 seconds** (exact matching, full pipeline including auto-fix, standardization, matching, clustering, and golden record generation):
-
-| Stage | Time | % |
-|-------|------|---|
-| Ingest | 0.30s | 2% |
-| Auto-fix | 2.29s | 15% |
-| Standardize | 2.34s | 15% |
-| Matchkeys | 0.17s | 1% |
-| **Matching** | **0.29s** | **2%** |
-| Clustering | 7.25s | 48% |
-| Golden records | 2.51s | 17% |
-| **Total** | **15.15s** | |
-
-Results: 138,730 duplicate clusters found (175,602 pairs) with **100% precision** and **100% recall** against known ground truth.
-
-### Leipzig Benchmark Results
-
-Evaluated against the standard [University of Leipzig entity resolution benchmark datasets](https://dbs.uni-leipzig.de/research/projects/benchmark-datasets-for-entity-resolution):
-
-| Dataset | Strategy | Precision | Recall | F1 | Time |
-|---------|----------|-----------|--------|-----|------|
-| **DBLP-ACM** (2.6K vs 2.3K) | exact title | 88.5% | 88.3% | 88.4% | 0.1s |
-| **DBLP-ACM** | multi-pass + fuzzy (0.85) | 96.4% | 98.0% | **97.2%** | 2.7s |
-| **DBLP-ACM** | multi-pass + ensemble (0.85) | 94.8% | **99.1%** | 96.9% | 3.1s |
-| **DBLP-Scholar** (2.6K vs 64K) | exact title | 76.7% | 47.8% | 58.9% | 0.3s |
-| **DBLP-Scholar** | multi-pass + fuzzy (0.80) | 67.2% | 84.1% | **74.7%** | 83.9s |
-| **Abt-Buy** (1K vs 1K) | fuzzy name (token sort) | 46.7% | 31.0% | 37.3% | 0.3s |
-| **Abt-Buy** | rec_emb + ann_pairs (0.80) | 35.5% | 59.4% | **44.5%** | 0.1s |
-| **Abt-Buy** | embedding + ANN (0.85) | 45.8% | 40.7% | 43.1% | 6.7s |
-| **Amazon-Google** (1.4K vs 3.2K) | fuzzy title+mfr (0.70) | 32.2% | 26.3% | 29.0% | 0.4s |
-| **Amazon-Google** | rec_emb + ann_pairs (0.80) | 40.2% | 40.9% | **40.5%** | 0.3s |
-| **Amazon-Google** | embedding + ANN (0.80) | 40.2% | 40.9% | 40.5% | 12.3s |
-
-**Key findings:**
-- **DBLP-ACM**: 97.2% F1 with multi-pass blocking — competitive with published state-of-the-art. Ensemble scorer achieves **99.1% recall** (best)
-- **DBLP-Scholar**: Multi-pass blocking improved F1 from 50.1% to **74.7%** (+49% relative gain)
-- **Abt-Buy**: Record embedding + ann_pairs: **44.5% F1 in 0.1s** (was 37.3% with fuzzy-only)
-- **Amazon-Google**: Record embedding + ann_pairs: **40.5% F1 in 0.3s** (was 29.0% with fuzzy-only)
-- `ann_pairs` is 50-100x faster than `ann` by eliminating Union-Find mega-blocks
-
-### LLM Boost (Optional)
-
-For harder datasets, add `--llm-boost` to use an LLM (Claude/GPT-4) to label ~100-500 pairs and train a local classifier. Requires `pip install goldenmatch[llm]` and an API key.
-
-```bash
-goldenmatch dedupe products.csv --llm-boost    # first run: ~$0.30, labels pairs
-goldenmatch dedupe products.csv --llm-boost    # subsequent: $0, uses saved model
-```
-
-**Simulated LLM boost results** (ground truth with 5% noise simulating LLM accuracy):
-
-| Dataset | Without Boost | LLM Boost (fine-tuning, 200 labels) | Improvement | Cost |
-|---------|--------------|--------------------------------------|-------------|------|
-| **DBLP-ACM** | 94.8% | **96.6%** | +1.8pts | ~$0.20 |
-| **Abt-Buy** | 39.6% | **50.5%** | **+10.9pts** | ~$0.20 |
-
-The fine-tuning approach works by using the LLM to label ~200 pairs, then fine-tuning the sentence-transformer embedding model so it learns what "same entity" means for your specific dataset. Training takes 1-3 minutes on CPU. The fine-tuned model is saved locally and reused on subsequent runs at zero cost.
-
-**Abt-Buy: 39.6% to 50.5% F1** — a 27% relative improvement from just 200 LLM-labeled pairs (~$0.20). This is the largest single accuracy gain in the project.
-
-### Available Scorers
+## Scorers
 
 | Scorer | Description | Best For |
 |--------|-------------|----------|
@@ -369,21 +133,123 @@ The fine-tuning approach works by using the LLM to label ~200 pairs, then fine-t
 | `levenshtein` | Normalized Levenshtein | General strings |
 | `token_sort` | Order-invariant token matching | Names, addresses |
 | `soundex_match` | Phonetic match | Names |
-| `ensemble` | max(jaro_winkler, token_sort, soundex) | Names (catches reordering) |
+| `ensemble` | max(jaro_winkler, token_sort, soundex) | Names with reordering |
 | `embedding` | Cosine similarity of sentence embeddings | Semantic matching |
 | `record_embedding` | Embed concatenated fields | Cross-field semantic matching |
 
-### Performance Notes
+## Blocking Strategies
 
-- **Zero-config**: Auto-detects column types, assigns scorers, picks blocking strategy — no YAML needed
-- **Polars**: All data loading and transformation runs on Polars with native expressions for maximum throughput
-- **Exact matching**: Uses Polars self-join (hash-based, O(n)) instead of Python pairwise comparison
-- **Fuzzy matching**: Uses vectorized `rapidfuzz.process.cdist` for NxN score matrices in C
-- **Embedding matching**: Sentence-transformer embeddings with FAISS ANN indexing for semantic similarity
-- **ann_pairs**: Direct-pair scoring from FAISS (no Union-Find), 50-100x faster than block-based ANN
-- **Blocking**: Seven strategies — static, adaptive, sorted neighborhood, multi-pass, ANN, ann_pairs, canopy
-- **Cascading**: Exact matchkeys run first; matched pairs are excluded from expensive fuzzy comparisons
-- **Settings persistence**: Global (`~/.goldenmatch/settings.yaml`) + project (`.goldenmatch.yaml`) with TUI save
+| Strategy | Description |
+|----------|-------------|
+| `static` | Group by blocking key (default) |
+| `adaptive` | Static + recursive sub-blocking for oversized blocks |
+| `sorted_neighborhood` | Sliding window over sorted records |
+| `multi_pass` | Union of blocks from multiple passes (best for noisy data) |
+| `ann` | ANN via FAISS on sentence-transformer embeddings |
+| `ann_pairs` | Direct-pair ANN scoring (50-100x faster than `ann`) |
+| `canopy` | TF-IDF canopy clustering |
+
+## Database Integration
+
+GoldenMatch can sync against live Postgres databases with incremental matching:
+
+```bash
+pip install goldenmatch[postgres]
+
+goldenmatch sync \
+  --table customers \
+  --connection-string "postgresql://user:pass@localhost/mydb" \
+  --config config.yaml
+```
+
+**Features:**
+- **Incremental sync** — only processes records added since last run
+- **Hybrid blocking** — SQL WHERE clauses for exact fields + FAISS ANN for semantic fields, results unioned
+- **Persistent ANN index** — disk cache + DB source of truth, progressive embedding across runs
+- **Golden record versioning** — append-only with `is_current` flag, full audit trail
+- **Cluster management** — persistent clusters with merge, conflict detection, max size safety cap
+
+**Metadata tables** (auto-created):
+
+| Table | Purpose |
+|-------|---------|
+| `gm_state` | Processing state, watermarks |
+| `gm_clusters` | Persistent cluster membership |
+| `gm_golden_records` | Versioned golden records |
+| `gm_embeddings` | Cached embeddings for ANN |
+| `gm_match_log` | Audit trail of all match decisions |
+
+## LLM Boost (Optional)
+
+For harder datasets where zero-shot scoring isn't enough:
+
+```bash
+pip install goldenmatch[llm]
+
+# First run: LLM labels ~300 pairs (~$0.30), fine-tunes embedding model
+goldenmatch dedupe products.csv --llm-boost
+
+# Subsequent runs: uses saved model ($0)
+goldenmatch dedupe products.csv --llm-boost
+```
+
+**Tiered auto-escalation:**
+- **Level 1** — zero-shot (free, instant)
+- **Level 2** — bi-encoder fine-tuning (~$0.20, ~2 min CPU)
+- **Level 3** — Ditto-style cross-encoder with data augmentation (~$0.50, ~5 min CPU)
+
+Best result: **Abt-Buy 59.5% F1** (up from 44.5% zero-shot) with 300 LLM labels and optimal train/score split.
+
+## Benchmarks
+
+### Leipzig Entity Resolution Benchmarks
+
+| Dataset | Best Strategy | F1 | Time |
+|---------|--------------|-----|------|
+| **DBLP-ACM** (2.6K vs 2.3K) | multi-pass + fuzzy | **97.2%** | 2.7s |
+| **DBLP-Scholar** (2.6K vs 64K) | multi-pass + fuzzy | **74.7%** | 83.9s |
+| **Abt-Buy** (1K vs 1K) | LLM boost (optimal) | **59.5%** | 7 min |
+| **Abt-Buy** | rec_emb + ann_pairs | 44.5% | 0.1s |
+| **Amazon-Google** (1.4K vs 3.2K) | rec_emb + ann_pairs | **40.5%** | 0.3s |
+
+### 1M Record Benchmark
+
+1 million records deduplicated in **~15 seconds** on a laptop (exact matching, full pipeline).
+
+## Settings Persistence
+
+GoldenMatch saves preferences across sessions:
+
+- **Global**: `~/.goldenmatch/settings.yaml` — output mode, default model, API keys
+- **Project**: `.goldenmatch.yaml` — column mappings, thresholds, blocking config
+
+Settings tuned in the TUI can be saved to the project file. Next run picks them up automatically.
+
+## CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `goldenmatch dedupe FILE [...]` | Deduplicate one or more files |
+| `goldenmatch match TARGET --against REF` | Match target against reference |
+| `goldenmatch sync --table TABLE --connection-string URL` | Sync against database |
+| `goldenmatch init` | Interactive config wizard |
+| `goldenmatch config save/load/list/delete/show` | Manage config presets |
+| `goldenmatch profile FILE` | Profile data quality |
+| `goldenmatch interactive FILE [...]` | Launch TUI |
+
+## Architecture
+
+```
+goldenmatch/
+├── cli/            # Typer CLI commands (dedupe, match, sync)
+├── config/         # Pydantic schemas, YAML loader, settings persistence
+├── core/           # Pipeline modules (ingest, block, score, cluster, golden)
+├── db/             # Database integration (connector, blocking, sync, reconcile)
+├── tui/            # Textual TUI + MatchEngine
+└── utils/          # Transforms, helpers
+```
+
+**605+ tests** covering all modules. Run with `pytest`.
 
 ## License
 
