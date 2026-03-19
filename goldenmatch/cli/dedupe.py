@@ -87,6 +87,8 @@ def dedupe_cmd(
     run_name: Optional[str] = typer.Option(None, "--run-name", help="Run name for output files"),
     auto_fix: bool = typer.Option(False, "--auto-fix", help="Run auto-fix before matching"),
     auto_block: bool = typer.Option(False, "--auto-block", help="Auto-suggest blocking keys"),
+    chunked: bool = typer.Option(False, "--chunked", help="Large dataset mode — process in chunks for files >1M records"),
+    chunk_size: int = typer.Option(100000, "--chunk-size", help="Records per chunk in chunked mode"),
     llm_boost: bool = typer.Option(False, "--llm-boost", help="Boost accuracy with LLM-labeled training data"),
     llm_retrain: bool = typer.Option(False, "--llm-retrain", help="Force re-labeling (ignore saved model)"),
     llm_provider: Optional[str] = typer.Option(None, "--llm-provider", help="LLM provider: auto, anthropic, or openai"),

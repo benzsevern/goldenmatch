@@ -237,9 +237,17 @@ Best result: **Abt-Buy 59.5% F1** (up from 44.5% zero-shot) with 300 LLM labels 
 
 **Previous best without Vertex AI:** Abt-Buy 59.5% (LLM boost), Amazon-Google 40.5% (rec_emb). Vertex AI's `text-embedding-004` model provides dramatically better embeddings with no local GPU needed.
 
-### 1M Record Benchmark
+### Throughput (Scale Curve)
 
-1 million records deduplicated in **~15 seconds** on a laptop (exact matching, full pipeline).
+Measured on a laptop (17GB RAM) with exact + fuzzy matching, blocking, clustering, and golden record generation:
+
+| Records | Time | Throughput | Pairs Found | Memory |
+|---------|------|------------|-------------|--------|
+| 1,000 | 0.2s | 5,500 rec/s | 210 | 101 MB |
+| 10,000 | 1.4s | 7,300 rec/s | 7,000 | 123 MB |
+| 100,000 | 12s | **8,200 rec/s** | 571,000 | 544 MB |
+
+For datasets over 1M records, use `goldenmatch sync` (database mode) with incremental matching and persistent ANN indexing. See [Large Dataset Mode](#large-dataset-mode).
 
 ### How GoldenMatch Compares
 
@@ -255,6 +263,28 @@ Best result: **Abt-Buy 59.5% F1** (up from 44.5% zero-shot) with 300 LLM labels 
 | GPU required | No | No | No | Spark | Yes |
 
 GoldenMatch's sweet spot is **ease of use + competitive accuracy**. Ditto has higher F1 but requires 1000+ manual labels and a GPU. Splink scales to billions on Spark but needs label training. GoldenMatch auto-configures from your data and reaches 85%+ F1 with zero labels.
+
+## Interactive TUI
+
+## Large Dataset Mode
+
+For datasets over 1M records, use database sync mode. GoldenMatch processes records in chunks, maintains a persistent ANN index, and matches incrementally:
+
+```bash
+# Load into Postgres, then sync
+goldenmatch sync --table customers --connection-string "$DATABASE_URL" --config config.yaml
+
+# Watch for new records continuously
+goldenmatch watch --table customers --connection-string "$DATABASE_URL" --interval 30
+```
+
+**How it works:**
+- Reads in configurable chunks (default 10K) — never loads entire table into memory
+- Hybrid blocking: SQL WHERE for exact fields + persistent FAISS ANN for semantic fields
+- Progressive embedding: computes 100K embeddings per run, ANN improves over time
+- Persistent clusters with golden record versioning
+
+**Scale:** Tested to 10M+ records in Postgres. For 100M+, use larger chunk sizes and dedicated Postgres infrastructure.
 
 ## Interactive TUI
 
