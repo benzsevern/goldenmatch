@@ -355,16 +355,28 @@ class ConfigTab(Static):
                 with Horizontal():
                     yield Switch(value=False, id="sw-across-files")
                     yield Label("Match across files only")
+                with Horizontal():
+                    yield Switch(value=False, id="sw-anomalies")
+                    yield Label("Anomaly detection")
+                with Horizontal():
+                    yield Switch(value=False, id="sw-preview")
+                    yield Label("Merge preview (show changes before writing)")
 
             # ── Report options ──
             with Vertical(classes="config-section"):
-                yield Label("Reports", classes="section-title")
+                yield Label("Reports & Exports", classes="section-title")
                 with Horizontal():
                     yield Switch(value=False, id="sw-html-report")
                     yield Label("HTML Report")
                 with Horizontal():
                     yield Switch(value=False, id="sw-dashboard")
                     yield Label("Before/After Dashboard")
+                with Horizontal():
+                    yield Switch(value=False, id="sw-diff")
+                    yield Label("CSV Diff (before/after changes)")
+                with Horizontal():
+                    yield Switch(value=False, id="sw-diff-html")
+                    yield Label("HTML Diff (with highlighting)")
                 with Horizontal():
                     yield Switch(value=False, id="sw-graph")
                     yield Label("Cluster Graph")

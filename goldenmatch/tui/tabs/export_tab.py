@@ -96,6 +96,15 @@ class ExportTab(Static):
             with Horizontal(classes="switch-row"):
                 yield Switch(value=False, id="sw-graph-export")
                 yield Static("Cluster Graph", classes="switch-label")
+            with Horizontal(classes="switch-row"):
+                yield Switch(value=False, id="sw-diff-export")
+                yield Static("CSV Diff", classes="switch-label")
+            with Horizontal(classes="switch-row"):
+                yield Switch(value=False, id="sw-diff-html-export")
+                yield Static("HTML Diff (highlighted)", classes="switch-label")
+            with Horizontal(classes="switch-row"):
+                yield Switch(value=False, id="sw-anomalies-export")
+                yield Static("Anomaly Detection", classes="switch-label")
 
             yield Static("")
             yield Button("Run Full Job", id="btn-run-full", variant="warning")
