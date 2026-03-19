@@ -80,6 +80,7 @@ def dedupe_cmd(
     output_all: bool = typer.Option(False, "--output-all", help="Output all result types"),
     output_report: bool = typer.Option(False, "--output-report", help="Generate summary report"),
     html_report: bool = typer.Option(False, "--html-report", help="Generate standalone HTML report"),
+    dashboard: bool = typer.Option(False, "--dashboard", help="Generate before/after data quality dashboard"),
     across_files_only: bool = typer.Option(False, "--across-files-only", help="Only match across different sources"),
     output_dir: Optional[str] = typer.Option(None, "--output-dir", help="Output directory"),
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format (csv, parquet)"),

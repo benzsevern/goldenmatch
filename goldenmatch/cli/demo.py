@@ -39,6 +39,7 @@ DEMO_DATA = [
 def demo_cmd(
     tui: bool = typer.Option(False, "--tui", help="Launch interactive TUI with demo data"),
     report: bool = typer.Option(False, "--report", help="Generate HTML report"),
+    dashboard: bool = typer.Option(False, "--dashboard", help="Generate before/after dashboard"),
     graph: bool = typer.Option(False, "--graph", help="Generate cluster graph"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress animated output"),
 ) -> None:
@@ -186,6 +187,16 @@ def demo_cmd(
             title="GoldenMatch Demo Report",
         )
         console.print(f"\n[#d4a017]Report saved:[/] {report_path}")
+
+    if dashboard:
+        from goldenmatch.core.dashboard import generate_dashboard
+        dash_path = generate_dashboard(
+            engine.data, result.clusters, result.scored_pairs,
+            golden_df=result.golden,
+            output_path="goldenmatch_demo_dashboard.html",
+            title="GoldenMatch Demo",
+        )
+        console.print(f"[#d4a017]Dashboard saved:[/] {dash_path}")
 
     if graph:
         from goldenmatch.core.graph import generate_cluster_graph
