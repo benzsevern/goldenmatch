@@ -92,6 +92,8 @@ def dedupe_cmd(
     diff: bool = typer.Option(False, "--diff", help="Generate before/after CSV diff"),
     diff_html: bool = typer.Option(False, "--diff-html", help="Generate before/after HTML diff with highlighting"),
     merge_preview: bool = typer.Option(False, "--preview", help="Show merge preview (what will change) without writing"),
+    anomalies: bool = typer.Option(False, "--anomalies", help="Detect suspicious/fake records"),
+    anomaly_sensitivity: str = typer.Option("medium", "--anomaly-sensitivity", help="low, medium, or high"),
     llm_boost: bool = typer.Option(False, "--llm-boost", help="Boost accuracy with LLM-labeled training data"),
     llm_retrain: bool = typer.Option(False, "--llm-retrain", help="Force re-labeling (ignore saved model)"),
     llm_provider: Optional[str] = typer.Option(None, "--llm-provider", help="LLM provider: auto, anthropic, or openai"),
