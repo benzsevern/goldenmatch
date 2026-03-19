@@ -23,13 +23,23 @@ goldenmatch demo
 
 ## Features
 
-- **Zero-config** — `goldenmatch dedupe file.csv` auto-detects columns, picks scorers, shows auto-config summary
-- **Gold-themed TUI** — professional interactive interface with keyboard shortcuts, live threshold tuning, split-view results
+- **Zero-config** — `goldenmatch dedupe file.csv` auto-detects columns, picks scorers, runs automatically
+- **Gold-themed TUI** — interactive interface with keyboard shortcuts, live threshold tuning, setup wizard
 - **8 scoring methods** — exact, Jaro-Winkler, Levenshtein, token sort, soundex, ensemble, embedding, record embedding
 - **7 blocking strategies** — static, adaptive, sorted neighborhood, multi-pass, ANN, ann_pairs, canopy
-- **Database sync** — incremental matching against Postgres with persistent ANN index and golden record versioning
-- **LLM boost** — optional Claude/GPT-4 labeling + sentence-transformer fine-tuning for harder datasets
+- **Vertex AI embeddings** — 85%+ F1 accuracy with no GPU needed (Google Cloud managed API)
+- **Database sync** — incremental Postgres matching with persistent ANN index and golden record versioning
+- **REST API + MCP Server** — real-time matching via HTTP or Claude Desktop integration
+- **Anomaly detection** — flag fake emails, placeholder data, suspicious records
+- **Merge preview + undo** — see what will change before writing, rollback any run
+- **Before/after dashboard** — shareable HTML showing data transformation with charts
+- **Schema-free matching** — auto-maps columns between different schemas (full_name -> first_name + last_name)
+- **Cloud storage** — read directly from S3, GCS, or Azure Blob
+- **API connector** — pull from Salesforce, HubSpot, or any REST/GraphQL API
+- **Scheduled runs** — cron-like scheduling with run history
+- **LLM boost** — optional Claude/GPT-4 labeling + fine-tuning for harder datasets
 - **Golden records** — 5 merge strategies (most_complete, majority_vote, source_priority, most_recent, first_non_null)
+- **Large dataset mode** — chunked processing for files that don't fit in memory
 
 ## Installation
 
@@ -321,27 +331,52 @@ Settings tuned in the TUI can be saved to the project file. Next run picks them 
 
 | Command | Description |
 |---------|-------------|
+| `goldenmatch demo` | Built-in demo with sample data |
+| `goldenmatch setup` | Interactive setup wizard (GPU, API keys, database) |
 | `goldenmatch dedupe FILE [...]` | Deduplicate one or more files |
 | `goldenmatch match TARGET --against REF` | Match target against reference |
-| `goldenmatch sync --table TABLE --connection-string URL` | Sync against database |
+| `goldenmatch sync --table TABLE` | Sync against Postgres database |
+| `goldenmatch watch --table TABLE` | Live stream mode (continuous polling) |
+| `goldenmatch schedule --every 1h FILE` | Run deduplication on a schedule |
+| `goldenmatch serve FILE [...]` | Start REST API server |
+| `goldenmatch mcp-serve FILE [...]` | Start MCP server (Claude Desktop) |
+| `goldenmatch rollback RUN_ID` | Undo a previous merge run |
+| `goldenmatch runs` | List previous runs for rollback |
 | `goldenmatch init` | Interactive config wizard |
-| `goldenmatch config save/load/list/delete/show` | Manage config presets |
-| `goldenmatch profile FILE` | Profile data quality |
 | `goldenmatch interactive FILE [...]` | Launch TUI |
+| `goldenmatch profile FILE` | Profile data quality |
+| `goldenmatch config save/load/list/show` | Manage config presets |
+
+**Key dedupe flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--anomalies` | Detect fake emails, placeholder data, suspicious records |
+| `--preview` | Show what will change before writing (merge preview) |
+| `--diff` / `--diff-html` | Generate before/after change report |
+| `--dashboard` | Before/after data quality dashboard (HTML) |
+| `--html-report` | Detailed match report with charts |
+| `--chunked` | Large dataset mode (process in chunks) |
+| `--llm-boost` | Improve accuracy with LLM-labeled training |
+| `s3://` / `gs://` / `az://` | Read directly from cloud storage |
 
 ## Architecture
 
 ```
 goldenmatch/
-├── cli/            # Typer CLI commands (dedupe, match, sync)
-├── config/         # Pydantic schemas, YAML loader, settings persistence
-├── core/           # Pipeline modules (ingest, block, score, cluster, golden)
-├── db/             # Database integration (connector, blocking, sync, reconcile)
-├── tui/            # Textual TUI + MatchEngine
+├── cli/            # 16 CLI commands (Typer)
+├── config/         # Pydantic schemas, YAML loader, settings
+├── core/           # Pipeline: ingest, block, score, cluster, golden, explainer,
+│                   #   report, dashboard, graph, anomaly, diff, rollback,
+│                   #   schema_match, chunked, cloud_ingest, api_connector, scheduler
+├── db/             # Postgres: connector, sync, reconcile, clusters, ANN index
+├── api/            # REST API server
+├── mcp/            # MCP server for Claude Desktop
+├── tui/            # Gold-themed Textual TUI + setup wizard
 └── utils/          # Transforms, helpers
 ```
 
-**605+ tests** covering all modules. Run with `pytest`.
+**Run tests:** `pytest` (600+ tests)
 
 ## License
 
