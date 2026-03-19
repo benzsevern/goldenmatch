@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 class GPUMode(Enum):
     LOCAL = "local"        # Local GPU (CUDA/MPS available)
     REMOTE = "remote"      # Remote endpoint configured
+    VERTEX = "vertex"      # Google Vertex AI managed embeddings
     CPU_SAFE = "cpu_safe"  # No GPU, no endpoint — use lightweight scorers only
 
 
@@ -38,12 +39,13 @@ def detect_gpu_mode() -> GPUMode:
     Priority:
     1. GOLDENMATCH_GPU_MODE env var (explicit override)
     2. GOLDENMATCH_GPU_ENDPOINT set → REMOTE
-    3. CUDA available → LOCAL
-    4. MPS available (Apple Silicon) → LOCAL
-    5. Fallback → CPU_SAFE
+    3. GOOGLE_CLOUD_PROJECT set → VERTEX
+    4. CUDA available → LOCAL
+    5. MPS available (Apple Silicon) → LOCAL
+    6. Fallback → CPU_SAFE
     """
     explicit = os.environ.get("GOLDENMATCH_GPU_MODE", "").lower()
-    if explicit in ("local", "remote", "cpu_safe"):
+    if explicit in ("local", "remote", "vertex", "cpu_safe"):
         mode = GPUMode(explicit)
         logger.info("GPU mode: %s (explicit)", mode.value)
         return mode
@@ -51,6 +53,12 @@ def detect_gpu_mode() -> GPUMode:
     if os.environ.get("GOLDENMATCH_GPU_ENDPOINT"):
         logger.info("GPU mode: remote (endpoint configured)")
         return GPUMode.REMOTE
+
+    if os.environ.get("GOOGLE_CLOUD_PROJECT"):
+        from goldenmatch.core.vertex_embedder import is_vertex_available
+        if is_vertex_available():
+            logger.info("GPU mode: vertex (Google Cloud credentials found)")
+            return GPUMode.VERTEX
 
     if _has_cuda():
         logger.info("GPU mode: local (CUDA detected)")
@@ -181,6 +189,13 @@ def get_smart_embedder(model_name: str = "all-MiniLM-L6-v2"):
         logger.info("Using remote embedder: %s", embedder.endpoint)
         return embedder
 
+    if mode == GPUMode.VERTEX:
+        from goldenmatch.core.vertex_embedder import VertexEmbedder
+        embedder = VertexEmbedder()
+        _smart_embedders[cache_key] = embedder
+        logger.info("Using Vertex AI embedder: %s/%s", embedder.project, embedder.model)
+        return embedder
+
     if mode == GPUMode.LOCAL:
         from goldenmatch.core.embedder import Embedder
         embedder = Embedder(model_name)
@@ -203,7 +218,7 @@ def get_smart_embedder(model_name: str = "all-MiniLM-L6-v2"):
 def is_embedding_available() -> bool:
     """Check if embedding features are available without loading models."""
     mode = detect_gpu_mode()
-    if mode == GPUMode.REMOTE:
+    if mode in (GPUMode.REMOTE, GPUMode.VERTEX):
         return True
     if mode == GPUMode.LOCAL:
         try:
@@ -225,6 +240,10 @@ def get_gpu_status() -> dict:
 
     if mode == GPUMode.REMOTE:
         status["endpoint"] = os.environ.get("GOLDENMATCH_GPU_ENDPOINT", "")
+
+    if mode == GPUMode.VERTEX:
+        status["project"] = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+        status["model"] = os.environ.get("VERTEX_EMBEDDING_MODEL", "text-embedding-004")
 
     if mode == GPUMode.LOCAL:
         status["cuda"] = _has_cuda()
