@@ -16,7 +16,7 @@ from goldenmatch.core.validate import ValidationRule, validate_dataframe
 from goldenmatch.core.matchkey import compute_matchkeys
 from goldenmatch.core.block_analyzer import analyze_blocking
 from goldenmatch.core.blocker import build_blocks
-from goldenmatch.core.scorer import find_exact_matches, find_fuzzy_matches
+from goldenmatch.core.scorer import find_exact_matches, find_fuzzy_matches, score_blocks_parallel, rerank_top_pairs
 from goldenmatch.core.cluster import build_clusters
 from goldenmatch.core.golden import build_golden_record
 from goldenmatch.output.writer import write_output
@@ -218,30 +218,24 @@ def run_dedupe(
 
     logger.info("Exact matching found %d pairs", len(all_pairs))
 
-    # Phase 2: Fuzzy matchkeys (slow — skip already-matched pairs)
+    # Phase 2: Fuzzy matchkeys (parallel block scoring)
     for mk in matchkeys:
         if mk.type == "weighted":
             if config.blocking is None:
                 continue
             blocks = build_blocks(combined_lf, config.blocking)
-            for block in blocks:
-                if across_files_only:
-                    # Skip single-source blocks
-                    block_df = block.df.collect()
-                    sources_in_block = block_df["__source__"].unique().to_list()
-                    if len(sources_in_block) < 2:
-                        continue
-                    pairs = find_fuzzy_matches(block_df, mk, exclude_pairs=matched_pairs, pre_scored_pairs=block.pre_scored_pairs)
-                    pairs = [
-                        (a, b, s) for a, b, s in pairs
-                        if source_lookup.get(a) != source_lookup.get(b)
-                    ]
-                else:
-                    block_df = block.df.collect()
-                    pairs = find_fuzzy_matches(block_df, mk, exclude_pairs=matched_pairs, pre_scored_pairs=block.pre_scored_pairs)
-                all_pairs.extend(pairs)
-                for a, b, s in pairs:
-                    matched_pairs.add((min(a, b), max(a, b)))
+            pairs = score_blocks_parallel(
+                blocks, mk, matched_pairs,
+                across_files_only=across_files_only,
+                source_lookup=source_lookup if across_files_only else None,
+            )
+            all_pairs.extend(pairs)
+
+    # ── Step 3.3: CROSS-ENCODER RERANKING (optional) ──
+    for mk in matchkeys:
+        if mk.type == "weighted" and mk.rerank:
+            all_pairs = rerank_top_pairs(all_pairs, collected_df, mk)
+            break  # rerank once with the first rerank-enabled matchkey
 
     # ── Step 3.5: LLM BOOST (optional) ──
     if config.llm_boost and all_pairs:
@@ -485,22 +479,23 @@ def run_match(
             for a, b, s in pairs:
                 matched_pairs.add((min(a, b), max(a, b)))
 
-    # Phase 2: Fuzzy matchkeys (slow — skip already-matched pairs)
+    # Phase 2: Fuzzy matchkeys (parallel block scoring)
     for mk in matchkeys:
         if mk.type == "weighted":
             if config.blocking is None:
                 continue
             blocks = build_blocks(combined_lf, config.blocking)
-            for block in blocks:
-                block_df = block.df.collect()
-                pairs = find_fuzzy_matches(block_df, mk, exclude_pairs=matched_pairs, pre_scored_pairs=block.pre_scored_pairs)
-                pairs = [
-                    (a, b, s) for a, b, s in pairs
-                    if (a in target_ids) != (b in target_ids)
-                ]
-                all_pairs.extend(pairs)
-                for a, b, s in pairs:
-                    matched_pairs.add((min(a, b), max(a, b)))
+            pairs = score_blocks_parallel(
+                blocks, mk, matched_pairs,
+                target_ids=target_ids,
+            )
+            all_pairs.extend(pairs)
+
+    # ── Step 4.5: CROSS-ENCODER RERANKING (optional) ──
+    for mk in matchkeys:
+        if mk.type == "weighted" and mk.rerank:
+            all_pairs = rerank_top_pairs(all_pairs, combined_df, mk)
+            break
 
     # ── Step 5: Normalize pairs so target ID is always first ──
     normalized: list[tuple[int, int, float]] = []

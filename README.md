@@ -7,7 +7,7 @@ Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode
 [![PyPI](https://img.shields.io/pypi/v/goldenmatch?color=d4a017)](https://pypi.org/project/goldenmatch/)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-605%2B%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-688%20passing-brightgreen)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/benzsevern/goldenmatch/blob/main/scripts/gpu_colab_notebook.ipynb)
 
 ### See it in action
@@ -31,7 +31,10 @@ goldenmatch demo
 - **Database sync** — incremental Postgres matching with persistent ANN index and golden record versioning
 - **REST API + MCP Server** — real-time matching via HTTP or Claude Desktop integration
 - **Anomaly detection** — flag fake emails, placeholder data, suspicious records
-- **Merge preview + undo** — see what will change before writing, rollback any run
+- **Merge preview + undo** — see what will change before writing, rollback any run or unmerge individual records
+- **Active learning boost** — label 10 borderline pairs in the TUI, instantly retrain a classifier for 99% accuracy
+- **Cluster confidence scoring** — weakly-connected clusters flagged with bottleneck pair identification
+- **Single-record matching** — `match_one` primitive for streaming: embed, query ANN, score, return matches
 - **Before/after dashboard** — shareable HTML showing data transformation with charts
 - **Schema-free matching** — auto-maps columns between different schemas (full_name -> first_name + last_name)
 - **Cloud storage** — read directly from S3, GCS, or Azure Blob
@@ -39,6 +42,10 @@ goldenmatch demo
 - **Scheduled runs** — cron-like scheduling with run history
 - **LLM boost** — optional Claude/GPT-4 labeling + fine-tuning for harder datasets
 - **Golden records** — 5 merge strategies (most_complete, majority_vote, source_priority, most_recent, first_non_null)
+- **Parallel fuzzy scoring** — blocks scored concurrently via thread pool with intra-field early termination
+- **Cross-encoder reranking** — re-score borderline pairs with a pre-trained cross-encoder for higher precision
+- **Auto-select blocking** — histogram analysis picks the best blocking key automatically
+- **Dynamic block splitting** — oversized blocks auto-split by highest-cardinality column (zero config)
 - **Large dataset mode** — chunked processing for files that don't fit in memory
 
 ## Installation
@@ -103,6 +110,7 @@ Files/DB → Ingest → Standardize → Block → Score → Cluster → Golden R
                               SQL blocking   8 scorers
                               ANN blocking   ensemble
                               7 strategies   embeddings
+                                             parallel blocks
 ```
 
 **Pipeline:**
@@ -127,6 +135,8 @@ matchkeys:
   - name: fuzzy_name_zip
     type: weighted
     threshold: 0.85
+    rerank: true             # re-score borderline pairs with cross-encoder
+    rerank_band: 0.1         # pairs within threshold +/- 0.1 get reranked
     fields:
       - field: first_name
         scorer: jaro_winkler
@@ -140,8 +150,18 @@ matchkeys:
         scorer: exact
         weight: 0.2
 
+  - name: semantic
+    type: weighted
+    threshold: 0.80
+    fields:
+      - columns: [title, authors, venue]
+        scorer: record_embedding
+        weight: 1.0
+        column_weights: {title: 2.0, authors: 1.0, venue: 0.5}  # bias embedding toward title
+
 blocking:
-  strategy: multi_pass  # static | adaptive | sorted_neighborhood | multi_pass | ann | ann_pairs | canopy
+  strategy: adaptive         # static | adaptive | sorted_neighborhood | multi_pass | ann | ann_pairs | canopy
+  auto_select: true          # auto-pick best key by histogram analysis
   keys:
     - fields: [zip]
     - fields: [last_name]
@@ -261,6 +281,8 @@ Measured on a laptop (17GB RAM) with exact + fuzzy matching, blocking, clusterin
 | 10,000 | 1.4s | 7,300 rec/s | 7,000 | 123 MB |
 | 100,000 | 12s | **8,200 rec/s** | 571,000 | 544 MB |
 
+**Fuzzy matching speedup:** Parallel block scoring + intra-field early termination reduced 100K fuzzy matching from ~100s to **~39s** (2.5x) through the pipeline. The 1M exact-only benchmark runs in **7.8s**.
+
 For datasets over 1M records, use `goldenmatch sync` (database mode) with incremental matching and persistent ANN indexing. See [Large Dataset Mode](#large-dataset-mode).
 
 ### How GoldenMatch Compares
@@ -345,6 +367,7 @@ Settings tuned in the TUI can be saved to the project file. Next run picks them 
 | `goldenmatch serve FILE [...]` | Start REST API server |
 | `goldenmatch mcp-serve FILE [...]` | Start MCP server (Claude Desktop) |
 | `goldenmatch rollback RUN_ID` | Undo a previous merge run |
+| `goldenmatch unmerge RECORD_ID` | Remove a record from its cluster |
 | `goldenmatch runs` | List previous runs for rollback |
 | `goldenmatch init` | Interactive config wizard |
 | `goldenmatch interactive FILE [...]` | Launch TUI |
@@ -380,7 +403,7 @@ goldenmatch/
 └── utils/          # Transforms, helpers
 ```
 
-**Run tests:** `pytest` (600+ tests)
+**Run tests:** `pytest` (688 tests)
 
 ## License
 

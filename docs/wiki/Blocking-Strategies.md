@@ -20,14 +20,14 @@ Best for: clean data with reliable exact-match fields.
 
 ### Adaptive
 
-Static blocking with recursive sub-blocking for oversized groups.
+Static blocking with recursive sub-blocking for oversized groups. When `sub_block_keys` are configured, uses them for recursive splitting (up to depth 3). When not configured, **auto-splits by the highest-cardinality column** in the block -- zero config needed.
 
 ```yaml
 blocking:
   strategy: adaptive
   keys:
     - fields: [zip]
-  sub_block_keys:
+  sub_block_keys:                    # optional -- auto-splits if omitted
     - fields: [last_name]
       transforms: [soundex]
   max_block_size: 500
@@ -110,6 +110,24 @@ blocking:
 ```
 
 Best for: text-heavy data without embedding dependencies.
+
+## Auto-select Best Key
+
+When multiple blocking keys are configured, `auto_select: true` runs histogram analysis on each key and picks the one with the smallest maximum block size (while maintaining >= 50% record coverage):
+
+```yaml
+blocking:
+  strategy: static
+  auto_select: true
+  keys:
+    - fields: [zip]
+    - fields: [last_name]
+      transforms: [soundex]
+    - fields: [zip, last_name]
+      transforms: [strip, soundex]
+```
+
+This eliminates guesswork -- GoldenMatch evaluates each key's group-size distribution and picks the one that minimizes worst-case block size.
 
 ## Choosing a Strategy
 

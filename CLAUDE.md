@@ -11,7 +11,7 @@
 
 ## Testing
 - `pytest --tb=short` from project root — all tests must pass after every change
-- 600+ tests, run in ~35s
+- 688 tests, run in ~35s
 - Fixtures in `tests/conftest.py`: `sample_csv`, `sample_csv_b`, `sample_parquet`
 - TUI tests use `pytest-asyncio` with `app.run_test()` pilot
 - Benchmark scripts in `tests/bench_1m.py`, `tests/analyze_results.py` (not part of test suite)
@@ -24,7 +24,7 @@
 - Pipeline: ingest → column_map → auto_fix → validate → standardize → matchkeys → block → score → cluster → golden → output
 - `goldenmatch/core/` — pipeline modules (no Textual dependency)
 - `goldenmatch/tui/` — Textual TUI + MatchEngine (engine.py has no Textual dependency)
-- `goldenmatch/cli/` — Typer CLI commands (16 commands)
+- `goldenmatch/cli/` — Typer CLI commands (17 commands, including `unmerge`)
 - `goldenmatch/db/` — Postgres integration (connector, sync, reconcile, clusters, ANN index)
 - `goldenmatch/api/` — REST API server (`goldenmatch serve`)
 - `goldenmatch/mcp/` — MCP server for Claude Desktop (`goldenmatch mcp-serve`)
@@ -35,11 +35,22 @@
 ## Performance
 - Exact matching uses Polars self-join (not Python group_by + combinations)
 - Fuzzy matching uses `rapidfuzz.process.cdist` for vectorized NxN scoring
+- Fuzzy blocks scored in parallel via `ThreadPoolExecutor` (`score_blocks_parallel` in scorer.py)
+  - rapidfuzz.cdist releases the GIL so threads give real parallelism
+  - Blocks are independent — frozen `exclude_pairs` snapshot avoids races
+  - For <=2 blocks, skips thread overhead and runs sequentially
+  - All call sites (pipeline.py, engine.py, chunked.py) use the shared helper
+- Intra-field early termination in `find_fuzzy_matches`: after each expensive field, checks if any pair can still reach threshold even with perfect remaining scores; breaks early if not
+- Cross-encoder reranking (`rerank: true` on weighted matchkey): re-scores borderline pairs (threshold +/- band) with a pre-trained cross-encoder for improved precision, no training needed
+- Histogram-based auto-select (`auto_select: true` on blocking): evaluates all configured keys, picks the one with smallest max_block_size and >= 50% coverage
+- Dynamic block splitting: adaptive strategy auto-splits oversized blocks by highest-cardinality column when no sub_block_keys configured; picks column with most useful groups (>= 2 records), not just max cardinality
+- Multi-field embedding supports `column_weights` — high-weight fields get text repeated in concatenation, biasing embeddings toward important fields
 - Standardizers have native Polars fast path (`_NATIVE_STANDARDIZERS` in standardize.py)
 - Matchkey transforms have native Polars fast path (`_try_native_chain` in matchkey.py)
 - Clustering uses iterative Union-Find (not recursive) with lazy pair_scores
 - Blocking key choice dominates fuzzy performance — coarse keys create huge blocks
-- 1M exact dedupe: ~12s. 100K fuzzy (name+zip): ~100s
+- 1M exact dedupe: ~7.8s. 100K fuzzy (name+zip): ~39s via pipeline (was ~100s before parallel + early termination)
+- Benchmark note: `analyze_fuzzy.py` calls `find_fuzzy_matches` directly per block (sequential), not `score_blocks_parallel` — times vary 38-55s depending on block size sampling; parallel speedup only visible through `run_dedupe`/CLI
 - Vertex AI text-embedding-004 is the accuracy winner — 84.8% Abt-Buy, 98.0% DBLP-ACM zero-shot
 - Multi-field embedding helps structured data (DBLP-ACM +0.6pts) but hurts product data (Abt-Buy -2.4pts)
 - Hybrid scoring (embedding + fuzzy) generally hurts — dilutes embedding signal on semantic tasks
@@ -52,7 +63,15 @@
 - `GoldenMatchConfig.get_matchkeys()` returns matchkeys from either top-level or match_settings
 - Matchkey type field: use `mk.type` (not `mk.comparison`) after validation
 - Scorer returns `list[tuple[int, int, float]]` — (row_id_a, row_id_b, score)
-- `build_clusters` returns `dict[int, dict]` with keys: members, size, oversized, pair_scores
+- `build_clusters` returns `dict[int, dict]` with keys: members, size, oversized, pair_scores, confidence, bottleneck_pair
+- `confidence` = 0.4*min_edge + 0.3*avg_edge + 0.3*connectivity; `bottleneck_pair` = weakest link (id_a, id_b)
+- `unmerge_record(record_id, clusters)` removes a record from its cluster, re-clusters remaining via stored pair_scores
+- `unmerge_cluster(cluster_id, clusters)` shatters a cluster into singletons
+- TUI has 6 tabs: Data, Config, Matches, Golden, Boost, Export (key 1-6)
+- Boost tab: active learning with y/n/s keyboard labeling, trains LogisticRegression on labeled pairs
+- `match_one(record, df, mk)` in `core/match_one.py` — single-record matching primitive for streaming
+- `add_to_cluster(record_id, matches, clusters)` — incremental cluster update (join or merge)
+- `ANNBlocker.add_to_index(embedding)` / `ANNBlocker.query_one(embedding)` — incremental FAISS ops
 
 ## Gotchas
 - .docx files can't be read by Read tool — use `python-docx` or zipfile+XML

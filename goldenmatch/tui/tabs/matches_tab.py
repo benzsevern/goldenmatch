@@ -49,7 +49,7 @@ class MatchesTab(Static):
 
     def on_mount(self) -> None:
         cluster_table = self.query_one("#cluster-table", DataTable)
-        cluster_table.add_columns("Cluster ID", "Size", "Top Score")
+        cluster_table.add_columns("Cluster ID", "Size", "Top Score", "Confidence")
         cluster_table.display = False
         cluster_table.cursor_type = "row"
 
@@ -104,7 +104,15 @@ class MatchesTab(Static):
                 score_str = f"[yellow]{score_str}[/yellow]"
             else:
                 score_str = f"[red]{score_str}[/red]"
-            cluster_table.add_row(str(cid), str(cinfo["size"]), score_str)
+            conf = cinfo.get("confidence", 0.0)
+            conf_str = f"{conf:.2f}"
+            if conf >= 0.8:
+                conf_str = f"[green]{conf_str}[/green]"
+            elif conf >= 0.5:
+                conf_str = f"[yellow]{conf_str}[/yellow]"
+            else:
+                conf_str = f"[red]{conf_str}[/red]"
+            cluster_table.add_row(str(cid), str(cinfo["size"]), score_str, conf_str)
 
         # Clear detail
         detail_table = self.query_one("#detail-table", DataTable)

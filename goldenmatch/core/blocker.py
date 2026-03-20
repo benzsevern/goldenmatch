@@ -174,6 +174,81 @@ def _sub_block(
     return results
 
 
+def _auto_split_block(
+    block_df: pl.DataFrame,
+    max_block_size: int,
+    parent_key: str,
+) -> list[BlockResult]:
+    """Auto-split an oversized block using the highest-cardinality column.
+
+    When no sub_block_keys are configured, this provides a zero-config fallback
+    that splits by the column with the most unique values.
+    """
+    # Find non-internal columns
+    candidates = [c for c in block_df.columns if not c.startswith("__")]
+    if not candidates:
+        logger.warning(
+            "Auto-split of %r: no non-internal columns available. Processing as-is.",
+            parent_key,
+        )
+        return [BlockResult(block_key=parent_key, df=block_df.lazy(), strategy="adaptive", depth=1, parent_key=parent_key)]
+
+    # Pick column whose cardinality best splits blocks near max_block_size.
+    # Ideal: each group has ~max_block_size records.
+    # Score = number of groups with >= 2 records (useful groups).
+    n = len(block_df)
+    best_col = candidates[0]
+    best_useful_groups = 0
+    best_nunique = 0
+
+    for col in candidates:
+        nunique = block_df[col].n_unique()
+        # Estimate: if we split by this column, avg group size = n / nunique
+        avg_group = n / nunique if nunique > 0 else n
+        # Count groups that will have >= 2 records (useful for matching)
+        useful_groups = block_df.group_by(pl.col(col).cast(pl.Utf8)).agg(
+            pl.len().alias("cnt")
+        ).filter(pl.col("cnt") >= 2).height
+
+        if useful_groups > best_useful_groups or (
+            useful_groups == best_useful_groups and avg_group <= max_block_size and nunique > best_nunique
+        ):
+            best_useful_groups = useful_groups
+            best_nunique = nunique
+            best_col = col
+
+    split_expr = pl.col(best_col).cast(pl.Utf8).alias("__auto_split__")
+
+    df_with_key = block_df.with_columns(split_expr)
+    groups = df_with_key.group_by("__auto_split__")
+
+    results: list[BlockResult] = []
+    for key, group_df in groups:
+        key_str = key[0]
+        if key_str is None:
+            continue
+        if len(group_df) < 2:
+            continue
+        if len(group_df) > max_block_size:
+            logger.warning(
+                "Auto-split sub-block %r of %r has %d records (still oversized). Processing anyway.",
+                key_str, parent_key, len(group_df),
+            )
+        results.append(BlockResult(
+            block_key=f"{parent_key}||{key_str}",
+            df=group_df.drop("__auto_split__").lazy(),
+            strategy="adaptive",
+            depth=1,
+            parent_key=parent_key,
+        ))
+
+    logger.info(
+        "Auto-split %r (%d records) into %d sub-blocks using column %r (cardinality=%d)",
+        parent_key, len(block_df), len(results), best_col, best_nunique,
+    )
+    return results if results else [BlockResult(block_key=parent_key, df=block_df.lazy(), strategy="adaptive", depth=1, parent_key=parent_key)]
+
+
 def _build_sorted_neighborhood_blocks(
     lf: pl.LazyFrame, config: BlockingConfig,
 ) -> list[BlockResult]:
@@ -382,6 +457,63 @@ def _build_canopy_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[Block
     return results
 
 
+def select_best_blocking_key(
+    lf: pl.LazyFrame,
+    keys: list[BlockingKeyConfig],
+    max_block_size: int = 5000,
+) -> BlockingKeyConfig:
+    """Evaluate blocking keys and select the one with smallest max block size.
+
+    Computes group-size histogram for each candidate key, then picks the key
+    that minimizes max_group_size while maintaining >= 50% coverage.
+    """
+    if len(keys) <= 1:
+        return keys[0]
+
+    df = lf.collect()
+    total = len(df)
+
+    best_key = keys[0]
+    best_max_size = float("inf")
+
+    for key_config in keys:
+        block_key_expr = _build_block_key_expr(key_config)
+        df_with_key = df.with_columns(block_key_expr)
+
+        # Count non-null block keys (coverage)
+        non_null = df_with_key.filter(pl.col("__block_key__").is_not_null()).height
+        coverage = non_null / total if total > 0 else 0.0
+
+        if coverage < 0.5:
+            logger.debug(
+                "Auto-select: skipping key %s (coverage %.1f%% < 50%%)",
+                key_config.fields, coverage * 100,
+            )
+            continue
+
+        # Compute group sizes
+        groups = df_with_key.filter(pl.col("__block_key__").is_not_null()).group_by("__block_key__").agg(
+            pl.len().alias("size")
+        )
+        max_size = groups["size"].max()
+        group_count = groups.height
+
+        logger.debug(
+            "Auto-select: key %s -> groups=%d, max_size=%d, coverage=%.1f%%",
+            key_config.fields, group_count, max_size, coverage * 100,
+        )
+
+        if max_size < best_max_size or (max_size == best_max_size and group_count > 0):
+            best_max_size = max_size
+            best_key = key_config
+
+    logger.info(
+        "Auto-select: chose key %s (max_block_size=%d)",
+        best_key.fields, best_max_size,
+    )
+    return best_key
+
+
 def build_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
     """Build blocks from a LazyFrame based on blocking configuration.
 
@@ -399,6 +531,11 @@ def build_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
     Returns:
         List of BlockResult, one per valid block.
     """
+    # Auto-select: pick best key based on histogram analysis
+    if config.auto_select and len(config.keys) > 1:
+        best_key = select_best_blocking_key(lf, config.keys, config.max_block_size)
+        config = config.model_copy(update={"keys": [best_key], "auto_select": False})
+
     if config.strategy == "canopy":
         return _build_canopy_blocks(lf, config)
 
@@ -435,6 +572,10 @@ def build_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
                 parent_key=block.block_key,
             )
             results.extend(sub_results)
+        elif size > config.max_block_size and not config.skip_oversized:
+            # Auto-split: no sub_block_keys configured, split by highest-cardinality column
+            auto_results = _auto_split_block(block_df, config.max_block_size, block.block_key)
+            results.extend(auto_results)
         else:
             results.append(block)
 

@@ -99,6 +99,18 @@ Block DataFrame → _get_transformed_values (per field)
                 → weighted combination → threshold filter → pairs
 ```
 
+**Parallel block scoring:** All block-scoring call sites (pipeline.py, engine.py, chunked.py) use `score_blocks_parallel()` from scorer.py. This scores independent blocks concurrently via `ThreadPoolExecutor` (4 threads default). RapidFuzz's `cdist` releases the GIL, so threads provide real parallelism. A frozen snapshot of `exclude_pairs` avoids race conditions.
+
+**Intra-field early termination:** After each expensive field (fuzzy/embedding), the scorer checks whether any pair in the upper triangle can still reach the threshold even with perfect scores on all remaining fields. If not, it breaks out of the field loop, skipping unnecessary `cdist` calls.
+
+**Cross-encoder reranking:** When `rerank: true` is set on a weighted matchkey, pairs within `threshold +/- rerank_band` are re-scored using a pre-trained cross-encoder (default: `cross-encoder/ms-marco-MiniLM-L-6-v2`). No training needed -- zero-shot reranking for improved precision on borderline pairs.
+
+**Histogram-based auto-select:** When `auto_select: true` is set on blocking config with multiple keys, `select_best_blocking_key()` evaluates each key's group-size distribution and picks the one with smallest max_block_size while maintaining >= 50% coverage.
+
+**Dynamic block splitting:** When adaptive blocking encounters oversized blocks and no `sub_block_keys` are configured, `_auto_split_block()` picks the column with the most useful groups (groups with >= 2 records) and splits by it. Prefers columns that create right-sized groups over maximum cardinality.
+
+**Weighted multi-field embedding:** `column_weights` on `record_embedding` fields allows biasing the embedding toward important fields. High-weight fields have their text repeated in the concatenation (weight 2.0 = text included twice), while weight 0 excludes a field entirely.
+
 ### Database Sync Flow
 
 ```
@@ -108,9 +120,39 @@ New records → Hybrid blocking (SQL + ANN) → Score → Reconcile → Write
            Progressive embedding               Persistent clusters
 ```
 
+### Active Learning (Boost Tab)
+
+The TUI includes a "Boost" tab for human-in-the-loop active learning:
+
+1. Active sampling selects the 10 hardest borderline pairs (combined strategy: uncertainty + boundary + disagreement + diversity)
+2. User labels pairs with `y` (match), `n` (non-match), or `s` (skip)
+3. Logistic regression trains on the labeled pairs' feature vectors (Jaro-Winkler, token sort, Levenshtein, exact, length ratio per column)
+4. All pairs are re-scored with classifier probabilities and re-clustered
+5. Matches + Golden tabs refresh with boosted results
+
+### Per-Entity Unmerge
+
+Two operations in `cluster.py` for fine-grained undo:
+
+- **`unmerge_record(record_id, clusters, threshold)`** — removes a record from its cluster, re-clusters remaining members using stored `pair_scores`. The removed record becomes a singleton; remaining members that are still connected stay clustered.
+- **`unmerge_cluster(cluster_id, clusters)`** — shatters a cluster into individual singletons, discarding all pair connections.
+
+Available via CLI (`goldenmatch unmerge RECORD_ID`) and programmatically via `MatchEngine.unmerge_record()` / `MatchEngine.unmerge_cluster()`.
+
+### Streaming Foundation (match_one)
+
+The `core/match_one.py` module provides a single-record matching primitive -- the building block for streaming entity resolution:
+
+- **`match_one(record, df, mk)`** — embeds the new record, queries top-K candidates from the FAISS index, scores each candidate pair using the matchkey's fields/weights, returns matches above threshold. Falls back to brute-force when no ANN index is available.
+- **`ANNBlocker.add_to_index(embedding)`** — incrementally adds a vector to the FAISS index without rebuilding.
+- **`ANNBlocker.query_one(embedding)`** — queries top-K neighbors for a single vector.
+- **`add_to_cluster(record_id, matches, clusters)`** — incrementally updates the cluster graph. If the new record matches members of one cluster, it joins. If it bridges two clusters, they merge. Confidence is recomputed automatically.
+
+These primitives enable the `watch` command and incremental DB sync to process single records without re-running the full pipeline.
+
 ## Test Structure
 
-605+ tests across:
+688 tests across:
 - `tests/test_*.py` — unit tests for core modules
 - `tests/test_db.py` — Postgres integration tests
 - `tests/test_reconcile.py` — reconciliation + versioning tests

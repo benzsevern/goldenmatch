@@ -34,12 +34,12 @@ class TestTUIApp:
 
     @pytest.mark.asyncio
     async def test_tabs_exist(self, sample_csv):
-        """All five tab panes should be present."""
+        """All six tab panes should be present."""
         app = GoldenMatchApp(files=[str(sample_csv)])
         async with app.run_test() as pilot:
             await pilot.pause()
             panes = app.query("TabPane")
-            assert len(panes) == 5
+            assert len(panes) == 6
 
     @pytest.mark.asyncio
     async def test_app_launches_without_files(self):

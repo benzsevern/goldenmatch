@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from itertools import combinations
 
 import jellyfish
@@ -13,6 +15,8 @@ from rapidfuzz.process import cdist
 
 from goldenmatch.config.schemas import MatchkeyConfig, MatchkeyField
 from goldenmatch.utils.transforms import apply_transforms
+
+logger = logging.getLogger(__name__)
 
 
 def score_field(val_a: str | None, val_b: str | None, scorer: str) -> float | None:
@@ -165,6 +169,7 @@ def _fuzzy_score_matrix(
 
 def _record_embedding_score_matrix(
     block_df: pl.DataFrame, columns: list[str], model_name: str = "all-MiniLM-L6-v2",
+    column_weights: dict[str, float] | None = None,
 ) -> np.ndarray:
     """NxN score matrix from record-level embeddings.
 
@@ -177,9 +182,20 @@ def _record_embedding_score_matrix(
     for row in block_df.iter_rows(named=True):
         parts = []
         for col in columns:
-            val = row.get(col)
-            if val is not None:
-                parts.append(f"{col}: {val}")
+            if column_weights is not None:
+                w = column_weights.get(col, 1.0)
+                if w <= 0:
+                    continue
+                val = row.get(col)
+                if val is not None:
+                    part = f"{col}: {val}"
+                    repeats = round(w) if w > 1.0 else 1
+                    for _ in range(repeats):
+                        parts.append(part)
+            else:
+                val = row.get(col)
+                if val is not None:
+                    parts.append(f"{col}: {val}")
         concat_values.append(" | ".join(parts) if parts else "")
 
     row_ids = block_df["__row_id__"].to_list()
@@ -292,26 +308,49 @@ def find_fuzzy_matches(
         # Pairs that can't possibly reach threshold — mark them
         impossible = max_possible < mk.threshold
 
-        # Phase 3: Score fuzzy fields
+        # Phase 3: Score fuzzy fields with intra-field early termination
         fuzzy_numerator = np.zeros((n, n))
         fuzzy_denominator = np.zeros((n, n))
 
-        for f in fuzzy_fields:
-            values = _get_transformed_values(block_df, f)
-            null_mask = _build_null_mask(values)
-            valid = ~null_mask
+        all_expensive_fields = list(fuzzy_fields) + list(record_emb_fields)
+        for f_idx, f in enumerate(all_expensive_fields):
+            if f.scorer == "record_embedding":
+                scores = _record_embedding_score_matrix(
+                    block_df, f.columns, model_name=f.model or "all-MiniLM-L6-v2",
+                    column_weights=f.column_weights,
+                )
+                fuzzy_numerator += scores * f.weight
+                fuzzy_denominator += f.weight
+            else:
+                values = _get_transformed_values(block_df, f)
+                null_mask = _build_null_mask(values)
+                valid = ~null_mask
 
-            scores = _fuzzy_score_matrix(values, f.scorer, model_name=f.model or "all-MiniLM-L6-v2")
+                scores = _fuzzy_score_matrix(values, f.scorer, model_name=f.model or "all-MiniLM-L6-v2")
 
-            fuzzy_numerator += scores * f.weight * valid
-            fuzzy_denominator += f.weight * valid
+                fuzzy_numerator += scores * f.weight * valid
+                fuzzy_denominator += f.weight * valid
 
-        for f in record_emb_fields:
-            scores = _record_embedding_score_matrix(
-                block_df, f.columns, model_name=f.model or "all-MiniLM-L6-v2"
+            # Intra-field early termination: if no pair can reach threshold
+            # even with perfect scores on all remaining fields, stop early
+            remaining_weight = sum(
+                all_expensive_fields[i].weight
+                for i in range(f_idx + 1, len(all_expensive_fields))
             )
-            fuzzy_numerator += scores * f.weight
-            fuzzy_denominator += f.weight
+            if remaining_weight > 0:
+                total_num = cheap_numerator + fuzzy_numerator
+                total_den = cheap_denominator + fuzzy_denominator
+                # Best case: remaining fields all score 1.0
+                best_num = total_num + remaining_weight
+                best_den = total_den + remaining_weight
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    best_possible = np.where(best_den > 0, best_num / best_den, 0.0)
+                # Apply existing impossible mask
+                best_possible[impossible] = 0.0
+                # Only check upper triangle
+                best_upper = np.triu(best_possible, k=1)
+                if np.max(best_upper) < mk.threshold:
+                    break  # No pair can reach threshold, skip remaining fields
 
         # Combine cheap + fuzzy
         total_numerator = cheap_numerator + fuzzy_numerator
@@ -345,3 +384,204 @@ def find_fuzzy_matches(
         return results
 
     return [(int(a), int(b), float(s)) for a, b, s in zip(ids_a, ids_b, scores)]
+
+
+# ---------------------------------------------------------------------------
+# Parallel block scoring
+# ---------------------------------------------------------------------------
+
+def _score_one_block(
+    block,
+    mk: MatchkeyConfig,
+    exclude_pairs: set[tuple[int, int]],
+    across_files_only: bool = False,
+    source_lookup: dict[int, str] | None = None,
+) -> list[tuple[int, int, float]]:
+    """Score a single block — safe to call from a thread."""
+    block_df = block.df.collect()
+
+    if across_files_only and source_lookup:
+        sources_in_block = block_df["__source__"].unique().to_list()
+        if len(sources_in_block) < 2:
+            return []
+
+    pairs = find_fuzzy_matches(
+        block_df, mk,
+        exclude_pairs=exclude_pairs,
+        pre_scored_pairs=block.pre_scored_pairs,
+    )
+
+    if across_files_only and source_lookup:
+        pairs = [
+            (a, b, s) for a, b, s in pairs
+            if source_lookup.get(a) != source_lookup.get(b)
+        ]
+
+    return pairs
+
+
+def score_blocks_parallel(
+    blocks: list,
+    mk: MatchkeyConfig,
+    matched_pairs: set[tuple[int, int]],
+    max_workers: int = 4,
+    across_files_only: bool = False,
+    source_lookup: dict[int, str] | None = None,
+    target_ids: set[int] | None = None,
+) -> list[tuple[int, int, float]]:
+    """Score all blocks in parallel using threads.
+
+    rapidfuzz.cdist releases the GIL, so threads provide real parallelism
+    for the expensive fuzzy scoring. Blocks are independent — no shared
+    mutable state during scoring.
+
+    Args:
+        blocks: List of BlockResult objects.
+        mk: Matchkey configuration.
+        matched_pairs: Set of already-matched (min_id, max_id) pairs.
+        max_workers: Thread pool size (default 4).
+        across_files_only: Filter to cross-source pairs only.
+        source_lookup: Row ID to source name mapping.
+        target_ids: For match mode — filter to target/ref cross pairs.
+
+    Returns:
+        All fuzzy pairs found across blocks.
+    """
+    if not blocks:
+        return []
+
+    # For small block counts, skip thread overhead
+    if len(blocks) <= 2:
+        all_pairs = []
+        for block in blocks:
+            pairs = _score_one_block(
+                block, mk, matched_pairs,
+                across_files_only=across_files_only,
+                source_lookup=source_lookup,
+            )
+            if target_ids is not None:
+                pairs = [
+                    (a, b, s) for a, b, s in pairs
+                    if (a in target_ids) != (b in target_ids)
+                ]
+            all_pairs.extend(pairs)
+            for a, b, s in pairs:
+                matched_pairs.add((min(a, b), max(a, b)))
+        return all_pairs
+
+    # Snapshot exclude_pairs so threads see a frozen copy
+    frozen_exclude = frozenset(matched_pairs)
+
+    all_pairs = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {}
+        for i, block in enumerate(blocks):
+            future = executor.submit(
+                _score_one_block, block, mk, frozen_exclude,
+                across_files_only, source_lookup,
+            )
+            future_to_idx[future] = i
+
+        for future in as_completed(future_to_idx):
+            pairs = future.result()
+            if target_ids is not None:
+                pairs = [
+                    (a, b, s) for a, b, s in pairs
+                    if (a in target_ids) != (b in target_ids)
+                ]
+            all_pairs.extend(pairs)
+            for a, b, s in pairs:
+                matched_pairs.add((min(a, b), max(a, b)))
+
+    logger.info(
+        "Parallel scoring: %d blocks, %d workers, %d pairs found",
+        len(blocks), max_workers, len(all_pairs),
+    )
+    return all_pairs
+
+
+# ---------------------------------------------------------------------------
+# Cross-encoder reranking
+# ---------------------------------------------------------------------------
+
+def rerank_top_pairs(
+    pairs: list[tuple[int, int, float]],
+    df: pl.DataFrame,
+    mk: MatchkeyConfig,
+) -> list[tuple[int, int, float]]:
+    """Re-score borderline pairs with a pre-trained cross-encoder.
+
+    Pairs within a band around the threshold (threshold +/- rerank_band)
+    are re-scored using a cross-encoder model. Pairs outside the band
+    keep their original scores. No training needed -- uses an off-the-shelf
+    cross-encoder for zero-shot reranking.
+
+    Args:
+        pairs: All scored pairs (row_id_a, row_id_b, score).
+        df: Full collected DataFrame with record data.
+        mk: Matchkey config with rerank, rerank_model, rerank_band, threshold.
+
+    Returns:
+        Updated pairs list with reranked scores for borderline pairs.
+    """
+    if not mk.rerank or not pairs or mk.threshold is None:
+        return pairs
+
+    try:
+        from sentence_transformers import CrossEncoder
+    except ImportError:
+        logger.warning("Cross-encoder reranking unavailable: sentence-transformers not installed")
+        return pairs
+
+    band = mk.rerank_band
+    lo = mk.threshold - band
+    hi = mk.threshold + band
+
+    # Identify borderline pairs
+    borderline_idx = [i for i, (_, _, s) in enumerate(pairs) if lo <= s <= hi]
+    if not borderline_idx:
+        logger.info("Rerank: no pairs in band [%.2f, %.2f], skipping", lo, hi)
+        return pairs
+
+    # Build row lookup for serialization
+    matchable_cols = [c for c in df.columns if not c.startswith("__")]
+    row_lookup: dict[int, dict] = {}
+    for row in df.select(["__row_id__"] + matchable_cols).to_dicts():
+        row_lookup[row["__row_id__"]] = row
+
+    # Serialize borderline pairs
+    from goldenmatch.core.cross_encoder import serialize_record
+
+    sentence_pairs = []
+    for idx in borderline_idx:
+        a, b, _ = pairs[idx]
+        row_a = row_lookup.get(a, {})
+        row_b = row_lookup.get(b, {})
+        text_a = serialize_record(row_a, matchable_cols)
+        text_b = serialize_record(row_b, matchable_cols)
+        sentence_pairs.append((text_a, text_b))
+
+    # Score with cross-encoder
+    logger.info(
+        "Rerank: scoring %d borderline pairs with %s",
+        len(borderline_idx), mk.rerank_model,
+    )
+    model = CrossEncoder(mk.rerank_model)
+    from goldenmatch.core.cross_encoder import score_pairs as ce_score_pairs
+
+    ce_scores = ce_score_pairs(model, sentence_pairs)
+
+    # Replace scores for borderline pairs
+    result = list(pairs)
+    for i, idx in enumerate(borderline_idx):
+        a, b, _ = result[idx]
+        result[idx] = (a, b, float(ce_scores[i]))
+
+    # Re-filter by threshold
+    result = [(a, b, s) for a, b, s in result if s >= mk.threshold]
+
+    logger.info(
+        "Rerank: %d pairs after reranking (was %d)",
+        len(result), len(pairs),
+    )
+    return result

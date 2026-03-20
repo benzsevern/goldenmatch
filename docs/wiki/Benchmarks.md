@@ -47,6 +47,28 @@ Measured on a laptop (17GB RAM, no GPU) with exact + fuzzy matching, blocking, c
 
 Near-linear scaling: throughput stays consistent as data grows. Memory usage scales linearly.
 
+### Fuzzy Matching Performance
+
+100K records with 3-field fuzzy matching (first_name + last_name jaro_winkler, zip exact):
+
+| Threshold | Time | Fuzzy Pairs | F1 |
+|-----------|------|-------------|-----|
+| 0.95 | **38s** | 1,534 | 93.0% |
+| 0.85 | **39s** | 1,915 | 84.5% |
+| 0.75 | **42s** | 2,544 | 73.3% |
+
+Previously ~100s before parallel block scoring and intra-field early termination (2.5x speedup through the pipeline).
+
+**Note:** The times above are measured through `run_dedupe` which uses `score_blocks_parallel` (multi-threaded). The standalone `analyze_fuzzy.py` script calls `find_fuzzy_matches` per block sequentially, so its times (38-55s) reflect single-threaded performance with intra-field early termination only.
+
+**Optimizations applied:**
+- **Parallel block scoring** — blocks are independent and scored concurrently via `ThreadPoolExecutor`. RapidFuzz's `cdist` releases the GIL, so threads provide real parallelism on the expensive NxN scoring.
+- **Intra-field early termination** — after scoring each expensive field, checks if any pair in the upper triangle can still reach threshold even with perfect scores on all remaining fields. Breaks early when impossible, skipping unnecessary `cdist` calls.
+- **Cross-encoder reranking** (opt-in, `rerank: true`) — re-scores borderline pairs with a pre-trained cross-encoder for improved precision without training.
+- **Histogram-based auto-select** (opt-in, `auto_select: true`) — evaluates configured blocking keys by group-size histogram and picks the one with smallest max block size.
+- **Dynamic block splitting** — adaptive strategy auto-splits oversized blocks by highest-cardinality column when no `sub_block_keys` are configured.
+- **Weighted multi-field embedding** (opt-in, `column_weights`) — biases record embeddings toward important fields by repeating high-weight field text in the concatenation.
+
 ### Pipeline Bottlenecks (at 100K records)
 
 | Stage | Time | % of Total |
@@ -62,7 +84,17 @@ The bottleneck is fuzzy NxN scoring within blocks (RapidFuzz cdist). Coarser blo
 
 ### 1M Record Benchmark (Exact Only)
 
-With exact matching only (no fuzzy), 1M records process in **~15 seconds**:
+With exact matching only (no fuzzy), 1M records process in **~7.8 seconds**:
+
+| Stage | Time | % |
+|-------|------|---|
+| Ingest | 0.11s | 1% |
+| Auto-fix | 1.67s | 21% |
+| Standardize | 1.38s | 18% |
+| Matchkeys | 0.13s | 2% |
+| Exact matching | 0.14s | 2% |
+| Clustering | 3.08s | 39% |
+| Golden (1K sample) | 1.31s | 17% |
 
 138,730 duplicate clusters found with 100% precision and 100% recall.
 

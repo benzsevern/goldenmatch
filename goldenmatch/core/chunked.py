@@ -61,7 +61,7 @@ class ChunkedMatcher:
         from goldenmatch.core.standardize import apply_standardization
         from goldenmatch.core.matchkey import compute_matchkeys
         from goldenmatch.core.blocker import build_blocks
-        from goldenmatch.core.scorer import find_exact_matches, find_fuzzy_matches
+        from goldenmatch.core.scorer import find_exact_matches, find_fuzzy_matches, score_blocks_parallel
         from goldenmatch.core.cluster import build_clusters
         from goldenmatch.core.golden import build_golden_record
 
@@ -114,15 +114,8 @@ class ChunkedMatcher:
                 for mk in matchkeys:
                     if mk.type == "weighted":
                         blocks = build_blocks(chunk_df.lazy(), self.config.blocking)
-                        for block in blocks:
-                            bdf = block.df.collect()
-                            pairs = find_fuzzy_matches(
-                                bdf, mk, exclude_pairs=matched_pairs,
-                                pre_scored_pairs=block.pre_scored_pairs,
-                            )
-                            chunk_pairs.extend(pairs)
-                            for a, b, s in pairs:
-                                matched_pairs.add((min(a, b), max(a, b)))
+                        pairs = score_blocks_parallel(blocks, mk, matched_pairs)
+                        chunk_pairs.extend(pairs)
 
             # Match against index (cross-chunk matching)
             if self._index_records:

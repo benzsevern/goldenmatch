@@ -13,6 +13,7 @@ from goldenmatch.tui.tabs.config_tab import ConfigTab
 from goldenmatch.tui.tabs.data_tab import DataTab
 from goldenmatch.tui.tabs.export_tab import ExportTab
 from goldenmatch.tui.tabs.golden_tab import GoldenTab
+from goldenmatch.tui.tabs.boost_tab import BoostTab
 from goldenmatch.tui.tabs.matches_tab import MatchesTab
 
 
@@ -240,7 +241,8 @@ class GoldenMatchApp(App):
         Binding("2", "goto_tab_2", "Config", show=False),
         Binding("3", "goto_tab_3", "Matches", show=False),
         Binding("4", "goto_tab_4", "Golden", show=False),
-        Binding("5", "goto_tab_5", "Export", show=False),
+        Binding("5", "goto_tab_5", "Boost", show=False),
+        Binding("6", "goto_tab_6", "Export", show=False),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -265,6 +267,8 @@ class GoldenMatchApp(App):
                         yield MatchesTab()
                     with TabPane("Golden", id="tab-golden"):
                         yield GoldenTab()
+                    with TabPane("Boost", id="tab-boost"):
+                        yield BoostTab()
                     with TabPane("Export", id="tab-export"):
                         yield ExportTab()
         yield Footer()
@@ -328,7 +332,56 @@ class GoldenMatchApp(App):
         # Update golden tab
         golden_tab = self.query_one(GoldenTab)
         golden_tab.update_results(result)
+        # Update boost tab
+        boost_tab = self.query_one(BoostTab)
+        boost_tab.update_results(result, self.engine.data)
         self.notify("Sample matching complete.", severity="information")
+
+    def on_boost_tab_boost_complete(self, event: BoostTab.BoostComplete) -> None:
+        """Handle boost re-scoring: re-cluster and refresh all tabs."""
+        if self.last_result is None or self.engine is None:
+            return
+
+        from goldenmatch.core.cluster import build_clusters
+        from goldenmatch.tui.engine import EngineResult
+
+        # Re-cluster with boosted scores using current threshold
+        threshold = 0.5  # classifier probabilities: >0.5 = match
+        filtered = [(a, b, s) for a, b, s in event.scored_pairs if s >= threshold]
+        all_ids = sorted(set(
+            mid for cinfo in self.last_result.clusters.values() for mid in cinfo["members"]
+        ))
+        clusters = build_clusters(filtered, all_ids)
+
+        # Build updated result
+        stats = self.engine._compute_stats(clusters, len(all_ids))
+        updated = EngineResult(
+            clusters=clusters,
+            golden=self.last_result.golden,
+            unique=self.last_result.unique,
+            dupes=self.last_result.dupes,
+            quarantine=self.last_result.quarantine,
+            matched=self.last_result.matched,
+            unmatched=self.last_result.unmatched,
+            scored_pairs=event.scored_pairs,
+            stats=stats,
+        )
+        self.last_result = updated
+        self.engine._last_result = updated
+
+        # Refresh tabs
+        sidebar = self.query_one(Sidebar)
+        sidebar.update_stats(stats)
+        matches_tab = self.query_one(MatchesTab)
+        matches_tab.update_results(updated, self.engine.data)
+        golden_tab = self.query_one(GoldenTab)
+        golden_tab.update_results(updated)
+
+        self.notify(
+            f"Boost applied! {len(filtered)} pairs above threshold, "
+            f"{stats.total_clusters} clusters.",
+            severity="information",
+        )
 
     def action_help(self) -> None:
         """Show help information."""
@@ -393,6 +446,9 @@ class GoldenMatchApp(App):
         matches_tab.update_results(result, self.engine.data)
         golden_tab = self.query_one(GoldenTab)
         golden_tab.update_results(result)
+        # Update boost tab
+        boost_tab = self.query_one(BoostTab)
+        boost_tab.update_results(result, self.engine.data)
         # Update export status
         export_tab = self.query_one(ExportTab)
         run_status = export_tab.query_one("#run-status")
@@ -429,6 +485,9 @@ class GoldenMatchApp(App):
         self._goto_tab("tab-golden")
 
     def action_goto_tab_5(self) -> None:
+        self._goto_tab("tab-boost")
+
+    def action_goto_tab_6(self) -> None:
         self._goto_tab("tab-export")
 
     # ── Quick export ──────────────────────────────────────────────
@@ -447,7 +506,7 @@ class GoldenMatchApp(App):
         """Show keyboard shortcuts overlay."""
         shortcuts = (
             "[bold #d4a017]Keyboard Shortcuts[/]\n\n"
-            "[bold #d4a017]1-5[/]        Jump to tab\n"
+            "[bold #d4a017]1-6[/]        Jump to tab\n"
             "[bold #d4a017]F5[/]         Run / re-run\n"
             "[bold #d4a017]F2[/]         Save config\n"
             "[bold #d4a017]Ctrl+R[/]     Re-run matching\n"
@@ -457,7 +516,10 @@ class GoldenMatchApp(App):
             "[bold #d4a017]Q[/]          Quit\n\n"
             "[bold #8892a0]Matches Tab:[/]\n"
             "[bold #d4a017]↑/↓[/]        Navigate clusters\n"
-            "[bold #d4a017]Enter[/]       Select cluster\n"
-            "[bold #d4a017]/[/]          Filter\n"
+            "[bold #d4a017]Enter[/]       Select cluster\n\n"
+            "[bold #8892a0]Boost Tab:[/]\n"
+            "[bold #d4a017]y[/]           Label as match\n"
+            "[bold #d4a017]n[/]           Label as non-match\n"
+            "[bold #d4a017]s[/]           Skip pair\n"
         )
         self.notify(shortcuts, title="⚡ GoldenMatch", timeout=10)

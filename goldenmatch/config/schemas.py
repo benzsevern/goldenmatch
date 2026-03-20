@@ -60,6 +60,7 @@ class MatchkeyField(BaseModel):
     weight: float | None = None
     model: str | None = None  # for embedding scorer
     columns: list[str] | None = None  # for record_embedding scorer
+    column_weights: dict[str, float] | None = None  # per-field weights for record_embedding
 
     @model_validator(mode="after")
     def _resolve_field_column(self) -> "MatchkeyField":
@@ -95,6 +96,9 @@ class MatchkeyConfig(BaseModel):
     fields: list[MatchkeyField]
     threshold: float | None = None
     auto_threshold: bool = False
+    rerank: bool = False
+    rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    rerank_band: float = 0.1
 
     @model_validator(mode="after")
     def _validate_weighted(self) -> "MatchkeyConfig":
@@ -150,6 +154,7 @@ class BlockingConfig(BaseModel):
     skip_oversized: bool = False
     strategy: Literal["static", "adaptive", "sorted_neighborhood", "multi_pass", "ann", "canopy", "ann_pairs"] = "static"
     auto_suggest: bool = False
+    auto_select: bool = False
     sub_block_keys: list[BlockingKeyConfig] | None = None
     window_size: int = 20
     sort_key: list[SortKeyField] | None = None

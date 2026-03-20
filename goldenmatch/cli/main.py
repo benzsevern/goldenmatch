@@ -21,7 +21,7 @@ from goldenmatch.cli.mcp_serve import mcp_serve_cmd
 from goldenmatch.cli.watch import watch_cmd
 from goldenmatch.cli.setup import setup_cmd
 from goldenmatch.cli.demo import demo_cmd
-from goldenmatch.cli.rollback import rollback_cmd, runs_cmd
+from goldenmatch.cli.rollback import rollback_cmd, runs_cmd, unmerge_cmd
 from goldenmatch.cli.schedule import schedule_cmd
 from goldenmatch.prefs.store import PresetStore
 
@@ -96,6 +96,7 @@ app.command("setup", help="Interactive setup wizard for GPU, API keys, and datab
 app.command("demo", help="Run built-in demo with sample data, no files needed.")(demo_cmd)
 app.command("rollback", help="Undo a previous merge run.")(rollback_cmd)
 app.command("runs", help="List previous runs for rollback.")(runs_cmd)
+app.command("unmerge", help="Remove a record from its cluster (per-entity unmerge).")(unmerge_cmd)
 app.command("schedule", help="Run deduplication on a schedule.")(schedule_cmd)
 
 

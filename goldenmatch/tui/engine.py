@@ -118,7 +118,7 @@ class MatchEngine:
         from goldenmatch.core.cluster import build_clusters
         from goldenmatch.core.golden import build_golden_record
         from goldenmatch.core.matchkey import compute_matchkeys
-        from goldenmatch.core.scorer import find_exact_matches, find_fuzzy_matches
+        from goldenmatch.core.scorer import find_exact_matches, find_fuzzy_matches, score_blocks_parallel, rerank_top_pairs
         from goldenmatch.core.standardize import apply_standardization
         from goldenmatch.core.validate import ValidationRule, validate_dataframe
         from goldenmatch.config.schemas import GoldenRulesConfig
@@ -173,18 +173,20 @@ class MatchEngine:
                 for a, b, s in pairs:
                     matched_pairs.add((min(a, b), max(a, b)))
 
-        # Phase 2: Fuzzy matchkeys (slow — skip already-matched pairs)
+        # Phase 2: Fuzzy matchkeys (parallel block scoring)
         for mk in matchkeys:
             if mk.type == "weighted":
                 if config.blocking is None:
                     continue
                 blocks = build_blocks(combined_lf, config.blocking)
-                for block in blocks:
-                    block_df = block.df.collect()
-                    pairs = find_fuzzy_matches(block_df, mk, exclude_pairs=matched_pairs, pre_scored_pairs=block.pre_scored_pairs)
-                    all_pairs.extend(pairs)
-                    for a, b, s in pairs:
-                        matched_pairs.add((min(a, b), max(a, b)))
+                pairs = score_blocks_parallel(blocks, mk, matched_pairs)
+                all_pairs.extend(pairs)
+
+        # ── Rerank (optional) ──
+        for mk in matchkeys:
+            if mk.type == "weighted" and mk.rerank:
+                all_pairs = rerank_top_pairs(all_pairs, collected_df, mk)
+                break
 
         # ── Cluster ──
         all_ids = collected_df["__row_id__"].to_list()
@@ -256,6 +258,73 @@ class MatchEngine:
         result = self._run_pipeline(self._data, config)
         self._last_result = result
         return result
+
+    def unmerge_record(self, record_id: int, threshold: float = 0.0) -> EngineResult | None:
+        """Remove a record from its cluster and return updated results."""
+        if self._last_result is None:
+            return None
+
+        from goldenmatch.core.cluster import unmerge_record
+
+        clusters = unmerge_record(record_id, self._last_result.clusters, threshold)
+        stats = self._compute_stats(clusters, self._data.height)
+
+        self._last_result = EngineResult(
+            clusters=clusters,
+            golden=self._last_result.golden,
+            unique=self._last_result.unique,
+            dupes=self._last_result.dupes,
+            quarantine=self._last_result.quarantine,
+            matched=self._last_result.matched,
+            unmatched=self._last_result.unmatched,
+            scored_pairs=self._last_result.scored_pairs,
+            stats=stats,
+        )
+        return self._last_result
+
+    def unmerge_cluster(self, cluster_id: int) -> EngineResult | None:
+        """Shatter a cluster into singletons and return updated results."""
+        if self._last_result is None:
+            return None
+
+        from goldenmatch.core.cluster import unmerge_cluster
+
+        clusters = unmerge_cluster(cluster_id, self._last_result.clusters)
+        stats = self._compute_stats(clusters, self._data.height)
+
+        self._last_result = EngineResult(
+            clusters=clusters,
+            golden=self._last_result.golden,
+            unique=self._last_result.unique,
+            dupes=self._last_result.dupes,
+            quarantine=self._last_result.quarantine,
+            matched=self._last_result.matched,
+            unmatched=self._last_result.unmatched,
+            scored_pairs=self._last_result.scored_pairs,
+            stats=stats,
+        )
+        return self._last_result
+
+    def match_one(self, record: dict, config) -> list[tuple[int, float]]:
+        """Match a single record against the loaded dataset.
+
+        Uses brute-force scoring against the full dataset. For ANN-accelerated
+        matching, use core.match_one directly with a pre-built ANNBlocker.
+        """
+        from goldenmatch.core.match_one import match_one
+
+        matchkeys = config.get_matchkeys()
+        results = []
+        for mk in matchkeys:
+            if mk.type == "weighted":
+                matches = match_one(record, self._data, mk)
+                results.extend(matches)
+        # Deduplicate by row_id, keep highest score
+        best: dict[int, float] = {}
+        for row_id, score in results:
+            if row_id not in best or score > best[row_id]:
+                best[row_id] = score
+        return sorted(best.items(), key=lambda x: x[1], reverse=True)
 
     def recluster_at_threshold(self, threshold: float) -> EngineStats:
         """Re-cluster cached scored pairs at a new threshold. No re-scoring."""

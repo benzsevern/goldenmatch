@@ -30,6 +30,7 @@ goldenmatch setup
 | [GPU Routing & Vertex AI](GPU-Routing.md) | Managed embeddings via Google Cloud |
 | [Database Integration](Database-Integration.md) | Incremental Postgres sync with golden record versioning |
 | [LLM Boost](LLM-Boost.md) | Claude/GPT-4 labeling + fine-tuning |
+| [dbt Integration](dbt-Integration.md) | Post-hooks, Postgres sync, Snowflake/BigQuery recipes |
 
 ## Reference
 
@@ -53,6 +54,7 @@ goldenmatch setup
 | `goldenmatch serve FILE [...]` | REST API server |
 | `goldenmatch mcp-serve FILE [...]` | MCP server (Claude Desktop) |
 | `goldenmatch rollback RUN_ID` | Undo a previous run |
+| `goldenmatch unmerge RECORD_ID` | Remove a record from its cluster |
 | `goldenmatch runs` | List run history |
 
 ## Key Dedupe Flags
