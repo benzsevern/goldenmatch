@@ -232,7 +232,9 @@ goldenmatch dedupe products.csv --llm-boost
 - **Level 2** — bi-encoder fine-tuning (~$0.20, ~2 min CPU)
 - **Level 3** — Ditto-style cross-encoder with data augmentation (~$0.50, ~5 min CPU)
 
-Best result: **Abt-Buy 59.5% F1** (up from 44.5% zero-shot) with 300 LLM labels and optimal train/score split.
+**Active sampling** selects the most informative pairs for the LLM to label (uncertainty, disagreement, boundary, diversity), reducing label cost by ~45% compared to random sampling.
+
+**Note:** With Vertex AI embeddings, zero-shot already achieves 84.8% F1 on Abt-Buy — better than any threshold-learning approach. LLM boost is most valuable when using local models (MiniLM) where it improved Abt-Buy from 44.5% to 59.5% F1.
 
 ## Benchmarks
 
@@ -242,10 +244,10 @@ Best result: **Abt-Buy 59.5% F1** (up from 44.5% zero-shot) with 300 LLM labels 
 |---------|--------------|-----|------|
 | **DBLP-ACM** (2.6K vs 2.3K) | Vertex AI embeddings | **97.4%** | 119s |
 | **DBLP-Scholar** (2.6K vs 64K) | multi-pass + fuzzy | **74.7%** | 83.9s |
-| **Abt-Buy** (1K vs 1K) | Vertex AI embeddings | **84.7%** | 53s |
-| **Amazon-Google** (1.4K vs 3.2K) | Vertex AI embeddings | **58.6%** | 110s |
+| **Abt-Buy** (1K vs 1K) | Vertex AI embeddings | **84.8%** | 56s |
+| **Amazon-Google** (1.4K vs 3.2K) | Vertex AI embeddings | **60.4%** | 110s |
 
-**Previous best without Vertex AI:** Abt-Buy 59.5% (LLM boost), Amazon-Google 40.5% (rec_emb). Vertex AI's `text-embedding-004` model provides dramatically better embeddings with no local GPU needed.
+**Zero config, zero labels, zero GPU.** Vertex AI's `text-embedding-004` provides state-of-the-art embeddings via API. Previous best without Vertex AI: Abt-Buy 59.5% (LLM boost with local MiniLM).
 
 ### Throughput (Scale Curve)
 
