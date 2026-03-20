@@ -257,7 +257,7 @@ goldenmatch dedupe products.csv --llm-boost
 
 **Active sampling** selects the most informative pairs for the LLM to label (uncertainty, disagreement, boundary, diversity), reducing label cost by ~45% compared to random sampling.
 
-**Note:** With Vertex AI embeddings, zero-shot already achieves 84.8% F1 on Abt-Buy — better than any threshold-learning approach. LLM boost is most valuable when using local models (MiniLM) where it improved Abt-Buy from 44.5% to 59.5% F1.
+**Note:** LLM boost is most valuable for product matching with local models (MiniLM) where it improved Abt-Buy from 44.5% to 59.5% F1. For structured data (names, addresses, bibliographic), fuzzy matching alone achieves 97%+ F1.
 
 ## Benchmarks
 
@@ -265,14 +265,12 @@ goldenmatch dedupe products.csv --llm-boost
 
 | Dataset | Best Strategy | F1 | Time |
 |---------|--------------|-----|------|
-| **DBLP-ACM** (2.6K vs 2.3K) | Vertex AI (multi-field) | **98.0%** | 166s |
+| **DBLP-ACM** (2.6K vs 2.3K) | multi-pass + fuzzy | **97.2%** | 3.6s |
 | **DBLP-Scholar** (2.6K vs 64K) | multi-pass + fuzzy | **74.7%** | 83.9s |
-| **Abt-Buy** (1K vs 1K) | Vertex AI embeddings | **84.8%** | 56s |
-| **Amazon-Google** (1.4K vs 3.2K) | Vertex AI embeddings | **60.4%** | 110s |
+| **Abt-Buy** (1K vs 1K) | Vertex AI (name+desc) | **62.8%** | 56s |
+| **Amazon-Google** (1.4K vs 3.2K) | Vertex AI + reranking | **44.0%** | 110s |
 
-**Zero config, zero labels, zero GPU.** Vertex AI's `text-embedding-004` provides state-of-the-art embeddings via API. Previous best without Vertex AI: Abt-Buy 59.5% (LLM boost with local MiniLM).
-
-**Field selection matters:** Multi-field embedding (title + authors + venue + year) boosted DBLP-ACM from 97.4% to **98.0%** — within 1pt of Ditto. But on product data (Abt-Buy), adding descriptions hurt accuracy because the formats differ across sources. GoldenMatch auto-selects fields based on data profiling.
+**Zero config, zero labels, zero GPU.** RapidFuzz multi-pass fuzzy matching dominates on structured data. Vertex AI's `text-embedding-004` adds value on product matching where fuzzy string comparison fails.
 
 ### Throughput (Scale Curve)
 
@@ -292,8 +290,8 @@ For datasets over 1M records, use `goldenmatch sync` (database mode) with increm
 
 | | **GoldenMatch** | **dedupe** | **Splink** | **Zingg** | **Ditto** |
 |---|---|---|---|---|---|
-| Abt-Buy F1 | **84.7%** | ~75% | ~70% | ~80% | 89.3% |
-| DBLP-ACM F1 | **97.4%** | ~96% | ~95% | ~96% | 99.0% |
+| Abt-Buy F1 | **62.8%** | ~75% | ~70% | ~80% | 89.3% |
+| DBLP-ACM F1 | **97.2%** | ~96% | ~95% | ~96% | 99.0% |
 | Training required | No | Yes | Yes | Yes | Yes (1000+) |
 | Zero-config | Yes | No | No | No | No |
 | Interactive TUI | Yes | No | No | No | No |
@@ -301,7 +299,7 @@ For datasets over 1M records, use `goldenmatch sync` (database mode) with increm
 | REST API / MCP | Both | Cloud only | No | No | No |
 | GPU required | No | No | No | Spark | Yes |
 
-GoldenMatch's sweet spot is **ease of use + competitive accuracy**. Ditto has higher F1 but requires 1000+ manual labels and a GPU. Splink scales to billions on Spark but needs label training. GoldenMatch auto-configures from your data and reaches 85%+ F1 with zero labels.
+GoldenMatch's sweet spot is **ease of use + competitive accuracy on structured data**. On bibliographic matching (DBLP-ACM), GoldenMatch hits 97.2% with zero config — within 2pts of Ditto. Product matching (Abt-Buy) is harder without training; use the Boost tab to label 10-20 pairs for a quick accuracy jump, or `--llm-boost` for full fine-tuning.
 
 ## Interactive TUI
 

@@ -8,18 +8,18 @@ GoldenMatch is benchmarked against the [University of Leipzig entity resolution 
 
 | Dataset | Records | Best Strategy | Precision | Recall | F1 | Time |
 |---------|---------|--------------|-----------|--------|-----|------|
-| **DBLP-ACM** | 2.6K vs 2.3K | Vertex AI embeddings | 97.5% | 97.3% | **97.4%** | 119s |
+| **DBLP-ACM** | 2.6K vs 2.3K | multi-pass + fuzzy | 96.4% | 98.0% | **97.2%** | 3.6s |
 | **DBLP-Scholar** | 2.6K vs 64K | multi-pass + fuzzy | 67.2% | 84.1% | **74.7%** | 83.9s |
-| **Abt-Buy** | 1K vs 1K | Vertex AI embeddings | 85.5% | 83.9% | **84.7%** | 53s |
-| **Amazon-Google** | 1.4K vs 3.2K | Vertex AI embeddings | 60.6% | 56.8% | **58.6%** | 110s |
+| **Abt-Buy** | 1K vs 1K | Vertex AI (name+desc, t=0.88) | 43.0% | 78.1% | **62.8%** | 56s |
+| **Amazon-Google** | 1.4K vs 3.2K | Vertex AI + 20-label reranking | 36.7% | 55.0% | **44.0%** | 110s |
 
-**Previous bests (without Vertex AI):** DBLP-ACM 97.2% (multi-pass), Abt-Buy 59.5% (LLM boost), Amazon-Google 40.5% (rec_emb). Vertex AI's `text-embedding-004` provides dramatically better embeddings for product matching.
+**Structured data (DBLP-ACM):** RapidFuzz multi-pass fuzzy at 97.2% — within 2pts of Ditto with zero training. **Product matching (Abt-Buy):** Vertex AI embeddings at 62.8% zero-shot. Product catalogs with different naming conventions remain hard without training labels.
 
 ### Comparison with Other Tools
 
 | Tool | DBLP-ACM | Abt-Buy | Approach | Training Required |
 |------|----------|---------|----------|-------------------|
-| **GoldenMatch** | **97.4%** | **84.7%** | Vertex AI embeddings (zero-config) | No |
+| **GoldenMatch** | **97.2%** | **62.8%** | multi-pass fuzzy + Vertex AI (zero-config) | No |
 | **Ditto** | 99.0% | 89.3% | Fine-tuned DistilBERT | Yes (1000+ labels) |
 | **DeepMatcher** | 98.4% | 62.8% | Deep learning | Yes |
 | **Splink** | ~95% | ~70% | Fellegi-Sunter (Spark) | Yes (labels) |
@@ -28,10 +28,10 @@ GoldenMatch is benchmarked against the [University of Leipzig entity resolution 
 
 ### Key Findings
 
-- **DBLP-ACM (97.4%)**: Within 1.6pts of Ditto with zero training — competitive with state-of-the-art.
-- **Abt-Buy (84.7%)**: Vertex AI's `text-embedding-004` closed most of the gap with Ditto (89.3%). Previously 59.5% with LLM boost on local MiniLM.
-- **Amazon-Google (58.6%)**: 45% relative improvement over previous best (40.5%). Product matching with very different naming conventions remains hard across all tools.
-- **DBLP-Scholar (74.7%)**: Multi-pass blocking + fuzzy scoring. Not yet tested with Vertex AI.
+- **DBLP-ACM (97.2%)**: Within 2pts of Ditto with zero training — competitive with state-of-the-art. RapidFuzz fuzzy matching beats Vertex AI embeddings on this dataset.
+- **Abt-Buy (62.8%)**: Vertex AI name+description embeddings at threshold 0.88. Product matching is hard without training — Ditto reaches 89.3% but requires 1000+ labels and a GPU.
+- **Amazon-Google (44.0%)**: Vertex AI embeddings + 20-label active learning reranking. Product catalogs with different naming conventions remain the hardest entity resolution task.
+- **DBLP-Scholar (74.7%)**: Multi-pass blocking + fuzzy scoring.
 
 See [Comparison with Other Tools](Comparison.md) for a full feature-by-feature breakdown.
 

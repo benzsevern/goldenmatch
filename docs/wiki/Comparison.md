@@ -27,11 +27,11 @@ How GoldenMatch compares with other entity resolution tools.
 
 | Dataset | **GoldenMatch** | **dedupe** | **Splink** | **Zingg** | **Ditto** |
 |---|---|---|---|---|---|
-| DBLP-ACM | **97.4%** | ~96% | ~95% | ~96% | **99.0%** |
-| Abt-Buy | **84.7%** | ~75% | ~70% | ~80% | **89.3%** |
-| Amazon-Google | **58.6%** | ~50% | ~45% | ~55% | **70.0%** |
+| DBLP-ACM | **97.2%** | ~96% | ~95% | ~96% | **99.0%** |
+| Abt-Buy | **62.8%** | ~75% | ~70% | ~80% | **89.3%** |
+| Amazon-Google | **44.0%** | ~50% | ~45% | ~55% | **70.0%** |
 
-GoldenMatch uses Vertex AI's `text-embedding-004` for these results. Without Vertex AI (local CPU-only), results are lower but still competitive.
+GoldenMatch uses multi-pass fuzzy (RapidFuzz) for structured data and Vertex AI embeddings for product matching. Zero training, zero labels.
 
 ## Where GoldenMatch Wins
 
@@ -59,7 +59,7 @@ Gold-themed TUI with keyboard shortcuts, live threshold tuning, split-view resul
 ## Where Others Win
 
 ### Ditto — Higher Accuracy
-Ditto achieves 89.3% on Abt-Buy vs GoldenMatch's 84.7%. Ditto uses a fine-tuned DistilBERT model with 1000+ hand-labeled training pairs and data augmentation. If you have the labels and a GPU, Ditto wins on raw accuracy.
+Ditto achieves 89.3% on Abt-Buy vs GoldenMatch's 62.8%. The gap is real — product matching with different naming conventions needs the kind of supervised learning that Ditto provides (1000+ hand-labeled pairs, fine-tuned DistilBERT, data augmentation). GoldenMatch's Boost tab can close part of this gap with 20 labels, but for maximum accuracy on product catalogs, Ditto is the right choice if you have the labels and a GPU.
 
 ### Splink — Better at Scale
 Splink is built on Spark and handles billions of records across distributed clusters. GoldenMatch's current scale ceiling is ~10M records per Postgres table. For truly massive datasets, Splink is the right choice.

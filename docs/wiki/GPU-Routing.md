@@ -54,9 +54,9 @@ goldenmatch dedupe products.csv
 
 | Dataset | F1 Score |
 |---------|----------|
-| DBLP-ACM | 97.4% |
-| Abt-Buy | 84.7% |
-| Amazon-Google | 58.6% |
+| DBLP-ACM | 91.5% |
+| Abt-Buy | 62.8% |
+| Amazon-Google | 41.4% |
 
 **Cost:** ~$0.025 per 1,000 texts embedded. A typical 10K record dedupe costs ~$0.50.
 

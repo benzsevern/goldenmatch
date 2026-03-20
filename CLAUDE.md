@@ -51,8 +51,11 @@
 - Blocking key choice dominates fuzzy performance — coarse keys create huge blocks
 - 1M exact dedupe: ~7.8s. 100K fuzzy (name+zip): ~39s via pipeline (was ~100s before parallel + early termination)
 - Benchmark note: `analyze_fuzzy.py` calls `find_fuzzy_matches` directly per block (sequential), not `score_blocks_parallel` — times vary 38-55s depending on block size sampling; parallel speedup only visible through `run_dedupe`/CLI
-- Vertex AI text-embedding-004 is the accuracy winner — 84.8% Abt-Buy, 98.0% DBLP-ACM zero-shot
-- Multi-field embedding helps structured data (DBLP-ACM +0.6pts) but hurts product data (Abt-Buy -2.4pts)
+- DBLP-ACM best: 97.2% F1 with multi-pass fuzzy (RapidFuzz), no embeddings needed
+- Abt-Buy best: 62.8% F1 with Vertex AI name+desc embeddings (t=0.88)
+- Amazon-Google best: 44.0% F1 with Vertex AI + 20-label reranking
+- Previous 84.8% Abt-Buy claim used top-1-per-record evaluation (invalid methodology) — corrected to 62.8%
+- Multi-field embedding helps structured data (DBLP-ACM) but not product data (Abt-Buy) — descriptions differ in format
 - Hybrid scoring (embedding + fuzzy) generally hurts — dilutes embedding signal on semantic tasks
 - Scale curve: 8,200 rec/s at 100K records on laptop (fuzzy + exact + golden)
 - Active sampling saves ~45% labels vs random but value is in fine-tuning, not threshold learning
