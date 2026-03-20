@@ -40,6 +40,11 @@
 - Clustering uses iterative Union-Find (not recursive) with lazy pair_scores
 - Blocking key choice dominates fuzzy performance — coarse keys create huge blocks
 - 1M exact dedupe: ~12s. 100K fuzzy (name+zip): ~100s
+- Vertex AI text-embedding-004 is the accuracy winner — 84.8% Abt-Buy, 98.0% DBLP-ACM zero-shot
+- Multi-field embedding helps structured data (DBLP-ACM +0.6pts) but hurts product data (Abt-Buy -2.4pts)
+- Hybrid scoring (embedding + fuzzy) generally hurts — dilutes embedding signal on semantic tasks
+- Scale curve: 8,200 rec/s at 100K records on laptop (fuzzy + exact + golden)
+- Active sampling saves ~45% labels vs random but value is in fine-tuning, not threshold learning
 
 ## Code Patterns
 - Internal columns prefixed with `__` (e.g. `__row_id__`, `__source__`, `__mk_*__`)
@@ -62,3 +67,8 @@
 - Textual headless screenshots: `async with app.run_test(size=(W,H)) as pilot: app.save_screenshot('path.svg')`
 - PyPI publishing: `source .testing/.env && python -m build && python -m twine upload dist/*`
 - `.testing/` folder is gitignored — store credentials, API keys, service account JSON there
+- GitHub Wiki repo uses `master` branch, main repo uses `main`
+- GitHub Wiki needs `_Sidebar.md` and `_Footer.md` for custom nav/footer
+- Rich terminal recording: `Console(record=True)` then `console.export_svg(title='...')`
+- PyPI version must be bumped in both `pyproject.toml` and `goldenmatch/__init__.py`
+- v0.2.0 is live on PyPI — `pip install goldenmatch` works
