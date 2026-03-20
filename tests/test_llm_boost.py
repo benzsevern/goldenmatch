@@ -132,7 +132,7 @@ class TestFeatureExtraction:
         pairs = [(0, 1, 0.9), (0, 2, 0.3)]
         matrix = extract_feature_matrix(pairs, df, ["name", "email"])
 
-        assert matrix.shape == (2, 10)  # 2 pairs, 5 features * 2 columns
+        assert matrix.shape == (2, 11)  # 2 pairs, 1 original_score + 5 features * 2 columns
 
     def test_identical_records_high_features(self):
         from goldenmatch.core.boost import extract_feature_matrix

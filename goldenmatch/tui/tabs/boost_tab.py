@@ -149,10 +149,11 @@ class BoostTab(Static):
         self.query_one("#btn-apply").display = False
 
     def _select_borderline_batch(self, n: int = 10) -> list[int]:
-        """Select the N most borderline pairs using active sampling.
+        """Select N pairs stratified across the score range.
 
-        Prioritizes bottleneck pairs from low-confidence clusters -- these are
-        the pairs where human labeling has the highest impact on accuracy.
+        Guarantees both high-score (likely match) and low-score (likely non-match)
+        pairs so the classifier sees both classes. Prioritizes bottleneck pairs
+        from low-confidence clusters.
         """
         if self._result is None:
             return []
@@ -161,27 +162,31 @@ class BoostTab(Static):
         if not pairs:
             return []
 
-        try:
-            from goldenmatch.core.active_sampling import select_active_pairs
-            indices = select_active_pairs(
-                pairs,
-                features=None,
-                current_probs=None,
-                labeled_indices=set(self._labels.keys()),
-                n=n * 2,  # oversample, then re-rank
-                strategy="combined",
-            )
-        except Exception as e:
-            logger.warning("Active sampling failed, using score-based fallback: %s", e)
-            import numpy as np
-            scores = np.array([s for _, _, s in pairs])
-            median = np.median(scores)
-            dists = np.abs(scores - median)
-            for idx in self._labels:
-                dists[idx] = float("inf")
-            indices = list(np.argsort(dists)[:n * 2])
+        import numpy as np
 
-        # Boost bottleneck pairs from low-confidence clusters to the front
+        scores = np.array([s for _, _, s in pairs])
+        labeled = set(self._labels.keys())
+
+        # Stratified sampling across score buckets
+        # Heavy weight on the decision boundary (0.7-0.95) where matches and non-matches mix
+        buckets = [
+            (0.95, 1.01, 2),   # very high -- likely matches, need some
+            (0.90, 0.95, 2),   # high -- mix of match/non-match
+            (0.85, 0.90, 2),   # borderline high
+            (0.80, 0.85, 2),   # borderline
+            (0.70, 0.80, 1),   # lower borderline
+            (0.00, 0.70, 1),   # low -- likely non-matches, need some
+        ]
+
+        selected = []
+        for lo, hi, count in buckets:
+            bucket_idx = [i for i in range(len(scores)) if lo <= scores[i] < hi and i not in labeled]
+            if bucket_idx:
+                np.random.seed(42 + len(selected))
+                chosen = list(np.random.choice(bucket_idx, size=min(count, len(bucket_idx)), replace=False))
+                selected.extend(chosen)
+
+        # Boost bottleneck pairs from low-confidence clusters
         bottleneck_pairs = set()
         if self._result.clusters:
             for cinfo in self._result.clusters.values():
@@ -189,15 +194,15 @@ class BoostTab(Static):
                 conf = cinfo.get("confidence", 1.0)
                 if bp is not None and conf < 0.8:
                     bottleneck_pairs.add(bp)
-                    bottleneck_pairs.add((bp[1], bp[0]))  # both orderings
+                    bottleneck_pairs.add((bp[1], bp[0]))
 
         def _priority(idx: int) -> tuple:
             a, b, s = pairs[idx]
             is_bottleneck = (a, b) in bottleneck_pairs
-            return (0 if is_bottleneck else 1, abs(s - 0.5))
+            return (0 if is_bottleneck else 1, -s)  # bottleneck first, then by score desc
 
-        indices.sort(key=_priority)
-        return indices[:n]
+        selected.sort(key=_priority)
+        return selected[:n]
 
     def _show_current_pair(self) -> None:
         """Display the current pair for labeling."""
@@ -305,7 +310,13 @@ class BoostTab(Static):
         self._show_current_pair()
 
     def _apply_boost(self) -> None:
-        """Train classifier on collected labels and re-score pairs."""
+        """Train classifier on collected labels and rerank pairs.
+
+        Uses the classifier to adjust scores near the decision boundary
+        rather than replacing all scores. High-confidence matches and
+        non-matches keep their original scores; only borderline pairs
+        get the classifier's opinion blended in.
+        """
         if self._result is None or not self._labels:
             return
 
@@ -321,42 +332,83 @@ class BoostTab(Static):
             columns = self._display_cols
             df = self._data
 
-            # Extract features for labeled pairs
+            # Check we have both classes
             labeled_indices = sorted(self._labels.keys())
-            labeled_pairs = [pairs[i] for i in labeled_indices]
             y = np.array([1.0 if self._labels[i] else 0.0 for i in labeled_indices])
+            n_pos = int(y.sum())
+            n_neg = len(y) - n_pos
 
+            if n_pos == 0 or n_neg == 0:
+                stats.update(
+                    f"[yellow]Need labels from both classes. "
+                    f"Got {n_pos} matches, {n_neg} non-matches. "
+                    f"Label more pairs with both y and n.[/yellow]"
+                )
+                return
+
+            labeled_pairs = [pairs[i] for i in labeled_indices]
             X_labeled = extract_feature_matrix(labeled_pairs, df, columns)
 
-            # Train logistic regression
             clf = LogisticRegression(max_iter=1000, class_weight="balanced")
             clf.fit(X_labeled, y)
 
-            # Score labeled set for feedback
-            from sklearn.model_selection import cross_val_score
-            if len(labeled_indices) >= 6:
-                cv_f1 = cross_val_score(clf, X_labeled, y, cv=min(3, len(labeled_indices) // 2), scoring="f1").mean()
-            else:
-                cv_f1 = 0.0
-
-            # Re-score ALL pairs
+            # Re-score ALL pairs with reranking blend
             X_all = extract_feature_matrix(pairs, df, columns)
             probs = clf.predict_proba(X_all)[:, 1]
 
-            # Build new scored pairs with classifier probabilities
-            new_pairs = [
-                (a, b, float(prob))
-                for (a, b, _), prob in zip(pairs, probs)
-            ]
+            # Blend: original score weighted by distance from decision boundary
+            # Near the boundary (prob ~0.5): trust classifier more
+            # Far from boundary (prob ~0 or ~1): trust original more
+            new_pairs = []
+            boosted = 0
+            for i, (a, b, original_score) in enumerate(pairs):
+                clf_prob = float(probs[i])
+                # How confident is the classifier? 0 = uncertain, 1 = certain
+                clf_confidence = abs(clf_prob - 0.5) * 2.0
+                # Blend weight: trust classifier more when it's confident
+                # and the original score is in the ambiguous range
+                alpha = min(clf_confidence, 0.7)  # cap at 70% classifier influence
+                blended = (1 - alpha) * original_score + alpha * clf_prob
+                new_pairs.append((a, b, blended))
+                if abs(blended - original_score) > 0.05:
+                    boosted += 1
 
-            stats.update(
-                f"[bold #2ecc71]Boost applied![/]  "
-                f"F1 (cross-val): [bold]{cv_f1:.1%}[/]  "
-                f"Labels used: [bold]{len(labeled_indices)}[/]  "
-                f"Re-scored [bold]{len(new_pairs)}[/] pairs."
-            )
+            # Quality check: does reranking help on the labeled pairs?
+            # Count how many labeled pairs moved in the right direction
+            improved = 0
+            degraded = 0
+            for idx in labeled_indices:
+                a, b, orig = pairs[idx]
+                blended_score = new_pairs[idx][2]
+                is_match = self._labels[idx]
+                if is_match:
+                    # Match: higher score = better
+                    if blended_score > orig:
+                        improved += 1
+                    elif blended_score < orig:
+                        degraded += 1
+                else:
+                    # Non-match: lower score = better
+                    if blended_score < orig:
+                        improved += 1
+                    elif blended_score > orig:
+                        degraded += 1
 
-            # Post message so app can update results
+            if degraded > improved and self._total_labeled >= 10:
+                stats.update(
+                    f"[bold yellow]Reranking may be hurting accuracy.[/]  "
+                    f"Improved {improved}, degraded {degraded} of {len(labeled_indices)} labeled pairs.  "
+                    f"Your data may need [bold]embedding fine-tuning[/] (LLM boost Level 2) "
+                    f"rather than feature reranking. Try: [bold]goldenmatch dedupe --llm-boost[/]"
+                )
+            else:
+                stats.update(
+                    f"[bold #2ecc71]Boost applied![/]  "
+                    f"Labels: [bold]{n_pos}[/] match + [bold]{n_neg}[/] non-match  "
+                    f"Adjusted [bold]{boosted}[/] of {len(new_pairs)} pairs.  "
+                    f"Quality: {improved} improved, {degraded} degraded."
+                )
+
             self.post_message(self.BoostComplete(new_pairs))
 
         except ImportError:

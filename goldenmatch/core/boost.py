@@ -73,17 +73,19 @@ def extract_feature_matrix(
     n_feats_per_col = 6 if embeddings_per_col else 5
 
     features = []
-    for id_a, id_b, _score in pairs:
+    for id_a, id_b, original_score in pairs:
         idx_a = id_to_idx.get(id_a)
         idx_b = id_to_idx.get(id_b)
         if idx_a is None or idx_b is None:
-            features.append([0.0] * (n_feats_per_col * len(columns)))
+            features.append([0.0] * (n_feats_per_col * len(columns) + 1))
             continue
 
         row_a = rows[idx_a]
         row_b = rows[idx_b]
 
-        pair_feats = []
+        # Start with the original pair score — the single most informative feature
+        pair_feats = [float(original_score)]
+
         for col in columns:
             val_a = str(row_a.get(col, "") or "")
             val_b = str(row_b.get(col, "") or "")
