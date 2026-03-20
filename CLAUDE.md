@@ -72,6 +72,7 @@
 - `match_one(record, df, mk)` in `core/match_one.py` — single-record matching primitive for streaming
 - `add_to_cluster(record_id, matches, clusters)` — incremental cluster update (join or merge)
 - `ANNBlocker.add_to_index(embedding)` / `ANNBlocker.query_one(embedding)` — incremental FAISS ops
+- PPRL: `bloom_filter` transform (CLK via SHA-256, configurable ngram/k/size), `dice`/`jaccard` scorers for fuzzy matching on encrypted data
 
 ## Gotchas
 - .docx files can't be read by Read tool — use `python-docx` or zipfile+XML

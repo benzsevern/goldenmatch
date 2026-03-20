@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 
 import jellyfish
@@ -60,8 +61,48 @@ def apply_transform(value: str | None, transform: str) -> str | None:
     elif transform == "last_token":
         tokens = value.strip().split()
         return tokens[-1] if tokens else value
+    elif transform == "bloom_filter" or transform.startswith("bloom_filter:"):
+        return _bloom_filter_transform(value, transform)
     else:
         raise ValueError(f"Unknown transform: {transform!r}")
+
+
+def _bloom_filter_transform(value: str, transform: str) -> str:
+    """Convert a string to a CLK (Cryptographic Longterm Key) as hex string.
+
+    Generates character-level n-grams, hashes each with k hash functions
+    into a fixed-size bit array, returns the bit array as a hex string.
+
+    Parameterized: bloom_filter or bloom_filter:ngram:k:size
+    """
+    # Parse parameters
+    if transform == "bloom_filter":
+        ngram_size, num_hashes, filter_size = 2, 20, 1024
+    else:
+        parts = transform.split(":")
+        ngram_size = int(parts[1])
+        num_hashes = int(parts[2])
+        filter_size = int(parts[3])
+
+    filter_bytes = filter_size // 8
+    bits = bytearray(filter_bytes)
+
+    # Generate character n-grams
+    padded = value.lower().strip()
+    if len(padded) < ngram_size:
+        padded = padded.ljust(ngram_size, "_")
+    ngrams = [padded[i:i + ngram_size] for i in range(len(padded) - ngram_size + 1)]
+
+    # Hash each n-gram with k different hash functions
+    for ngram in ngrams:
+        for k in range(num_hashes):
+            h = hashlib.sha256(f"{k}:{ngram}".encode()).hexdigest()
+            bit_pos = int(h, 16) % filter_size
+            byte_idx = bit_pos // 8
+            bit_idx = bit_pos % 8
+            bits[byte_idx] |= (1 << bit_idx)
+
+    return bits.hex()
 
 
 def apply_transforms(value: str | None, transforms: list[str]) -> str | None:

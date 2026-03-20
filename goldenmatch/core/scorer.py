@@ -37,6 +37,10 @@ def score_field(val_a: str | None, val_b: str | None, scorer: str) -> float | No
         return token_sort_ratio(val_a, val_b) / 100.0
     elif scorer == "soundex_match":
         return 1.0 if jellyfish.soundex(val_a) == jellyfish.soundex(val_b) else 0.0
+    elif scorer == "dice":
+        return _dice_score_single(val_a, val_b)
+    elif scorer == "jaccard":
+        return _jaccard_score_single(val_a, val_b)
     else:
         raise ValueError(f"Unknown scorer: {scorer!r}")
 
@@ -161,6 +165,10 @@ def _fuzzy_score_matrix(
         matrix = cdist(clean, clean, scorer=Levenshtein.normalized_similarity)
     elif scorer_name == "token_sort":
         matrix = cdist(clean, clean, scorer=token_sort_ratio) / 100.0
+    elif scorer_name == "dice":
+        return _dice_score_matrix(values)
+    elif scorer_name == "jaccard":
+        return _jaccard_score_matrix(values)
     else:
         raise ValueError(f"Unknown fuzzy scorer: {scorer_name!r}")
 
@@ -211,6 +219,101 @@ def _soundex_score_matrix(values: list) -> np.ndarray:
     """NxN soundex match matrix."""
     codes = [jellyfish.soundex(v) if v is not None else None for v in values]
     return _exact_score_matrix(codes)
+
+
+# ---------------------------------------------------------------------------
+# PPRL (Privacy-Preserving Record Linkage) scoring
+# ---------------------------------------------------------------------------
+
+def _hex_to_bits(hex_str: str) -> np.ndarray:
+    """Convert hex-encoded bloom filter to a numpy uint8 byte array."""
+    return np.frombuffer(bytes.fromhex(hex_str), dtype=np.uint8)
+
+
+def _dice_score_single(val_a: str, val_b: str) -> float:
+    """Dice coefficient on two hex-encoded bloom filters."""
+    bits_a = _hex_to_bits(val_a)
+    bits_b = _hex_to_bits(val_b)
+    intersection = np.unpackbits(np.bitwise_and(bits_a, bits_b)).sum()
+    total = np.unpackbits(bits_a).sum() + np.unpackbits(bits_b).sum()
+    return float(2.0 * intersection / total) if total > 0 else 0.0
+
+
+def _jaccard_score_single(val_a: str, val_b: str) -> float:
+    """Jaccard similarity on two hex-encoded bloom filters."""
+    bits_a = _hex_to_bits(val_a)
+    bits_b = _hex_to_bits(val_b)
+    intersection = np.unpackbits(np.bitwise_and(bits_a, bits_b)).sum()
+    union = np.unpackbits(np.bitwise_or(bits_a, bits_b)).sum()
+    return float(intersection / union) if union > 0 else 0.0
+
+
+def _dice_score_matrix(values: list) -> np.ndarray:
+    """NxN Dice coefficient matrix on hex-encoded bloom filters.
+
+    Uses vectorized numpy operations: unpack all bloom filters to bits,
+    compute intersection via matrix multiply, and popcount via sum.
+    """
+    n = len(values)
+    # Convert hex strings to bit matrix (n, filter_size_bits)
+    bit_arrays = []
+    for v in values:
+        if v is not None:
+            bit_arrays.append(np.unpackbits(_hex_to_bits(v)))
+        else:
+            bit_arrays.append(np.zeros(0, dtype=np.uint8))
+
+    # Handle variable-length or empty arrays
+    if not bit_arrays or len(bit_arrays[0]) == 0:
+        return np.zeros((n, n))
+
+    max_len = max(len(b) for b in bit_arrays)
+    bit_matrix = np.zeros((n, max_len), dtype=np.float32)
+    for i, b in enumerate(bit_arrays):
+        if len(b) > 0:
+            bit_matrix[i, :len(b)] = b
+
+    # Intersection: dot product of bit vectors
+    intersection = bit_matrix @ bit_matrix.T  # (n, n)
+
+    # Popcount per vector
+    popcounts = bit_matrix.sum(axis=1)  # (n,)
+
+    # Dice: 2*|A&B| / (|A| + |B|)
+    denom = popcounts[:, None] + popcounts[None, :]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        dice = np.where(denom > 0, 2.0 * intersection / denom, 0.0)
+
+    return dice.astype(np.float64)
+
+
+def _jaccard_score_matrix(values: list) -> np.ndarray:
+    """NxN Jaccard similarity matrix on hex-encoded bloom filters."""
+    n = len(values)
+    bit_arrays = []
+    for v in values:
+        if v is not None:
+            bit_arrays.append(np.unpackbits(_hex_to_bits(v)))
+        else:
+            bit_arrays.append(np.zeros(0, dtype=np.uint8))
+
+    if not bit_arrays or len(bit_arrays[0]) == 0:
+        return np.zeros((n, n))
+
+    max_len = max(len(b) for b in bit_arrays)
+    bit_matrix = np.zeros((n, max_len), dtype=np.float32)
+    for i, b in enumerate(bit_arrays):
+        if len(b) > 0:
+            bit_matrix[i, :len(b)] = b
+
+    intersection = bit_matrix @ bit_matrix.T
+    popcounts = bit_matrix.sum(axis=1)
+    # Union: |A| + |B| - |A&B|
+    union = popcounts[:, None] + popcounts[None, :] - intersection
+    with np.errstate(divide="ignore", invalid="ignore"):
+        jaccard = np.where(union > 0, intersection / union, 0.0)
+
+    return jaccard.astype(np.float64)
 
 
 def _build_null_mask(values: list) -> np.ndarray:

@@ -18,6 +18,7 @@ VALID_SIMPLE_TRANSFORMS = frozenset({
 VALID_SCORERS = frozenset({
     "exact", "jaro_winkler", "levenshtein", "token_sort", "soundex_match",
     "embedding", "record_embedding", "ensemble",
+    "dice", "jaccard",
 })
 
 VALID_STRATEGIES = frozenset({
@@ -26,6 +27,7 @@ VALID_STRATEGIES = frozenset({
 
 _SUBSTRING_RE = re.compile(r"^substring:\d+:\d+$")
 _QGRAM_RE = re.compile(r"^qgram:\d+$")
+_BLOOM_FILTER_RE = re.compile(r"^bloom_filter:\d+:\d+:\d+$")
 
 
 # ── FieldTransform ──────────────────────────────────────────────────────────
@@ -42,6 +44,8 @@ class FieldTransform(BaseModel):
         if _SUBSTRING_RE.match(t):
             return self
         if _QGRAM_RE.match(t):
+            return self
+        if t == "bloom_filter" or _BLOOM_FILTER_RE.match(t):
             return self
         raise ValueError(
             f"Invalid transform '{t}'. Must be one of {sorted(VALID_SIMPLE_TRANSFORMS)} "

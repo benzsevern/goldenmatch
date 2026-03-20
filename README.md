@@ -35,6 +35,7 @@ goldenmatch demo
 - **Active learning boost** — label 10 borderline pairs in the TUI, instantly retrain a classifier for 99% accuracy
 - **Cluster confidence scoring** — weakly-connected clusters flagged with bottleneck pair identification
 - **Single-record matching** — `match_one` primitive for streaming: embed, query ANN, score, return matches
+- **Privacy-preserving matching** — bloom filter transforms + Dice/Jaccard scoring for fuzzy matching on encrypted PII
 - **Before/after dashboard** — shareable HTML showing data transformation with charts
 - **Schema-free matching** — auto-maps columns between different schemas (full_name -> first_name + last_name)
 - **Cloud storage** — read directly from S3, GCS, or Azure Blob
@@ -190,6 +191,8 @@ output:
 | `ensemble` | max(jaro_winkler, token_sort, soundex) | Names with reordering |
 | `embedding` | Cosine similarity of sentence embeddings | Semantic matching |
 | `record_embedding` | Embed concatenated fields | Cross-field semantic matching |
+| `dice` | Dice coefficient on bloom filters | Privacy-preserving matching |
+| `jaccard` | Jaccard similarity on bloom filters | Privacy-preserving matching |
 
 ## Blocking Strategies
 
