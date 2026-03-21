@@ -237,17 +237,24 @@ def run_dedupe(
             if config.blocking is None:
                 continue
             from goldenmatch.core.probabilistic import train_em, score_probabilistic
-            # Train EM on sample pairs from blocks
+            # Build blocks first, then train EM on within-block pairs
+            blocks = build_blocks(combined_lf, config.blocking)
+            # Identify blocking fields so EM doesn't waste effort on them
+            blocking_fields = []
+            if config.blocking and config.blocking.keys:
+                for bk in config.blocking.keys:
+                    blocking_fields.extend(bk.fields)
             em_result = train_em(
                 collected_df, mk,
                 max_iterations=mk.em_iterations,
                 convergence=mk.convergence_threshold,
+                blocks=blocks,
+                blocking_fields=blocking_fields,
             )
             logger.info(
                 "F-S EM: converged=%s, iterations=%d, match_rate=%.4f",
                 em_result.converged, em_result.iterations, em_result.proportion_matched,
             )
-            blocks = build_blocks(combined_lf, config.blocking)
             for block in blocks:
                 block_df = block.df.collect() if hasattr(block.df, 'collect') else block.df
                 if across_files_only:
@@ -545,16 +552,22 @@ def run_match(
             if config.blocking is None:
                 continue
             from goldenmatch.core.probabilistic import train_em, score_probabilistic
+            blocks = build_blocks(combined_lf, config.blocking)
+            blocking_fields = []
+            if config.blocking and config.blocking.keys:
+                for bk in config.blocking.keys:
+                    blocking_fields.extend(bk.fields)
             em_result = train_em(
                 combined_df, mk,
                 max_iterations=mk.em_iterations,
                 convergence=mk.convergence_threshold,
+                blocks=blocks,
+                blocking_fields=blocking_fields,
             )
             logger.info(
                 "F-S EM: converged=%s, iterations=%d, match_rate=%.4f",
                 em_result.converged, em_result.iterations, em_result.proportion_matched,
             )
-            blocks = build_blocks(combined_lf, config.blocking)
             for block in blocks:
                 block_df = block.df.collect() if hasattr(block.df, 'collect') else block.df
                 pairs = score_probabilistic(block_df, mk, em_result, exclude_pairs=matched_pairs)

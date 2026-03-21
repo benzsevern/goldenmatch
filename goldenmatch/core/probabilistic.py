@@ -51,10 +51,16 @@ def comparison_vector(
     For 2-level fields: 0=disagree, 1=agree
     For 3-level fields: 0=disagree, 1=partial, 2=agree
     """
+    from goldenmatch.utils.transforms import apply_transforms
+
     levels = []
     for f in mk.fields:
         val_a = str(row_a.get(f.field, "")) if row_a.get(f.field) is not None else None
         val_b = str(row_b.get(f.field, "")) if row_b.get(f.field) is not None else None
+        # Apply field transforms before scoring (e.g. lowercase, strip)
+        if f.transforms:
+            val_a = apply_transforms(val_a, f.transforms)
+            val_b = apply_transforms(val_b, f.transforms)
         s = score_field(val_a, val_b, f.scorer)
 
         if s is None:
@@ -120,6 +126,42 @@ def _build_comparison_matrix(
     return matrix
 
 
+def _sample_blocked_pairs(
+    blocks: list,
+    n_pairs: int = 10000,
+    seed: int = 42,
+) -> list[tuple[int, int]]:
+    """Sample within-block pairs for EM training.
+
+    This produces a much higher match rate than random sampling because
+    records in the same block are more likely to be true matches.
+    """
+    rng = random.Random(seed)
+    all_block_pairs: list[tuple[int, int]] = []
+
+    for block in blocks:
+        block_df = block.df.collect() if hasattr(block.df, 'collect') else block.df
+        row_ids = block_df["__row_id__"].to_list()
+        if len(row_ids) < 2:
+            continue
+        # Limit per-block pairs for large blocks
+        if len(row_ids) > 100:
+            sampled_ids = rng.sample(row_ids, 100)
+        else:
+            sampled_ids = row_ids
+        for i in range(len(sampled_ids)):
+            for j in range(i + 1, len(sampled_ids)):
+                all_block_pairs.append((min(sampled_ids[i], sampled_ids[j]),
+                                        max(sampled_ids[i], sampled_ids[j])))
+
+    # Deduplicate and sample down if too many
+    all_block_pairs = list(set(all_block_pairs))
+    if len(all_block_pairs) > n_pairs:
+        all_block_pairs = rng.sample(all_block_pairs, n_pairs)
+
+    return all_block_pairs
+
+
 def train_em(
     df: pl.DataFrame,
     mk: MatchkeyConfig,
@@ -127,27 +169,48 @@ def train_em(
     max_iterations: int = 20,
     convergence: float = 0.001,
     seed: int = 42,
+    blocks: list | None = None,
+    blocking_fields: list[str] | None = None,
 ) -> EMResult:
     """Train Fellegi-Sunter model using Expectation-Maximization.
+
+    When blocks are provided, samples within-block pairs for training.
+    This produces much better m/u estimates because blocked pairs have
+    a higher true match rate than random pairs from the full dataset.
+
+    IMPORTANT: Fields used for blocking are always "agree" within blocks,
+    so they provide no discrimination for EM. If blocking_fields is provided,
+    those fields get fixed high-confidence priors instead of EM-estimated values.
 
     Args:
         df: DataFrame with __row_id__ and field columns.
         mk: Probabilistic matchkey config.
-        n_sample_pairs: Number of random pairs to sample for training.
+        n_sample_pairs: Number of pairs to sample for training.
         max_iterations: Maximum EM iterations.
         convergence: Stop when max change in any probability < this.
         seed: Random seed for pair sampling.
+        blocks: Optional list of BlockResult for within-block sampling.
+        blocking_fields: Fields used for blocking (excluded from EM training).
 
     Returns:
         EMResult with trained m/u probabilities and match weights.
     """
+    if blocking_fields is None:
+        blocking_fields = []
+
     cols = [f.field for f in mk.fields if f.field != "__record__"]
     row_lookup: dict[int, dict] = {}
     for row in df.select(["__row_id__"] + cols).to_dicts():
         row_lookup[row["__row_id__"]] = row
 
-    # Sample pairs
-    pairs = _sample_pairs(df, n_sample_pairs, seed)
+    # Sample pairs — prefer blocked pairs when available
+    if blocks:
+        pairs = _sample_blocked_pairs(blocks, n_sample_pairs, seed)
+        logger.info("EM training on %d within-block pairs", len(pairs))
+    else:
+        pairs = _sample_pairs(df, n_sample_pairs, seed)
+        logger.info("EM training on %d random pairs (no blocks provided)", len(pairs))
+
     if len(pairs) < 10:
         logger.warning("Too few pairs (%d) for EM training", len(pairs))
         return _fallback_result(mk)
@@ -233,8 +296,19 @@ def train_em(
         logger.warning("EM did not converge after %d iterations (delta=%.6f)", max_iterations, max_delta)
 
     # Compute match weights: log2(m/u)
+    # For blocking fields, use fixed priors since EM can't learn from
+    # fields that are always "agree" within blocks
     match_weights = {}
     for f in mk.fields:
+        if f.field in blocking_fields:
+            # Fixed weights: agree is positive, disagree is negative
+            if f.levels == 2:
+                match_weights[f.field] = [-3.0, 3.0]  # strong signal
+            else:
+                match_weights[f.field] = [-3.0, 1.0, 4.0]
+            logger.debug("Using fixed weights for blocking field '%s'", f.field)
+            continue
+
         weights = []
         for k in range(f.levels):
             m_val = max(m_probs[f.field][k], 1e-10)
@@ -276,34 +350,41 @@ def _fallback_result(mk: MatchkeyConfig) -> EMResult:
     )
 
 
-def compute_thresholds(em_result: EMResult) -> tuple[float, float]:
+def compute_thresholds(
+    em_result: EMResult,
+    scored_weights: list[float] | None = None,
+) -> tuple[float, float]:
     """Compute link and review thresholds from EM result.
 
     Returns (link_threshold, review_threshold) as normalized 0-1 scores.
     link_threshold: pairs above this are matches
     review_threshold: pairs between review and link are uncertain
+
+    If scored_weights are provided (actual pair weight distribution),
+    uses percentile-based thresholds. Otherwise uses a fixed default
+    that works well across datasets.
     """
-    # Compute max possible weight (all fields agree at highest level)
-    max_weight = 0.0
-    min_weight = 0.0
-    for field_name, weights in em_result.match_weights.items():
-        max_weight += max(weights)
-        min_weight += min(weights)
+    if scored_weights and len(scored_weights) > 50:
+        # Data-driven: use the distribution of actual pair scores
+        sorted_w = sorted(scored_weights)
+        n = len(sorted_w)
+        # Link at the (1 - match_rate) percentile — top match_rate% of pairs
+        # But clamp to reasonable range
+        match_pct = max(em_result.proportion_matched, 0.001)
+        link_idx = int(n * (1 - match_pct * 2))  # 2x match rate for headroom
+        link_idx = max(0, min(link_idx, n - 1))
+        link_norm = sorted_w[link_idx]
 
-    weight_range = max_weight - min_weight
-    if weight_range == 0:
-        return 0.85, 0.60
+        review_idx = int(n * (1 - match_pct * 5))  # 5x for review band
+        review_idx = max(0, min(review_idx, n - 1))
+        review_norm = sorted_w[review_idx]
 
-    # Link threshold at ~85th percentile of weight range
-    link_raw = min_weight + 0.85 * weight_range
-    # Review threshold at ~60th percentile
-    review_raw = min_weight + 0.60 * weight_range
+        return round(max(0.40, min(0.95, link_norm)), 4), round(max(0.25, min(link_norm - 0.05, review_norm)), 4)
 
-    # Normalize to 0-1
-    link_norm = (link_raw - min_weight) / weight_range
-    review_norm = (review_raw - min_weight) / weight_range
-
-    return round(link_norm, 4), round(review_norm, 4)
+    # Fixed defaults that work well with pre-blocked pairs
+    # 0.50 is permissive enough to catch partial matches while
+    # still filtering clear non-matches (which score near 0)
+    return 0.50, 0.35
 
 
 def score_probabilistic(

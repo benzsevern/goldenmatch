@@ -189,12 +189,18 @@ class MatchEngine:
                 if config.blocking is None:
                     continue
                 from goldenmatch.core.probabilistic import train_em, score_probabilistic
+                blocks = build_blocks(combined_lf, config.blocking)
+                blocking_fields = []
+                if config.blocking and config.blocking.keys:
+                    for bk in config.blocking.keys:
+                        blocking_fields.extend(bk.fields)
                 em_result = train_em(
                     collected_df, mk,
                     max_iterations=mk.em_iterations,
                     convergence=mk.convergence_threshold,
+                    blocks=blocks,
+                    blocking_fields=blocking_fields,
                 )
-                blocks = build_blocks(combined_lf, config.blocking)
                 for block in blocks:
                     block_df = block.df.collect() if hasattr(block.df, 'collect') else block.df
                     pairs = score_probabilistic(block_df, mk, em_result, exclude_pairs=matched_pairs)
