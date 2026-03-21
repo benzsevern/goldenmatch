@@ -237,6 +237,21 @@ def run_dedupe(
             all_pairs = rerank_top_pairs(all_pairs, collected_df, mk)
             break  # rerank once with the first rerank-enabled matchkey
 
+    # ── Step 3.4: LLM SCORER (optional) ──
+    if config.llm_scorer and config.llm_scorer.enabled and all_pairs:
+        from goldenmatch.core.llm_scorer import llm_score_pairs
+        all_pairs = llm_score_pairs(
+            all_pairs, collected_df,
+            auto_threshold=config.llm_scorer.auto_threshold,
+            candidate_lo=config.llm_scorer.candidate_lo,
+            candidate_hi=config.llm_scorer.candidate_hi,
+            provider=config.llm_scorer.provider,
+            model=config.llm_scorer.model,
+            batch_size=config.llm_scorer.batch_size,
+        )
+        # Filter to scored matches only
+        all_pairs = [(a, b, s) for a, b, s in all_pairs if s > 0.5]
+
     # ── Step 3.5: LLM BOOST (optional) ──
     if config.llm_boost and all_pairs:
         try:
@@ -496,6 +511,20 @@ def run_match(
         if mk.type == "weighted" and mk.rerank:
             all_pairs = rerank_top_pairs(all_pairs, combined_df, mk)
             break
+
+    # ── Step 4.6: LLM SCORER (optional) ──
+    if config.llm_scorer and config.llm_scorer.enabled and all_pairs:
+        from goldenmatch.core.llm_scorer import llm_score_pairs
+        all_pairs = llm_score_pairs(
+            all_pairs, combined_df,
+            auto_threshold=config.llm_scorer.auto_threshold,
+            candidate_lo=config.llm_scorer.candidate_lo,
+            candidate_hi=config.llm_scorer.candidate_hi,
+            provider=config.llm_scorer.provider,
+            model=config.llm_scorer.model,
+            batch_size=config.llm_scorer.batch_size,
+        )
+        all_pairs = [(a, b, s) for a, b, s in all_pairs if s > 0.5]
 
     # ── Step 5: Normalize pairs so target ID is always first ──
     normalized: list[tuple[int, int, float]] = []

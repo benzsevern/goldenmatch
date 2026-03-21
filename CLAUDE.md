@@ -52,11 +52,15 @@
 - 1M exact dedupe: ~7.8s. 100K fuzzy (name+zip): ~39s via pipeline (was ~100s before parallel + early termination)
 - Benchmark note: `analyze_fuzzy.py` calls `find_fuzzy_matches` directly per block (sequential), not `score_blocks_parallel` — times vary 38-55s depending on block size sampling; parallel speedup only visible through `run_dedupe`/CLI
 - DBLP-ACM best: 97.2% F1 with multi-pass fuzzy (RapidFuzz), no embeddings needed
-- Abt-Buy best: 62.8% F1 with Vertex AI name+desc embeddings (t=0.88)
+- Abt-Buy best: 81.7% F1 with Vertex AI candidates + GPT-4o-mini scorer (~$0.74)
+- Abt-Buy zero-shot best: 62.8% F1 with Vertex AI name+desc embeddings (t=0.88)
 - Amazon-Google best: 44.0% F1 with Vertex AI + 20-label reranking
-- Previous 84.8% Abt-Buy claim used top-1-per-record evaluation (invalid methodology) — corrected to 62.8%
+- LLM-as-scorer approach: Vertex embeddings generate candidates, GPT-4o-mini scores borderline pairs (0.75-0.95 range), auto-accept pairs above 0.95. Dramatically outperforms fine-tuning and cross-encoder approaches on product matching.
+- Cross-encoder Level 3 (300 labels, CPU): 65.5% F1 on Abt-Buy — modest improvement over Vertex baseline, massively outperformed by LLM scorer
+- MiniLM fine-tuning Level 2 (300 labels): 58.7% F1 on Abt-Buy — worse than Vertex baseline because MiniLM is a weaker model
+- Boost tab logistic regression reranking can hurt on product data where string-distance features are weaker than embeddings. Quality check detects this and recommends --llm-boost instead.
+- Previous 84.8% Abt-Buy claim used top-1-per-record evaluation (invalid methodology) — corrected
 - Multi-field embedding helps structured data (DBLP-ACM) but not product data (Abt-Buy) — descriptions differ in format
-- Hybrid scoring (embedding + fuzzy) generally hurts — dilutes embedding signal on semantic tasks
 - Scale curve: 8,200 rec/s at 100K records on laptop (fuzzy + exact + golden)
 - Active sampling saves ~45% labels vs random but value is in fine-tuning, not threshold learning
 
@@ -76,6 +80,7 @@
 - `add_to_cluster(record_id, matches, clusters)` — incremental cluster update (join or merge)
 - `ANNBlocker.add_to_index(embedding)` / `ANNBlocker.query_one(embedding)` — incremental FAISS ops
 - PPRL: `bloom_filter` transform (CLK via SHA-256, configurable ngram/k/size), `dice`/`jaccard` scorers for fuzzy matching on encrypted data
+- LLM scorer: `llm_score_pairs()` in `core/llm_scorer.py` — sends borderline pairs to GPT/Claude for yes/no match decisions, used as pipeline step after embedding candidate generation
 
 ## Gotchas
 - .docx files can't be read by Read tool — use `python-docx` or zipfile+XML

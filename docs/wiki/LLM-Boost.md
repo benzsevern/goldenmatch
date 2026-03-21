@@ -50,13 +50,19 @@ Activated if Level 2 F1 < 60%:
 
 ### Optimal Strategy
 
-The best results come from training on multi-pass blocking pairs (clean training data) and scoring on ANN blocking pairs (high recall):
+For product matching, the **LLM scorer** (not LLM boost) is the best approach:
 
 | Approach | Abt-Buy F1 | Cost |
 |----------|-----------|------|
-| Zero-shot | 44.5% | $0 |
-| Bi-encoder fine-tune | 52.7% | ~$0.30 |
-| **Optimal (train multi-pass, score ANN)** | **59.5%** | **~$0.30** |
+| Zero-shot (MiniLM) | 44.5% | $0 |
+| Zero-shot (Vertex AI) | 62.8% | ~$0.05 |
+| Bi-encoder fine-tune (Level 2) | 58.7% | ~$0.30 |
+| Cross-encoder (Level 3) | 65.5% | ~$0.50 |
+| **LLM scorer (Vertex + GPT-4o-mini)** | **81.7%** | **~$0.74** |
+
+The LLM scorer (`llm_scorer: {enabled: true}` in config) dramatically outperforms fine-tuning because GPT-4o-mini understands product semantics that local models cannot learn from 300 labels.
+
+For structured data (names, addresses), LLM boost fine-tuning remains effective:
 
 ## Model Persistence
 

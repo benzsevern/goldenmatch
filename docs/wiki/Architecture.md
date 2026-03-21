@@ -139,6 +139,18 @@ Two operations in `cluster.py` for fine-grained undo:
 
 Available via CLI (`goldenmatch unmerge RECORD_ID`) and programmatically via `MatchEngine.unmerge_record()` / `MatchEngine.unmerge_cluster()`.
 
+### LLM Scorer
+
+`core/llm_scorer.py` sends borderline pairs to GPT-4o-mini (or Claude) for yes/no match decisions. Three-tier approach:
+
+1. **Auto-accept** (score >= 0.95): high-confidence pairs skip the LLM
+2. **LLM score** (0.75-0.95): borderline pairs batched and sent to the LLM
+3. **Auto-reject** (< 0.75): low-confidence pairs keep original scores
+
+The LLM sees both records' fields and decides "same entity?" — it understands model number abbreviations, naming conventions, and semantic equivalences that embedding similarity alone cannot capture. On Abt-Buy, this approach jumps from 62.8% (embedding-only) to **81.7% F1** at ~$0.74 cost.
+
+Configured via `llm_scorer` in the config YAML. Supports OpenAI and Anthropic APIs, auto-detected from environment variables.
+
 ### Streaming Foundation (match_one)
 
 The `core/match_one.py` module provides a single-record matching primitive -- the building block for streaming entity resolution:

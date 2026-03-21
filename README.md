@@ -41,6 +41,7 @@ goldenmatch demo
 - **Cloud storage** — read directly from S3, GCS, or Azure Blob
 - **API connector** — pull from Salesforce, HubSpot, or any REST/GraphQL API
 - **Scheduled runs** — cron-like scheduling with run history
+- **LLM scorer** — GPT/Claude scores borderline pairs for 81.7% F1 on product matching (~$0.74)
 - **LLM boost** — optional Claude/GPT-4 labeling + fine-tuning for harder datasets
 - **Golden records** — 5 merge strategies (most_complete, majority_vote, source_priority, most_recent, first_non_null)
 - **Parallel fuzzy scoring** — blocks scored concurrently via thread pool with intra-field early termination
@@ -160,6 +161,13 @@ matchkeys:
         weight: 1.0
         column_weights: {title: 2.0, authors: 1.0, venue: 0.5}  # bias embedding toward title
 
+llm_scorer:
+  enabled: true              # score borderline pairs with GPT/Claude
+  auto_threshold: 0.95       # auto-accept pairs above this
+  candidate_lo: 0.75         # LLM scores pairs in [0.75, 0.95]
+  # provider: openai         # auto-detected from OPENAI_API_KEY
+  # model: gpt-4o-mini       # default, cheapest option
+
 blocking:
   strategy: adaptive         # static | adaptive | sorted_neighborhood | multi_pass | ann | ann_pairs | canopy
   auto_select: true          # auto-pick best key by histogram analysis
@@ -263,14 +271,15 @@ goldenmatch dedupe products.csv --llm-boost
 
 ### Leipzig Entity Resolution Benchmarks
 
-| Dataset | Best Strategy | F1 | Time |
+| Dataset | Best Strategy | F1 | Cost |
 |---------|--------------|-----|------|
-| **DBLP-ACM** (2.6K vs 2.3K) | multi-pass + fuzzy | **97.2%** | 3.6s |
-| **DBLP-Scholar** (2.6K vs 64K) | multi-pass + fuzzy | **74.7%** | 83.9s |
-| **Abt-Buy** (1K vs 1K) | Vertex AI (name+desc) | **62.8%** | 56s |
-| **Amazon-Google** (1.4K vs 3.2K) | Vertex AI + reranking | **44.0%** | 110s |
+| **DBLP-ACM** (2.6K vs 2.3K) | multi-pass + fuzzy | **97.2%** | $0 |
+| **DBLP-Scholar** (2.6K vs 64K) | multi-pass + fuzzy | **74.7%** | $0 |
+| **Abt-Buy** (1K vs 1K) | Vertex AI + GPT-4o-mini scorer | **81.7%** | ~$0.74 |
+| **Abt-Buy** (zero-shot) | Vertex AI embeddings | **62.8%** | ~$0.05 |
+| **Amazon-Google** (1.4K vs 3.2K) | Vertex AI + reranking | **44.0%** | ~$0.10 |
 
-**Zero config, zero labels, zero GPU.** RapidFuzz multi-pass fuzzy matching dominates on structured data. Vertex AI's `text-embedding-004` adds value on product matching where fuzzy string comparison fails.
+**Structured data (names, addresses, bibliographic):** RapidFuzz multi-pass fuzzy matching at 97.2% — zero cost, zero labels. **Product matching:** Vertex AI embeddings for candidate generation + GPT-4o-mini scorer for borderline pairs achieves 81.7% at ~$0.74 total cost.
 
 ### Throughput (Scale Curve)
 
@@ -290,7 +299,7 @@ For datasets over 1M records, use `goldenmatch sync` (database mode) with increm
 
 | | **GoldenMatch** | **dedupe** | **Splink** | **Zingg** | **Ditto** |
 |---|---|---|---|---|---|
-| Abt-Buy F1 | **62.8%** | ~75% | ~70% | ~80% | 89.3% |
+| Abt-Buy F1 | **81.7%** | ~75% | ~70% | ~80% | 89.3% |
 | DBLP-ACM F1 | **97.2%** | ~96% | ~95% | ~96% | 99.0% |
 | Training required | No | Yes | Yes | Yes | Yes (1000+) |
 | Zero-config | Yes | No | No | No | No |
@@ -299,7 +308,7 @@ For datasets over 1M records, use `goldenmatch sync` (database mode) with increm
 | REST API / MCP | Both | Cloud only | No | No | No |
 | GPU required | No | No | No | Spark | Yes |
 
-GoldenMatch's sweet spot is **ease of use + competitive accuracy on structured data**. On bibliographic matching (DBLP-ACM), GoldenMatch hits 97.2% with zero config — within 2pts of Ditto. Product matching (Abt-Buy) is harder without training; use the Boost tab to label 10-20 pairs for a quick accuracy jump, or `--llm-boost` for full fine-tuning.
+GoldenMatch's sweet spot is **ease of use + competitive accuracy**. On bibliographic matching (DBLP-ACM), GoldenMatch hits 97.2% with zero config. On product matching (Abt-Buy), the LLM scorer reaches 81.7% — within 8pts of Ditto's 89.3%, but with zero training labels and no GPU. Ditto requires 1000+ hand-labeled pairs and a GPU.
 
 ## Interactive TUI
 

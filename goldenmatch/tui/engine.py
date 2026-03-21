@@ -188,6 +188,20 @@ class MatchEngine:
                 all_pairs = rerank_top_pairs(all_pairs, collected_df, mk)
                 break
 
+        # ── LLM scorer (optional) ──
+        if config.llm_scorer and config.llm_scorer.enabled and all_pairs:
+            from goldenmatch.core.llm_scorer import llm_score_pairs
+            all_pairs = llm_score_pairs(
+                all_pairs, collected_df,
+                auto_threshold=config.llm_scorer.auto_threshold,
+                candidate_lo=config.llm_scorer.candidate_lo,
+                candidate_hi=config.llm_scorer.candidate_hi,
+                provider=config.llm_scorer.provider,
+                model=config.llm_scorer.model,
+                batch_size=config.llm_scorer.batch_size,
+            )
+            all_pairs = [(a, b, s) for a, b, s in all_pairs if s > 0.5]
+
         # ── Cluster ──
         all_ids = collected_df["__row_id__"].to_list()
         max_cluster_size = 100

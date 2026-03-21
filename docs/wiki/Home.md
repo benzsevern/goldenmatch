@@ -36,7 +36,7 @@ goldenmatch setup
 
 | Page | Details |
 |------|---------|
-| [Benchmarks](Benchmarks.md) | 97.2% DBLP-ACM, 62.8% Abt-Buy, 8,200 rec/s |
+| [Benchmarks](Benchmarks.md) | 97.2% DBLP-ACM, 81.7% Abt-Buy, 8,200 rec/s |
 | [Comparison](Comparison.md) | vs dedupe, Splink, Zingg, Ditto |
 | [Architecture](Architecture.md) | Project structure and module map |
 

@@ -281,6 +281,19 @@ class OutputConfig(BaseModel):
     run_name: str | None = None
 
 
+# ── LLM Scorer Config ─────────────────────────────────────────────────────
+
+
+class LLMScorerConfig(BaseModel):
+    enabled: bool = False
+    provider: str | None = None  # "openai" or "anthropic", auto-detected if None
+    model: str | None = None  # e.g. "gpt-4o-mini", auto-detected if None
+    auto_threshold: float = 0.95  # auto-accept pairs above this
+    candidate_lo: float = 0.75  # lower bound of LLM scoring range
+    candidate_hi: float = 0.95  # upper bound (same as auto_threshold)
+    batch_size: int = 20
+
+
 # ── MatchSettingsConfig ─────────────────────────────────────────────────────
 
 
@@ -301,6 +314,7 @@ class GoldenMatchConfig(BaseModel):
     standardization: StandardizationConfig | None = None
     validation: ValidationConfig | None = None
     llm_boost: bool = False
+    llm_scorer: LLMScorerConfig | None = None
 
     @model_validator(mode="after")
     def _validate_fuzzy_needs_blocking(self) -> "GoldenMatchConfig":
