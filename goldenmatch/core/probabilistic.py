@@ -67,13 +67,23 @@ def comparison_vector(
             levels.append(0)  # treat nulls as disagree
         elif f.levels == 2:
             levels.append(1 if s >= f.partial_threshold else 0)
-        else:  # 3 levels
+        elif f.levels == 3:
             if s >= 0.95:
-                levels.append(2)  # agree
+                levels.append(2)
             elif s >= f.partial_threshold:
-                levels.append(1)  # partial
+                levels.append(1)
             else:
-                levels.append(0)  # disagree
+                levels.append(0)
+        else:
+            # N levels: evenly spaced thresholds from 0 to 1
+            # Level 0 = lowest (disagree), Level N-1 = highest (exact agree)
+            n = f.levels
+            level = 0
+            for k in range(1, n):
+                threshold = k / n
+                if s >= threshold:
+                    level = k
+            levels.append(level)
     return levels
 
 
@@ -245,42 +255,63 @@ def train_em(
     for row in df.select(["__row_id__"] + cols).to_dicts():
         row_lookup[row["__row_id__"]] = row
 
-    # Sample pairs — prefer blocked pairs when available
-    if blocks:
-        pairs = _sample_blocked_pairs(blocks, n_sample_pairs, seed)
-        logger.info("EM training on %d within-block pairs", len(pairs))
-    else:
-        pairs = _sample_pairs(df, n_sample_pairs, seed)
-        logger.info("EM training on %d random pairs (no blocks provided)", len(pairs))
-
-    if len(pairs) < 10:
-        logger.warning("Too few pairs (%d) for EM training", len(pairs))
+    # ── Step 1: Estimate u from RANDOM pairs (Splink approach) ──
+    # Random pairs are overwhelmingly non-matches, so the observed
+    # level distribution approximates u directly. No EM needed for u.
+    random_pairs = _sample_pairs(df, min(n_sample_pairs, 5000), seed)
+    if len(random_pairs) < 10:
+        logger.warning("Too few pairs (%d) for EM training", len(random_pairs))
         return _fallback_result(mk)
 
-    # Build comparison matrix
+    random_matrix = _build_comparison_matrix(random_pairs, row_lookup, mk)
+    u_probs = {}
+    for j, f in enumerate(mk.fields):
+        n_levels = f.levels
+        counts = [0.0] * n_levels
+        for level in range(n_levels):
+            counts[level] = float((random_matrix[:, j] == level).sum())
+        total = sum(counts) + n_levels * 1e-6
+        u_probs[f.field] = [(c + 1e-6) / total for c in counts]
+
+    # Override blocking fields with neutral u (since random pairs give biased u for blocked fields)
+    for f in mk.fields:
+        if f.field in blocking_fields:
+            if f.levels == 2:
+                u_probs[f.field] = [0.50, 0.50]  # neutral
+            else:
+                u_probs[f.field] = [0.34, 0.33, 0.33]
+
+    logger.info("u-probabilities estimated from %d random pairs", len(random_pairs))
+
+    # ── Step 2: Get blocked pairs for m estimation ──
+    if blocks:
+        pairs = _sample_blocked_pairs(blocks, n_sample_pairs, seed)
+        logger.info("EM training m on %d within-block pairs", len(pairs))
+    else:
+        pairs = random_pairs
+        logger.info("No blocks provided; using random pairs for m estimation")
+
+    if len(pairs) < 10:
+        return _fallback_result(mk)
+
     comp_matrix = _build_comparison_matrix(pairs, row_lookup, mk)
     n_pairs = len(pairs)
     n_fields = len(mk.fields)
 
-    # Initialize parameters
-    p_match = 0.05  # prior: 5% of pairs are matches
-    # Initialize m/u with reasonable priors
+    # Initialize m with strong priors (matches mostly agree at highest level)
+    p_match = 0.02  # conservative prior
     m_probs = {}
-    u_probs = {}
     for j, f in enumerate(mk.fields):
         n_levels = f.levels
-        if n_levels == 2:
-            m_probs[f.field] = [0.1, 0.9]  # matches mostly agree
-            u_probs[f.field] = [0.9, 0.1]  # non-matches mostly disagree
-        else:
-            m_probs[f.field] = [0.05, 0.15, 0.80]  # matches: mostly full agree
-            u_probs[f.field] = [0.80, 0.15, 0.05]  # non-matches: mostly disagree
+        # Exponential prior: highest level gets most mass
+        raw = [2 ** k for k in range(n_levels)]
+        total = sum(raw)
+        m_probs[f.field] = [r / total for r in raw]
 
-    # EM iterations
+    # ── Step 3: EM iterations — only update m, fix u ──
     converged = False
     for iteration in range(max_iterations):
         old_m = {k: list(v) for k, v in m_probs.items()}
-        old_u = {k: list(v) for k, v in u_probs.items()}
 
         # E-step: compute posterior P(match | comparison vector)
         posteriors = np.zeros(n_pairs)
@@ -289,7 +320,6 @@ def train_em(
             log_u = 0.0
             for j, f in enumerate(mk.fields):
                 level = comp_matrix[i, j]
-                # Clamp to avoid log(0)
                 m_val = max(m_probs[f.field][level], 1e-10)
                 u_val = max(u_probs[f.field][level], 1e-10)
                 log_m += math.log(m_val)
@@ -298,36 +328,32 @@ def train_em(
             log_match = math.log(max(p_match, 1e-10)) + log_m
             log_nonmatch = math.log(max(1 - p_match, 1e-10)) + log_u
 
-            # Numerically stable softmax
             max_log = max(log_match, log_nonmatch)
             posteriors[i] = math.exp(log_match - max_log) / (
                 math.exp(log_match - max_log) + math.exp(log_nonmatch - max_log)
             )
 
-        # M-step: update parameters
+        # M-step: update ONLY m_probs and p_match (u is fixed)
         total_match = posteriors.sum()
-        total_nonmatch = n_pairs - total_match
         p_match = max(total_match / n_pairs, 1e-6)
 
         for j, f in enumerate(mk.fields):
+            if f.field in blocking_fields:
+                continue  # skip blocked fields
             n_levels = f.levels
             new_m = [0.0] * n_levels
-            new_u = [0.0] * n_levels
-
             for level in range(n_levels):
                 mask = comp_matrix[:, j] == level
                 new_m[level] = (posteriors[mask].sum() + 1e-6) / (total_match + n_levels * 1e-6)
-                new_u[level] = ((1 - posteriors[mask]).sum() + 1e-6) / (total_nonmatch + n_levels * 1e-6)
-
             m_probs[f.field] = new_m
-            u_probs[f.field] = new_u
 
-        # Check convergence
+        # Check convergence (only m changes)
         max_delta = 0.0
         for f in mk.fields:
+            if f.field in blocking_fields:
+                continue
             for k in range(f.levels):
                 max_delta = max(max_delta, abs(m_probs[f.field][k] - old_m[f.field][k]))
-                max_delta = max(max_delta, abs(u_probs[f.field][k] - old_u[f.field][k]))
 
         if max_delta < convergence:
             converged = True
@@ -343,11 +369,12 @@ def train_em(
     match_weights = {}
     for f in mk.fields:
         if f.field in blocking_fields:
-            # Fixed weights: agree is positive, disagree is negative
-            if f.levels == 2:
-                match_weights[f.field] = [-3.0, 3.0]  # strong signal
-            else:
-                match_weights[f.field] = [-3.0, 1.0, 4.0]
+            # Fixed weights: linearly increasing from -3 to +3
+            n = f.levels
+            match_weights[f.field] = [
+                -3.0 + 6.0 * k / (n - 1) if n > 1 else 3.0
+                for k in range(n)
+            ]
             logger.debug("Using fixed weights for blocking field '%s'", f.field)
             continue
 
