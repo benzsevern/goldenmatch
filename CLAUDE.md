@@ -49,17 +49,22 @@
 - Matchkey transforms have native Polars fast path (`_try_native_chain` in matchkey.py)
 - Clustering uses iterative Union-Find (not recursive) with lazy pair_scores
 - Blocking key choice dominates fuzzy performance — coarse keys create huge blocks
-- 1M exact dedupe: ~7.8s. 100K fuzzy (name+zip): ~39s via pipeline
-- Scale curve: 8,200 rec/s at 100K records on laptop (fuzzy + exact + golden)
+- 1M exact dedupe: ~7.8s. 100K fuzzy (name+zip): ~12.8s via pipeline
+- Scale curve: 7,823 rec/s at 100K records on laptop (fuzzy + exact + golden)
+- 1M records: OOM in-memory — use DuckDB backend or chunked processing for >500K records
 
 ## Accuracy Strategy
 - Structured data (names, addresses, bibliographic): fuzzy matching alone → 97.2% F1. No embeddings or LLM needed.
-- Product matching: Vertex AI candidates + GPT-4o-mini LLM scorer → 81.7% F1 (~$0.74). Config: `llm_scorer: {enabled: true}`
-- LLM scorer sends borderline pairs (0.75-0.95) to GPT, auto-accepts >0.95. Dramatically outperforms fine-tuning (58.7%) and cross-encoder (65.5%).
+- Product matching: embedding+ANN baseline 44.5% F1 → +LLM scorer **66.3% F1** (precision 35%→95%, cost $0.04). Config: `llm_scorer: {enabled: true, budget: {max_cost_usd: 0.10}}`
+- LLM scorer sends borderline pairs (0.75-0.95) to GPT, auto-accepts >0.95. Budget cap of $0.05 covers typical datasets.
+- Fellegi-Sunter probabilistic: 98.8% precision, 57.6% recall, 72.8% F1 on DBLP-ACM. Opt-in for automatic parameter estimation and high-precision use cases. Uses Splink-style EM (fix u from random pairs, train only m).
+- Learned blocking: auto-discovers predicates, 96.9% F1 matching hand-tuned static blocking
 - Boost tab reranking can hurt on product data — quality check warns user to try `--llm-boost` instead
 - Multi-field embedding helps structured data (DBLP-ACM) but not product data — descriptions differ in format across sources
 - Benchmark evaluation: always use threshold-based pair generation, NOT top-1-per-record (argmax)
 - Leipzig benchmarks: `python tests/benchmarks/run_leipzig.py`
+- v0.3.0 benchmarks: `python tests/benchmarks/run_v030_quick.py` (F-S, learned blocking, LLM budget)
+- LLM+embedding benchmark: `python tests/benchmarks/run_llm_budget_bench.py` (requires OPENAI_API_KEY)
 
 ## Code Patterns
 - Internal columns prefixed with `__` (e.g. `__row_id__`, `__source__`, `__mk_*__`)
@@ -79,7 +84,10 @@
 - PPRL: `bloom_filter` transform (CLK via SHA-256, configurable ngram/k/size), `dice`/`jaccard` scorers for fuzzy matching on encrypted data
 - LLM scorer: `llm_score_pairs()` in `core/llm_scorer.py` — accepts `LLMScorerConfig` with optional `BudgetConfig` for cost tracking, model tiering, and graceful degradation
 - LLM budget: `core/llm_budget.py` — `BudgetTracker` class tracks token usage, cost, and enforces `max_cost_usd`/`max_calls` limits. Budget summary in `EngineStats.llm_cost`
-- Fellegi-Sunter: `core/probabilistic.py` — EM-trained m/u probabilities, comparison vectors (2/3-level), match weights as log-likelihood ratios. New matchkey `type: probabilistic`
+- Fellegi-Sunter: `core/probabilistic.py` — EM-trained m/u probabilities, comparison vectors (2/3/N-level), match weights as log-likelihood ratios. New matchkey `type: probabilistic`
+  - Splink-style EM: u estimated from random pairs (fixed), only m trained via EM. Blocking fields get fixed neutral priors
+  - Continuous EM (`train_em_continuous`) available but not default — discrete levels are more stable
+  - `ContinuousEMResult` + `score_probabilistic_continuous` for advanced users
 - Learned blocking: `core/learned_blocking.py` — data-driven predicate selection via two-pass approach (sample → train → apply). Config: `strategy: learned`
 - Plugin system: `plugins/registry.py` — `PluginRegistry` singleton discovers plugins via entry points. Schema validators fall through to plugins for unknown scorer/transform names
 - Connectors: `connectors/base.py` — `BaseConnector` ABC with `load_connector()` dispatch. Built-in: snowflake, databricks, bigquery, hubspot, salesforce. All optional deps.

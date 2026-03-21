@@ -45,7 +45,7 @@ goldenmatch demo
 - **Cloud storage** — read directly from S3, GCS, or Azure Blob
 - **API connector** — pull from Salesforce, HubSpot, or any REST/GraphQL API
 - **Scheduled runs** — cron-like scheduling with run history
-- **LLM scorer with budget controls** — GPT/Claude scores borderline pairs for 81.7% F1 (~$0.74). Budget caps (`max_cost_usd`, `max_calls`), model tiering, graceful degradation
+- **LLM scorer with budget controls** — GPT-4o-mini scores borderline pairs, boosting product matching from 44.5% to **66.3% F1** (precision 35%→95%) for just $0.04. Budget caps, model tiering, graceful degradation
 - **LLM boost** — optional Claude/GPT-4 labeling + fine-tuning for harder datasets
 - **Golden records** — 5 merge strategies (most_complete, majority_vote, source_priority, most_recent, first_non_null)
 - **Parallel fuzzy scoring** — blocks scored concurrently via thread pool with intra-field early termination
@@ -86,6 +86,30 @@ Run `goldenmatch setup` for an interactive walkthrough:
 Guides you through GPU mode selection, Vertex AI / Colab / local GPU configuration, LLM boost API keys, and database sync — with copy-paste commands at every step.
 
 ![GPU Selection](docs/screenshots/setup-gpu.svg)
+
+## Benchmarks (v0.3.0)
+
+Tested on [Leipzig benchmark datasets](https://dbs.uni-leipzig.de/research/projects/object-matching/benchmark-datasets-for-entity-resolution) (DBLP-ACM, Abt-Buy).
+
+### Accuracy
+
+| Dataset | Strategy | Precision | Recall | F1 | Cost |
+|---------|----------|-----------|--------|-----|------|
+| DBLP-ACM (bibliographic) | Weighted fuzzy | 97.2% | 97.1% | **97.2%** | $0 |
+| DBLP-ACM | Fellegi-Sunter (opt-in) | 98.8% | 57.6% | 72.8% | $0 |
+| DBLP-ACM | Learned blocking | 97.6% | 96.3% | 96.9% | $0 |
+| Abt-Buy (product) | Embedding + ANN | 35.5% | 59.4% | 44.5% | $0 |
+| Abt-Buy | **Embedding + ANN + LLM** | **95.4%** | **50.9%** | **66.3%** | **$0.04** |
+
+### Speed
+
+| Records | Time | Throughput | Memory |
+|---------|------|-----------|--------|
+| 1,000 | 0.15s | 6,667 rec/s | 101 MB |
+| 10,000 | 1.67s | 5,975 rec/s | 123 MB |
+| 100,000 | 12.78s | **7,823 rec/s** | 546 MB |
+
+Measured on a laptop (Windows 11, Python 3.12, 16GB RAM) with fuzzy + exact + golden record pipeline.
 
 ## Quick Start
 
