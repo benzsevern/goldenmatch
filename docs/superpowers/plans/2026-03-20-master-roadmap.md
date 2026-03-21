@@ -702,13 +702,13 @@ For each phase:
 
 ## Current Status
 
-- [ ] **Phase 1A: LLM Budget Controller** — Not started
-- [ ] **Phase 1B: Fellegi-Sunter Probabilistic Model** — Not started
-- [ ] **Phase 2A: Plugin Architecture** — Not started
-- [ ] **Phase 2B: Learned Blocking** — Not started
-- [ ] **Phase 2C: Auto-Config / Zero-Config** — Not started
-- [ ] **Phase 3A: Connectors** — Not started
-- [ ] **Phase 3B: Explainability** — Not started
-- [ ] **Phase 3C: DuckDB Backend** — Not started
-- [ ] **Phase 4A: Streaming / CDC** — Not started
-- [ ] **Phase 4B: Multi-Table Graph ER** — Not started
+- [x] **Phase 1A: LLM Budget Controller** — Done (86fedab)
+- [x] **Phase 1B: Fellegi-Sunter Probabilistic Model** — Done (86fedab)
+- [x] **Phase 2A: Plugin Architecture** — Done (5e8e0f3)
+- [x] **Phase 2B: Learned Blocking** — Done (5e8e0f3)
+- [x] **Phase 2C: Auto-Config / Zero-Config** — Done (5e8e0f3)
+- [x] **Phase 3A: Connectors** — Done (9158234)
+- [x] **Phase 3B: Explainability** — Done (9158234)
+- [x] **Phase 3C: DuckDB Backend** — Done (9158234)
+- [x] **Phase 4A: Streaming / CDC** — Done (308e98e)
+- [x] **Phase 4B: Multi-Table Graph ER** — Done (308e98e)
