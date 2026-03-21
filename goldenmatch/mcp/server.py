@@ -161,6 +161,69 @@ def create_server(file_paths: list[str], config_path: str | None = None) -> Serv
                 },
             ),
             Tool(
+                name="match_record",
+                description=(
+                    "Match a single record against the loaded dataset in real-time. "
+                    "Paste a record's fields and instantly see if it matches any existing record. "
+                    "Uses the configured matchkeys, scorers, and thresholds. "
+                    "Example: {\"name\": \"John Smith\", \"email\": \"john@test.com\", \"zip\": \"10001\"}"
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "record": {
+                            "type": "object",
+                            "description": "Record fields to match against the dataset",
+                        },
+                        "threshold": {
+                            "type": "number",
+                            "description": "Minimum score to consider a match (default: use config threshold)",
+                        },
+                        "top_k": {
+                            "type": "integer",
+                            "description": "Max matches to return (default 5)",
+                            "default": 5,
+                        },
+                    },
+                    "required": ["record"],
+                },
+            ),
+            Tool(
+                name="unmerge_record",
+                description=(
+                    "Remove a record from its cluster. The record becomes a singleton. "
+                    "Remaining cluster members are re-clustered using stored pair scores. "
+                    "Use this to fix bad merges."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "record_id": {
+                            "type": "integer",
+                            "description": "Row ID of the record to unmerge",
+                        },
+                    },
+                    "required": ["record_id"],
+                },
+            ),
+            Tool(
+                name="shatter_cluster",
+                description=(
+                    "Break an entire cluster into individual records. "
+                    "All members become singletons. Use when a cluster is completely wrong."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "cluster_id": {
+                            "type": "integer",
+                            "description": "Cluster ID to shatter",
+                        },
+                    },
+                    "required": ["cluster_id"],
+                },
+            ),
+            Tool(
                 name="profile_data",
                 description="Get data quality profile: column types, null rates, unique counts, sample values.",
                 inputSchema={"type": "object", "properties": {}},
@@ -212,6 +275,12 @@ def _handle_tool(name: str, args: dict) -> dict:
         return _tool_get_cluster(args["cluster_id"])
     elif name == "get_golden_record":
         return _tool_get_golden_record(args["cluster_id"])
+    elif name == "match_record":
+        return _tool_match_record(args.get("record", {}), args.get("threshold"), args.get("top_k", 5))
+    elif name == "unmerge_record":
+        return _tool_unmerge_record(args["record_id"])
+    elif name == "shatter_cluster":
+        return _tool_shatter_cluster(args["cluster_id"])
     elif name == "profile_data":
         return _tool_profile_data()
     elif name == "export_results":
@@ -333,6 +402,95 @@ def _tool_get_golden_record(cluster_id: int) -> dict:
     row = golden_rows.to_dicts()[0]
     clean = {k: v for k, v in row.items() if not k.startswith("__")}
     return {"cluster_id": cluster_id, "golden_record": clean}
+
+
+def _tool_match_record(record: dict, threshold: float | None, top_k: int) -> dict:
+    """Match a single record against the dataset using match_one."""
+    from goldenmatch.core.match_one import match_one
+
+    matchkeys = _config.get_matchkeys()
+    all_matches = []
+
+    for mk in matchkeys:
+        if mk.type != "weighted":
+            continue
+        t = threshold if threshold is not None else (mk.threshold or 0.80)
+        # Temporarily override threshold if user specified one
+        import copy
+        mk_copy = copy.deepcopy(mk)
+        mk_copy.threshold = t
+
+        matches = match_one(record, _engine.data, mk_copy)
+        for row_id, score in matches:
+            idx = _id_to_idx.get(row_id)
+            if idx is not None:
+                clean = {k: v for k, v in _rows[idx].items() if not k.startswith("__")}
+                all_matches.append({
+                    "row_id": row_id,
+                    "score": round(score, 4),
+                    "record": clean,
+                })
+
+    # Deduplicate by row_id, keep highest score
+    seen = {}
+    for m in all_matches:
+        rid = m["row_id"]
+        if rid not in seen or m["score"] > seen[rid]["score"]:
+            seen[rid] = m
+    deduped = sorted(seen.values(), key=lambda x: -x["score"])[:top_k]
+
+    return {
+        "matches": deduped,
+        "count": len(deduped),
+        "input_record": record,
+    }
+
+
+def _tool_unmerge_record(record_id: int) -> dict:
+    """Remove a record from its cluster."""
+    global _result
+
+    updated = _engine.unmerge_record(record_id)
+    if updated is None:
+        return {"error": "No matching results. Run matching first."}
+
+    _result = updated
+
+    # Find the record's new cluster
+    for cid, info in _result.clusters.items():
+        if record_id in info["members"]:
+            return {
+                "status": "unmerged",
+                "record_id": record_id,
+                "new_cluster_id": cid,
+                "new_cluster_size": info["size"],
+                "total_clusters": _result.stats.total_clusters,
+            }
+
+    return {"status": "unmerged", "record_id": record_id}
+
+
+def _tool_shatter_cluster(cluster_id: int) -> dict:
+    """Break a cluster into singletons."""
+    global _result
+
+    info = _result.clusters.get(cluster_id)
+    if info is None:
+        return {"error": f"Cluster {cluster_id} not found"}
+
+    member_count = info["size"]
+    updated = _engine.unmerge_cluster(cluster_id)
+    if updated is None:
+        return {"error": "No matching results. Run matching first."}
+
+    _result = updated
+
+    return {
+        "status": "shattered",
+        "cluster_id": cluster_id,
+        "records_freed": member_count,
+        "total_clusters": _result.stats.total_clusters,
+    }
 
 
 def _tool_profile_data() -> dict:
