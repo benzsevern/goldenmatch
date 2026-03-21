@@ -7,7 +7,7 @@ Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode
 [![PyPI](https://img.shields.io/pypi/v/goldenmatch?color=d4a017)](https://pypi.org/project/goldenmatch/)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-688%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-792%20passing-brightgreen)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/benzsevern/goldenmatch/blob/main/scripts/gpu_colab_notebook.ipynb)
 
 ### See it in action
@@ -25,8 +25,9 @@ goldenmatch demo
 
 - **Zero-config** — `goldenmatch dedupe file.csv` auto-detects columns, picks scorers, runs automatically
 - **Gold-themed TUI** — interactive interface with keyboard shortcuts, live threshold tuning, setup wizard
-- **10 scoring methods** — exact, Jaro-Winkler, Levenshtein, token sort, soundex, ensemble, embedding, record embedding, dice, jaccard
-- **7 blocking strategies** — static, adaptive, sorted neighborhood, multi-pass, ANN, ann_pairs, canopy
+- **10+ scoring methods** — exact, Jaro-Winkler, Levenshtein, token sort, soundex, ensemble, embedding, record embedding, dice, jaccard + plugin extensible
+- **8 blocking strategies** — static, adaptive, sorted neighborhood, multi-pass, ANN, ann_pairs, canopy, **learned** (data-driven predicate selection)
+- **Fellegi-Sunter probabilistic matching** — EM-trained m/u probabilities, automatic threshold estimation, comparison vectors with 2/3-level agreement
 - **Vertex AI embeddings** — 85%+ F1 accuracy with no GPU needed (Google Cloud managed API)
 - **Database sync** — incremental Postgres matching with persistent ANN index and golden record versioning
 - **REST API + MCP Server** — real-time matching via HTTP or Claude Desktop (12 tools: match, unmerge, explain, config advisor, etc.)
@@ -44,7 +45,7 @@ goldenmatch demo
 - **Cloud storage** — read directly from S3, GCS, or Azure Blob
 - **API connector** — pull from Salesforce, HubSpot, or any REST/GraphQL API
 - **Scheduled runs** — cron-like scheduling with run history
-- **LLM scorer** — GPT/Claude scores borderline pairs for 81.7% F1 on product matching (~$0.74)
+- **LLM scorer with budget controls** — GPT/Claude scores borderline pairs for 81.7% F1 (~$0.74). Budget caps (`max_cost_usd`, `max_calls`), model tiering, graceful degradation
 - **LLM boost** — optional Claude/GPT-4 labeling + fine-tuning for harder datasets
 - **Golden records** — 5 merge strategies (most_complete, majority_vote, source_priority, most_recent, first_non_null)
 - **Parallel fuzzy scoring** — blocks scored concurrently via thread pool with intra-field early termination
@@ -52,6 +53,12 @@ goldenmatch demo
 - **Auto-select blocking** — histogram analysis picks the best blocking key automatically
 - **Dynamic block splitting** — oversized blocks auto-split by highest-cardinality column (zero config)
 - **Large dataset mode** — chunked processing for files that don't fit in memory
+- **Plugin architecture** — extend with custom scorers, transforms, connectors, and golden strategies via pip-installable plugins
+- **Enterprise connectors** — Snowflake, Databricks, BigQuery, HubSpot, Salesforce (optional deps)
+- **DuckDB backend** — out-of-core processing for 10M+ records without Spark
+- **Natural language explainability** — template-based per-pair and per-cluster explanations at zero LLM cost
+- **Streaming / CDC mode** — incremental record matching with micro-batch or immediate processing
+- **Multi-table graph ER** — match across entity types with cross-relationship evidence propagation
 
 ## Installation
 
@@ -60,6 +67,11 @@ pip install goldenmatch                    # core (files only)
 pip install goldenmatch[embeddings]        # + sentence-transformers, FAISS
 pip install goldenmatch[llm]               # + Claude/OpenAI for LLM boost
 pip install goldenmatch[postgres]          # + Postgres database sync
+pip install goldenmatch[snowflake]        # + Snowflake connector
+pip install goldenmatch[bigquery]         # + BigQuery connector
+pip install goldenmatch[databricks]       # + Databricks connector
+pip install goldenmatch[salesforce]       # + Salesforce connector
+pip install goldenmatch[duckdb]           # + DuckDB backend
 
 # Run the setup wizard to configure GPU, API keys, and database:
 goldenmatch setup

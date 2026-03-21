@@ -12,7 +12,7 @@
 
 ## Testing
 - `pytest --tb=short` from project root — all tests must pass after every change
-- 688 tests, run in ~35s
+- 792 tests (+ 6 skipped for optional deps), run in ~30s
 - Fixtures in `tests/conftest.py`: `sample_csv`, `sample_csv_b`, `sample_parquet`
 - TUI tests use `pytest-asyncio` with `app.run_test()` pilot
 - Benchmark scripts in `tests/bench_1m.py`, `tests/analyze_results.py` (not part of test suite)
@@ -29,7 +29,10 @@
 - `goldenmatch/db/` — Postgres integration (connector, sync, reconcile, clusters, ANN index)
 - `goldenmatch/api/` — REST API server (`goldenmatch serve`)
 - `goldenmatch/mcp/` — MCP server for Claude Desktop (`goldenmatch mcp-serve`)
-- Core modules: explainer, report, dashboard, graph, anomaly, diff, rollback, schema_match, chunked, cloud_ingest, api_connector, scheduler, gpu, vertex_embedder, llm_scorer, lineage, match_one
+- `goldenmatch/plugins/` — Plugin system (registry, base protocols for scorer/transform/connector/golden_strategy)
+- `goldenmatch/connectors/` — Data source connectors (Snowflake, Databricks, BigQuery, HubSpot, Salesforce)
+- `goldenmatch/backends/` — Storage backends (DuckDB for out-of-core processing)
+- Core modules: explainer, explain, report, dashboard, graph, anomaly, diff, rollback, schema_match, chunked, cloud_ingest, api_connector, scheduler, gpu, vertex_embedder, llm_scorer, llm_budget, lineage, match_one, probabilistic, learned_blocking, streaming, graph_er
 - Config: Pydantic models in `config/schemas.py`, YAML loading in `config/loader.py`
 - `config/loader.py` normalizes golden_rules and standardization sections from flat YAML
 
@@ -74,8 +77,17 @@
 - `add_to_cluster(record_id, matches, clusters)` — incremental cluster update (join or merge)
 - `ANNBlocker.add_to_index(embedding)` / `ANNBlocker.query_one(embedding)` — incremental FAISS ops
 - PPRL: `bloom_filter` transform (CLK via SHA-256, configurable ngram/k/size), `dice`/`jaccard` scorers for fuzzy matching on encrypted data
-- LLM scorer: `llm_score_pairs()` in `core/llm_scorer.py` — sends borderline pairs to GPT/Claude for yes/no match decisions, used as pipeline step after embedding candidate generation
-- Lineage: `core/lineage.py` — `build_lineage` + `save_lineage` saves per-pair field-level explanations to `{run_name}_lineage.json` sidecar. Auto-generated when pipeline writes output.
+- LLM scorer: `llm_score_pairs()` in `core/llm_scorer.py` — accepts `LLMScorerConfig` with optional `BudgetConfig` for cost tracking, model tiering, and graceful degradation
+- LLM budget: `core/llm_budget.py` — `BudgetTracker` class tracks token usage, cost, and enforces `max_cost_usd`/`max_calls` limits. Budget summary in `EngineStats.llm_cost`
+- Fellegi-Sunter: `core/probabilistic.py` — EM-trained m/u probabilities, comparison vectors (2/3-level), match weights as log-likelihood ratios. New matchkey `type: probabilistic`
+- Learned blocking: `core/learned_blocking.py` — data-driven predicate selection via two-pass approach (sample → train → apply). Config: `strategy: learned`
+- Plugin system: `plugins/registry.py` — `PluginRegistry` singleton discovers plugins via entry points. Schema validators fall through to plugins for unknown scorer/transform names
+- Connectors: `connectors/base.py` — `BaseConnector` ABC with `load_connector()` dispatch. Built-in: snowflake, databricks, bigquery, hubspot, salesforce. All optional deps.
+- Explainability: `core/explain.py` — `explain_pair_nl()` template-based NL explanations, `explain_cluster_nl()` cluster summaries. Zero LLM cost.
+- Lineage: `core/lineage.py` — `build_lineage` + `save_lineage` + `save_lineage_streaming` (no 10K cap). Supports `natural_language=True` for NL explanations. Auto-generated when pipeline writes output.
+- DuckDB backend: `backends/duckdb_backend.py` — user-maintained DuckDB read/write. `read_table()`, `write_table()`, `list_tables()`. Optional dep.
+- Streaming: `core/streaming.py` — `StreamProcessor` for incremental record matching (immediate or micro-batch). Uses `match_one` → `add_to_cluster`.
+- Graph ER: `core/graph_er.py` — multi-table entity resolution with evidence propagation across relationships. Iterative convergence.
 - MCP `suggest_config` tool: analyze bad merges, identify guilty fields, suggest threshold/weight changes
 - REST review queue: `GET /reviews` returns borderline pairs for steward review, `POST /reviews/decide` records approve/reject decisions
 - Daemon mode: `watch_daemon()` in `db/watch.py` — adds health endpoint (HTTP /health), PID file, SIGTERM handling to watch mode
@@ -99,6 +111,6 @@
 - GitHub Wiki needs `_Sidebar.md` and `_Footer.md` for custom nav/footer
 - Rich terminal recording: `Console(record=True)` then `console.export_svg(title='...')`
 - PyPI version must be bumped in both `pyproject.toml` and `goldenmatch/__init__.py`
-- v0.2.0 is live on PyPI — `pip install goldenmatch` works
+- v0.3.0 is live on PyPI — `pip install goldenmatch` works
 - Adding a TUI tab: update `test_tabs_exist` in `tests/test_tui.py` — asserts exact tab count (currently 6)
 - OpenAI API key: set `OPENAI_API_KEY` env var. Used by LLM scorer and LLM boost. Key stored in `.testing/.env`
