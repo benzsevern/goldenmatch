@@ -415,6 +415,85 @@ def _build_ann_pair_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[Blo
     )]
 
 
+def _build_learned_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
+    """Build blocks using learned predicates.
+
+    Two-pass approach:
+    1. If cached rules exist, load and apply them
+    2. Otherwise, run a fast sample with static blocking to generate training pairs,
+       then learn predicates from those pairs
+    """
+    from goldenmatch.core.learned_blocking import (
+        apply_learned_blocks,
+        learn_blocking_rules,
+        load_learned_rules,
+        save_learned_rules,
+    )
+
+    # Try loading cached rules
+    if config.learned_cache_path:
+        cached = load_learned_rules(config.learned_cache_path)
+        if cached:
+            logger.info("Using cached learned blocking rules from %s", config.learned_cache_path)
+            return apply_learned_blocks(lf, cached, config.max_block_size)
+
+    # Pass 1: fast static blocking on first key to generate training pairs
+    df = lf.collect()
+    sample_size = min(config.learned_sample_size, df.height)
+    if sample_size < df.height:
+        sample_df = df.sample(sample_size, seed=42)
+    else:
+        sample_df = df
+
+    # Use static blocking with the configured keys for the sample run
+    sample_config = config.model_copy(update={"strategy": "static"})
+    sample_blocks = _build_static_blocks(sample_df.lazy(), sample_config)
+
+    # Score sample blocks to get training pairs
+    from goldenmatch.core.scorer import find_fuzzy_matches
+    from goldenmatch.config.schemas import MatchkeyConfig, MatchkeyField
+
+    # Build a simple weighted matchkey for scoring
+    cols = [c for c in df.columns if not c.startswith("__")]
+    if not cols:
+        return _build_static_blocks(lf, sample_config)
+
+    # Use first few columns for a quick score
+    score_fields = [
+        MatchkeyField(field=c, scorer="token_sort", weight=1.0, transforms=["lowercase"])
+        for c in cols[:3]
+    ]
+    score_mk = MatchkeyConfig(name="_learned_score", type="weighted", threshold=0.5, fields=score_fields)
+
+    scored_pairs = []
+    for block in sample_blocks:
+        block_df = block.df.collect() if hasattr(block.df, 'collect') else block.df
+        pairs = find_fuzzy_matches(block_df, score_mk)
+        scored_pairs.extend(pairs)
+
+    if not scored_pairs:
+        logger.warning("No scored pairs from sample run. Falling back to static blocking.")
+        return _build_static_blocks(lf, sample_config)
+
+    # Pass 2: learn rules from scored pairs
+    rules = learn_blocking_rules(
+        sample_df,
+        scored_pairs,
+        columns=cols,
+        min_recall=config.learned_min_recall,
+        min_reduction=config.learned_min_reduction,
+        predicate_depth=config.learned_predicate_depth,
+    )
+
+    # Cache rules
+    if config.learned_cache_path and rules:
+        save_learned_rules(rules, config.learned_cache_path)
+        logger.info("Saved learned blocking rules to %s", config.learned_cache_path)
+
+    # Apply to full dataset
+    return apply_learned_blocks(lf, rules, config.max_block_size)
+
+
 def _build_canopy_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
     """Build blocks using TF-IDF canopy clustering.
 
@@ -535,6 +614,9 @@ def build_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
     if config.auto_select and len(config.keys) > 1:
         best_key = select_best_blocking_key(lf, config.keys, config.max_block_size)
         config = config.model_copy(update={"keys": [best_key], "auto_select": False})
+
+    if config.strategy == "learned":
+        return _build_learned_blocks(lf, config)
 
     if config.strategy == "canopy":
         return _build_canopy_blocks(lf, config)

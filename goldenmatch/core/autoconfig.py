@@ -401,9 +401,9 @@ def auto_configure(files: list[tuple[str, str]]) -> GoldenMatchConfig:
                 if f.scorer in ("embedding", "record_embedding") and not f.model:
                     f.model = model
 
-    # Build blocking (required for weighted matchkeys)
-    has_weighted = any(mk.type == "weighted" for mk in matchkeys)
-    blocking = build_blocking(profiles, combined) if has_weighted else None
+    # Build blocking (required for weighted/probabilistic matchkeys)
+    has_fuzzy = any(mk.type in ("weighted", "probabilistic") for mk in matchkeys)
+    blocking = build_blocking(profiles, combined) if has_fuzzy else None
 
     # Build config
     config = GoldenMatchConfig(
@@ -414,3 +414,46 @@ def auto_configure(files: list[tuple[str, str]]) -> GoldenMatchConfig:
     )
 
     return config
+
+
+def build_probabilistic_matchkeys(profiles: list[ColumnProfile]) -> list[MatchkeyConfig]:
+    """Generate Fellegi-Sunter probabilistic matchkeys from column profiles.
+
+    Produces a single probabilistic matchkey using all matchable columns
+    with appropriate comparison levels and partial thresholds.
+    """
+    fields = []
+    for p in profiles:
+        if p.col_type in ("numeric", "date", "identifier", "description"):
+            continue
+
+        scorer_info = _SCORER_MAP.get(p.col_type)
+        if not scorer_info:
+            continue
+
+        scorer, _weight, transforms = scorer_info
+
+        # Determine comparison levels based on scorer type
+        if scorer == "exact":
+            levels = 2
+            partial_threshold = 0.9
+        else:
+            levels = 3
+            partial_threshold = 0.8
+
+        fields.append(MatchkeyField(
+            field=p.name,
+            scorer=scorer,
+            transforms=transforms,
+            levels=levels,
+            partial_threshold=partial_threshold,
+        ))
+
+    if not fields:
+        return []
+
+    return [MatchkeyConfig(
+        name="probabilistic_auto",
+        type="probabilistic",
+        fields=fields,
+    )]

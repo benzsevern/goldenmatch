@@ -86,9 +86,14 @@ class MatchkeyField(BaseModel):
         for t in self.transforms:
             FieldTransform(transform=t)  # reuse validation
         if self.scorer is not None and self.scorer not in VALID_SCORERS:
-            raise ValueError(
-                f"Invalid scorer '{self.scorer}'. Must be one of {sorted(VALID_SCORERS)}."
-            )
+            # Check plugin registry before rejecting
+            from goldenmatch.plugins.registry import PluginRegistry
+            registry = PluginRegistry.instance()
+            if not registry.has_scorer(self.scorer):
+                raise ValueError(
+                    f"Invalid scorer '{self.scorer}'. Must be one of {sorted(VALID_SCORERS)} "
+                    f"or a registered plugin scorer."
+                )
         return self
 
 
@@ -175,7 +180,12 @@ class BlockingConfig(BaseModel):
     keys: list[BlockingKeyConfig]
     max_block_size: int = 5000
     skip_oversized: bool = False
-    strategy: Literal["static", "adaptive", "sorted_neighborhood", "multi_pass", "ann", "canopy", "ann_pairs"] = "static"
+    strategy: Literal["static", "adaptive", "sorted_neighborhood", "multi_pass", "ann", "canopy", "ann_pairs", "learned"] = "static"
+    learned_sample_size: int = 5000
+    learned_min_recall: float = 0.95
+    learned_min_reduction: float = 0.90
+    learned_predicate_depth: int = 2
+    learned_cache_path: str | None = None  # persist for reuse
     auto_suggest: bool = False
     auto_select: bool = False
     sub_block_keys: list[BlockingKeyConfig] | None = None

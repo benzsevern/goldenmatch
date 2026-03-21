@@ -42,6 +42,11 @@ def score_field(val_a: str | None, val_b: str | None, scorer: str) -> float | No
     elif scorer == "jaccard":
         return _jaccard_score_single(val_a, val_b)
     else:
+        # Check plugin registry
+        from goldenmatch.plugins.registry import PluginRegistry
+        plugin = PluginRegistry.instance().get_scorer(scorer)
+        if plugin is not None:
+            return plugin.score_pair(val_a, val_b)
         raise ValueError(f"Unknown scorer: {scorer!r}")
 
 
