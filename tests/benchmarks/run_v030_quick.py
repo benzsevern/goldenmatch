@@ -73,7 +73,7 @@ from goldenmatch.config.schemas import MatchkeyConfig, MatchkeyField, BlockingCo
 from goldenmatch.core.matchkey import compute_matchkeys
 from goldenmatch.core.blocker import build_blocks
 from goldenmatch.core.scorer import score_blocks_parallel
-from goldenmatch.core.probabilistic import train_em, score_probabilistic
+from goldenmatch.core.probabilistic import train_em, score_probabilistic, train_em_continuous, score_probabilistic_continuous
 
 # ── Benchmark 1: Weighted baseline ──
 print("=" * 70)
@@ -119,7 +119,7 @@ mk_fs = MatchkeyConfig(
 t0 = time.perf_counter()
 print("    Building blocks for EM training...", flush=True)
 blocks_fs = build_blocks(df.lazy(), blocking)
-print(f"    Training EM on within-block pairs from {len(blocks_fs)} blocks...", flush=True)
+print(f"    Training EM on {len(blocks_fs)} blocks...", flush=True)
 em = train_em(df, mk_fs, n_sample_pairs=15000, max_iterations=25, blocks=blocks_fs, blocking_fields=["year"])
 print(f"    EM: converged={em.converged}, iters={em.iterations}, match_rate={em.proportion_matched:.4f}", flush=True)
 
@@ -128,7 +128,6 @@ pairs_fs = []
 for i, block in enumerate(blocks_fs):
     block_df = block.df.collect() if hasattr(block.df, 'collect') else block.df
     if block_df.height > 500:
-        # Skip oversized blocks for speed
         continue
     p = score_probabilistic(block_df, mk_fs, em)
     pairs_fs.extend(p)

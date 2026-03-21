@@ -239,7 +239,6 @@ def run_dedupe(
             from goldenmatch.core.probabilistic import train_em, score_probabilistic
             # Build blocks first, then train EM on within-block pairs
             blocks = build_blocks(combined_lf, config.blocking)
-            # Identify blocking fields so EM doesn't waste effort on them
             blocking_fields = []
             if config.blocking and config.blocking.keys:
                 for bk in config.blocking.keys:
@@ -257,9 +256,6 @@ def run_dedupe(
             )
             for block in blocks:
                 block_df = block.df.collect() if hasattr(block.df, 'collect') else block.df
-                if across_files_only:
-                    # Filter handled after scoring
-                    pass
                 pairs = score_probabilistic(block_df, mk, em_result, exclude_pairs=matched_pairs)
                 if across_files_only:
                     pairs = [
@@ -557,16 +553,13 @@ def run_match(
             if config.blocking and config.blocking.keys:
                 for bk in config.blocking.keys:
                     blocking_fields.extend(bk.fields)
+            from goldenmatch.core.probabilistic import train_em, score_probabilistic
             em_result = train_em(
                 combined_df, mk,
                 max_iterations=mk.em_iterations,
                 convergence=mk.convergence_threshold,
                 blocks=blocks,
                 blocking_fields=blocking_fields,
-            )
-            logger.info(
-                "F-S EM: converged=%s, iterations=%d, match_rate=%.4f",
-                em_result.converged, em_result.iterations, em_result.proportion_matched,
             )
             for block in blocks:
                 block_df = block.df.collect() if hasattr(block.df, 'collect') else block.df

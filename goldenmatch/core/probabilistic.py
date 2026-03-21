@@ -77,6 +77,48 @@ def comparison_vector(
     return levels
 
 
+def continuous_scores(
+    row_a: dict,
+    row_b: dict,
+    mk: MatchkeyConfig,
+) -> list[float]:
+    """Compute continuous field scores for a pair (Winkler extension).
+
+    Returns raw scorer output per field (0.0-1.0), preserving the
+    full continuous signal instead of discretizing into levels.
+    """
+    from goldenmatch.utils.transforms import apply_transforms
+
+    scores = []
+    for f in mk.fields:
+        val_a = str(row_a.get(f.field, "")) if row_a.get(f.field) is not None else None
+        val_b = str(row_b.get(f.field, "")) if row_b.get(f.field) is not None else None
+        if f.transforms:
+            val_a = apply_transforms(val_a, f.transforms)
+            val_b = apply_transforms(val_b, f.transforms)
+        s = score_field(val_a, val_b, f.scorer)
+        scores.append(s if s is not None else 0.0)
+    return scores
+
+
+def _build_continuous_matrix(
+    pairs: list[tuple[int, int]],
+    row_lookup: dict[int, dict],
+    mk: MatchkeyConfig,
+) -> np.ndarray:
+    """Build NxF continuous score matrix."""
+    n_pairs = len(pairs)
+    n_fields = len(mk.fields)
+    matrix = np.zeros((n_pairs, n_fields), dtype=np.float64)
+
+    for i, (a, b) in enumerate(pairs):
+        row_a = row_lookup.get(a, {})
+        row_b = row_lookup.get(b, {})
+        matrix[i] = continuous_scores(row_a, row_b, mk)
+
+    return matrix
+
+
 def _sample_pairs(
     df: pl.DataFrame,
     n_pairs: int = 10000,
@@ -324,6 +366,212 @@ def train_em(
         iterations=min(iteration + 1, max_iterations) if not converged else iteration + 1,
         proportion_matched=p_match,
     )
+
+
+@dataclass
+class ContinuousEMResult:
+    """Result of continuous-score EM training (Winkler extension)."""
+
+    m_mean: dict[str, float]  # field -> mean score for matches
+    m_var: dict[str, float]   # field -> variance for matches
+    u_mean: dict[str, float]  # field -> mean score for non-matches
+    u_var: dict[str, float]   # field -> variance for non-matches
+    converged: bool
+    iterations: int
+    proportion_matched: float
+
+
+def train_em_continuous(
+    df: pl.DataFrame,
+    mk: MatchkeyConfig,
+    n_sample_pairs: int = 10000,
+    max_iterations: int = 20,
+    convergence: float = 0.001,
+    seed: int = 42,
+    blocks: list | None = None,
+    blocking_fields: list[str] | None = None,
+) -> ContinuousEMResult:
+    """Train Fellegi-Sunter model using continuous scores (Winkler extension).
+
+    Instead of discretizing scores into levels, models P(score|match) and
+    P(score|non-match) as Gaussians per field. This preserves the full
+    continuous signal and produces better likelihood ratios.
+    """
+    if blocking_fields is None:
+        blocking_fields = []
+
+    cols = [f.field for f in mk.fields if f.field != "__record__"]
+    row_lookup: dict[int, dict] = {}
+    for row in df.select(["__row_id__"] + cols).to_dicts():
+        row_lookup[row["__row_id__"]] = row
+
+    if blocks:
+        pairs = _sample_blocked_pairs(blocks, n_sample_pairs, seed)
+        logger.info("Continuous EM training on %d within-block pairs", len(pairs))
+    else:
+        pairs = _sample_pairs(df, n_sample_pairs, seed)
+
+    if len(pairs) < 10:
+        logger.warning("Too few pairs for continuous EM")
+        return ContinuousEMResult(
+            m_mean={f.field: 0.9 for f in mk.fields},
+            m_var={f.field: 0.01 for f in mk.fields},
+            u_mean={f.field: 0.2 for f in mk.fields},
+            u_var={f.field: 0.04 for f in mk.fields},
+            converged=False, iterations=0, proportion_matched=0.05,
+        )
+
+    # Build continuous score matrix
+    score_matrix = _build_continuous_matrix(pairs, row_lookup, mk)
+    n_pairs = len(pairs)
+    n_fields = len(mk.fields)
+
+    # Initialize with strong priors — matches score high, non-matches score low.
+    # Use the actual score distribution to set non-match priors at the median.
+    p_match = 0.02  # conservative: expect few matches
+
+    # Compute actual score statistics for better initialization
+    field_medians = {}
+    for j, f in enumerate(mk.fields):
+        if f.field not in blocking_fields:
+            col = score_matrix[:, j]
+            field_medians[f.field] = float(np.median(col))
+
+    m_mean = {f.field: 0.90 for f in mk.fields}  # matches should score very high
+    m_var = {f.field: 0.01 for f in mk.fields}    # tight distribution
+    u_mean = {f.field: field_medians.get(f.field, 0.30) for f in mk.fields}  # non-matches at median
+    u_var = {f.field: 0.05 for f in mk.fields}    # broader distribution
+
+    # Override blocking fields
+    for f in mk.fields:
+        if f.field in blocking_fields:
+            m_mean[f.field] = 0.99
+            m_var[f.field] = 0.001
+            u_mean[f.field] = 0.99  # always agree in blocks
+            u_var[f.field] = 0.001
+
+    converged = False
+    for iteration in range(max_iterations):
+        old_m_mean = dict(m_mean)
+        old_u_mean = dict(u_mean)
+
+        # E-step: compute posteriors using Gaussian likelihood
+        posteriors = np.zeros(n_pairs)
+        for i in range(n_pairs):
+            log_m = math.log(max(p_match, 1e-10))
+            log_u = math.log(max(1 - p_match, 1e-10))
+
+            for j, f in enumerate(mk.fields):
+                if f.field in blocking_fields:
+                    continue
+                s = score_matrix[i, j]
+                # Gaussian log-likelihood
+                var_m = max(m_var[f.field], 1e-6)
+                var_u = max(u_var[f.field], 1e-6)
+                log_m += -0.5 * ((s - m_mean[f.field]) ** 2) / var_m - 0.5 * math.log(var_m)
+                log_u += -0.5 * ((s - u_mean[f.field]) ** 2) / var_u - 0.5 * math.log(var_u)
+
+            max_log = max(log_m, log_u)
+            posteriors[i] = math.exp(log_m - max_log) / (
+                math.exp(log_m - max_log) + math.exp(log_u - max_log)
+            )
+
+        # M-step
+        total_match = posteriors.sum()
+        total_nonmatch = n_pairs - total_match
+        p_match = max(total_match / n_pairs, 1e-6)
+
+        for j, f in enumerate(mk.fields):
+            if f.field in blocking_fields:
+                continue
+            scores = score_matrix[:, j]
+            # Weighted mean and variance for matches
+            if total_match > 1e-6:
+                m_mean[f.field] = float(np.average(scores, weights=posteriors))
+                m_var[f.field] = float(np.average((scores - m_mean[f.field]) ** 2, weights=posteriors)) + 1e-6
+            # Weighted mean and variance for non-matches
+            w_nonmatch = 1 - posteriors
+            if total_nonmatch > 1e-6:
+                u_mean[f.field] = float(np.average(scores, weights=w_nonmatch))
+                u_var[f.field] = float(np.average((scores - u_mean[f.field]) ** 2, weights=w_nonmatch)) + 1e-6
+
+        # Convergence check
+        max_delta = 0.0
+        for f in mk.fields:
+            if f.field in blocking_fields:
+                continue
+            max_delta = max(max_delta, abs(m_mean[f.field] - old_m_mean[f.field]))
+            max_delta = max(max_delta, abs(u_mean[f.field] - old_u_mean[f.field]))
+
+        if max_delta < convergence:
+            converged = True
+            logger.info("Continuous EM converged after %d iterations", iteration + 1)
+            break
+
+    if not converged:
+        logger.warning("Continuous EM did not converge after %d iterations", max_iterations)
+
+    return ContinuousEMResult(
+        m_mean=m_mean, m_var=m_var,
+        u_mean=u_mean, u_var=u_var,
+        converged=converged,
+        iterations=iteration + 1,
+        proportion_matched=p_match,
+    )
+
+
+def score_probabilistic_continuous(
+    block_df: pl.DataFrame,
+    mk: MatchkeyConfig,
+    em: ContinuousEMResult,
+    threshold: float = 0.50,
+    exclude_pairs: set[tuple[int, int]] | None = None,
+) -> list[tuple[int, int, float]]:
+    """Score pairs using continuous Fellegi-Sunter (Winkler extension).
+
+    Computes log-likelihood ratios from Gaussian models of match/non-match
+    score distributions. Returns pairs above threshold as normalized 0-1 scores.
+    """
+    if exclude_pairs is None:
+        exclude_pairs = set()
+
+    cols = [f.field for f in mk.fields if f.field != "__record__"]
+    row_lookup: dict[int, dict] = {}
+    for row in block_df.select(["__row_id__"] + cols).to_dicts():
+        row_lookup[row["__row_id__"]] = row
+
+    row_ids = block_df["__row_id__"].to_list()
+
+    results = []
+    for i in range(len(row_ids)):
+        for j in range(i + 1, len(row_ids)):
+            a, b = row_ids[i], row_ids[j]
+            pair_key = (min(a, b), max(a, b))
+            if pair_key in exclude_pairs:
+                continue
+
+            row_a = row_lookup.get(a, {})
+            row_b = row_lookup.get(b, {})
+            scores = continuous_scores(row_a, row_b, mk)
+
+            # Compute log-likelihood ratio
+            log_ratio = 0.0
+            for k, f in enumerate(mk.fields):
+                s = scores[k]
+                var_m = max(em.m_var[f.field], 1e-6)
+                var_u = max(em.u_var[f.field], 1e-6)
+                # Log Gaussian likelihood ratio
+                log_m = -0.5 * ((s - em.m_mean[f.field]) ** 2) / var_m - 0.5 * math.log(var_m)
+                log_u = -0.5 * ((s - em.u_mean[f.field]) ** 2) / var_u - 0.5 * math.log(var_u)
+                log_ratio += log_m - log_u
+
+            # Convert to 0-1 via sigmoid
+            normalized = 1.0 / (1.0 + math.exp(-log_ratio))
+
+            if normalized >= threshold:
+                results.append((a, b, round(normalized, 4)))
+
+    return results
 
 
 def _fallback_result(mk: MatchkeyConfig) -> EMResult:
