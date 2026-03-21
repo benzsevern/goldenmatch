@@ -65,6 +65,8 @@ class MatchkeyField(BaseModel):
     model: str | None = None  # for embedding scorer
     columns: list[str] | None = None  # for record_embedding scorer
     column_weights: dict[str, float] | None = None  # per-field weights for record_embedding
+    levels: int = 2  # comparison levels for probabilistic: 2=agree/disagree, 3=agree/partial/disagree
+    partial_threshold: float = 0.8  # score >= this = partial agree (when levels=3)
 
     @model_validator(mode="after")
     def _resolve_field_column(self) -> "MatchkeyField":
@@ -93,9 +95,12 @@ class MatchkeyField(BaseModel):
 # ── MatchkeyConfig ──────────────────────────────────────────────────────────
 
 
+_VALID_MK_TYPES = ("exact", "weighted", "probabilistic")
+
+
 class MatchkeyConfig(BaseModel):
     name: str
-    type: Literal["exact", "weighted"] | None = None
+    type: Literal["exact", "weighted", "probabilistic"] | None = None
     comparison: str | None = None
     fields: list[MatchkeyField]
     threshold: float | None = None
@@ -103,15 +108,22 @@ class MatchkeyConfig(BaseModel):
     rerank: bool = False
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     rerank_band: float = 0.1
+    # Fellegi-Sunter EM parameters
+    em_iterations: int = 20
+    convergence_threshold: float = 0.001
+    link_threshold: float | None = None  # auto-computed if None
+    review_threshold: float | None = None  # auto-computed if None
 
     @model_validator(mode="after")
     def _validate_weighted(self) -> "MatchkeyConfig":
         # Allow 'comparison' as alias for 'type'
         if self.type is None and self.comparison is not None:
-            if self.comparison in ("exact", "weighted"):
+            if self.comparison in _VALID_MK_TYPES:
                 self.type = self.comparison
             else:
-                raise ValueError(f"Invalid comparison '{self.comparison}'. Must be 'exact' or 'weighted'.")
+                raise ValueError(
+                    f"Invalid comparison '{self.comparison}'. Must be one of {_VALID_MK_TYPES}."
+                )
         elif self.type is None:
             raise ValueError("MatchkeyConfig requires 'type' or 'comparison'.")
         if self.type == "weighted":
@@ -122,6 +134,13 @@ class MatchkeyConfig(BaseModel):
                     raise ValueError(
                         f"All fields in a weighted matchkey must have 'scorer' and 'weight'. "
                         f"Field '{f.field}' is missing one or both."
+                    )
+        elif self.type == "probabilistic":
+            for f in self.fields:
+                if f.scorer is None:
+                    raise ValueError(
+                        f"All fields in a probabilistic matchkey must have 'scorer'. "
+                        f"Field '{f.field}' is missing it."
                     )
         return self
 
@@ -281,7 +300,16 @@ class OutputConfig(BaseModel):
     run_name: str | None = None
 
 
-# ── LLM Scorer Config ─────────────────────────────────────────────────────
+# ── LLM Budget / Scorer Config ────────────────────────────────────────────
+
+
+class BudgetConfig(BaseModel):
+    max_cost_usd: float | None = None
+    max_calls: int | None = None
+    escalation_model: str | None = None
+    escalation_band: list[float] = Field(default_factory=lambda: [0.80, 0.90])
+    escalation_budget_pct: float = 20
+    warn_at_pct: float = 80
 
 
 class LLMScorerConfig(BaseModel):
@@ -292,6 +320,7 @@ class LLMScorerConfig(BaseModel):
     candidate_lo: float = 0.75  # lower bound of LLM scoring range
     candidate_hi: float = 0.95  # upper bound (same as auto_threshold)
     batch_size: int = 20
+    budget: BudgetConfig | None = None
 
 
 # ── MatchSettingsConfig ─────────────────────────────────────────────────────
@@ -319,10 +348,10 @@ class GoldenMatchConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_fuzzy_needs_blocking(self) -> "GoldenMatchConfig":
         mks = self.get_matchkeys()
-        has_weighted = any(mk.type == "weighted" for mk in mks)
-        if has_weighted and self.blocking is None:
+        has_fuzzy = any(mk.type in ("weighted", "probabilistic") for mk in mks)
+        if has_fuzzy and self.blocking is None:
             raise ValueError(
-                "Weighted/fuzzy matchkeys require a 'blocking' configuration."
+                "Weighted/probabilistic matchkeys require a 'blocking' configuration."
             )
         return self
 

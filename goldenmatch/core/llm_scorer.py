@@ -11,6 +11,9 @@ Usage in config:
       model: gpt-4o-mini        # or claude-haiku
       auto_threshold: 0.95      # auto-accept pairs above this
       candidate_range: [0.75, 0.95]  # score range to send to LLM
+      budget:
+        max_cost_usd: 5.00
+        max_calls: 500
 """
 
 from __future__ import annotations
@@ -37,7 +40,9 @@ def llm_score_pairs(
     model: str | None = None,
     batch_size: int = 20,
     display_columns: list[str] | None = None,
-) -> list[tuple[int, int, float]]:
+    config: "LLMScorerConfig | None" = None,
+    return_budget: bool = False,
+) -> "list[tuple[int, int, float]] | tuple[list[tuple[int, int, float]], dict | None]":
     """Score borderline pairs with an LLM.
 
     Three-tier approach:
@@ -56,20 +61,51 @@ def llm_score_pairs(
         model: Model name. Defaults to gpt-4o-mini or claude-haiku.
         batch_size: Pairs per LLM request.
         display_columns: Columns to show the LLM. Defaults to all non-internal.
+        config: LLMScorerConfig object. When provided, overrides individual kwargs.
+        return_budget: If True, return (pairs, budget_summary) tuple.
 
     Returns:
-        Updated pairs list. LLM-approved pairs get score=1.0,
-        LLM-rejected pairs get score=0.0, others unchanged.
+        Updated pairs list (or tuple with budget summary if return_budget=True).
+        LLM-approved pairs get score=1.0, LLM-rejected pairs get score=0.0,
+        others unchanged.
     """
+    from goldenmatch.config.schemas import LLMScorerConfig
+
+    # Resolve config -> individual params
+    if config is not None:
+        auto_threshold = config.auto_threshold
+        candidate_lo = config.candidate_lo
+        candidate_hi = config.candidate_hi
+        batch_size = config.batch_size
+        if config.provider:
+            provider = config.provider
+        if config.model:
+            model = config.model
+
+    # Set up budget tracker
+    budget = None
+    if config is not None and config.budget is not None:
+        from goldenmatch.core.llm_budget import BudgetTracker
+        budget = BudgetTracker(config.budget)
+
+    def _return(result):
+        if return_budget:
+            return result, budget.summary() if budget else None
+        return result
+
     if not pairs:
-        return pairs
+        return _return(pairs)
 
     # Auto-detect provider
     if not provider or not api_key:
-        provider, api_key = _detect_provider()
+        detected_provider, detected_key = _detect_provider()
+        if not provider:
+            provider = detected_provider
+        if not api_key:
+            api_key = detected_key
         if not provider:
             logger.warning("No LLM API key found. Set OPENAI_API_KEY or ANTHROPIC_API_KEY.")
-            return pairs
+            return _return(pairs)
 
     if not model:
         model = "gpt-4o-mini" if provider == "openai" else "claude-haiku-4-5-20251001"
@@ -99,25 +135,34 @@ def llm_score_pairs(
     )
 
     if not candidates:
-        # Nothing to score — just promote auto-accepts
         result = list(pairs)
         for i in auto_accept:
             a, b, _ = result[i]
             result[i] = (a, b, 1.0)
-        return result
+        return _return(result)
+
+    # Check budget before starting
+    if budget and budget.budget_exhausted:
+        logger.info("LLM budget exhausted before scoring. Candidates keep fuzzy scores.")
+        result = list(pairs)
+        for i in auto_accept:
+            a, b, _ = result[i]
+            result[i] = (a, b, 1.0)
+        return _return(result)
 
     # Score candidates with LLM
     t0 = time.perf_counter()
     llm_results = _batch_score(
         candidates, pairs, row_lookup, cols,
         provider, api_key, model, batch_size,
+        budget=budget,
     )
     elapsed = time.perf_counter() - t0
 
     n_match = sum(1 for v in llm_results.values() if v)
     logger.info(
         "LLM scored %d pairs in %.1fs: %d matches, %d non-matches",
-        len(candidates), elapsed, n_match, len(candidates) - n_match,
+        len(llm_results), elapsed, n_match, len(llm_results) - n_match,
     )
 
     # Build result
@@ -127,13 +172,14 @@ def llm_score_pairs(
         result[i] = (a, b, 1.0)
     for i in candidates:
         a, b, s = result[i]
-        if llm_results.get(i, False):
-            result[i] = (a, b, 1.0)
-        else:
-            result[i] = (a, b, 0.0)
-    # Below pairs keep original scores
+        if i in llm_results:
+            if llm_results[i]:
+                result[i] = (a, b, 1.0)
+            else:
+                result[i] = (a, b, 0.0)
+        # else: budget ran out mid-scoring, keep original score
 
-    return result
+    return _return(result)
 
 
 def _detect_provider() -> tuple[str | None, str | None]:
@@ -156,11 +202,19 @@ def _batch_score(
     api_key: str,
     model: str,
     batch_size: int,
+    budget: "BudgetTracker | None" = None,
 ) -> dict[int, bool]:
     """Score candidate pairs in batches. Returns {pair_index: is_match}."""
     results: dict[int, bool] = {}
 
     for bi in range(0, len(candidate_indices), batch_size):
+        # Check budget before each batch
+        if budget:
+            estimated_tokens = batch_size * 80  # rough estimate per pair
+            if not budget.can_send(estimated_tokens):
+                logger.info("LLM budget exhausted after %d/%d pairs.", bi, len(candidate_indices))
+                break
+
         batch_idx = candidate_indices[bi:bi + batch_size]
 
         # Build prompt
@@ -182,9 +236,19 @@ def _batch_score(
         for attempt in range(3):
             try:
                 if provider == "openai":
-                    answer = _call_openai(prompt, api_key, model, max_tokens=len(batch_idx) * 10)
+                    answer, in_tok, out_tok = _call_openai(
+                        prompt, api_key, model, max_tokens=len(batch_idx) * 10,
+                    )
                 else:
-                    answer = _call_anthropic(prompt, api_key, model, max_tokens=len(batch_idx) * 10)
+                    answer, in_tok, out_tok = _call_anthropic(
+                        prompt, api_key, model, max_tokens=len(batch_idx) * 10,
+                    )
+
+                # Record budget usage
+                if budget:
+                    budget.record_usage(
+                        input_tokens=in_tok, output_tokens=out_tok, model=model,
+                    )
 
                 # Parse responses
                 batch_results = []
@@ -222,8 +286,10 @@ def _batch_score(
     return results
 
 
-def _call_openai(prompt: str, api_key: str, model: str, max_tokens: int = 100) -> str:
-    """Call OpenAI chat completions API."""
+def _call_openai(
+    prompt: str, api_key: str, model: str, max_tokens: int = 100,
+) -> tuple[str, int, int]:
+    """Call OpenAI chat completions API. Returns (text, input_tokens, output_tokens)."""
     body = json.dumps({
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
@@ -241,11 +307,15 @@ def _call_openai(prompt: str, api_key: str, model: str, max_tokens: int = 100) -
     )
     resp = urllib.request.urlopen(req, timeout=30)
     result = json.loads(resp.read())
-    return result["choices"][0]["message"]["content"].strip()
+    text = result["choices"][0]["message"]["content"].strip()
+    usage = result.get("usage", {})
+    return text, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
 
 
-def _call_anthropic(prompt: str, api_key: str, model: str, max_tokens: int = 100) -> str:
-    """Call Anthropic messages API."""
+def _call_anthropic(
+    prompt: str, api_key: str, model: str, max_tokens: int = 100,
+) -> tuple[str, int, int]:
+    """Call Anthropic messages API. Returns (text, input_tokens, output_tokens)."""
     body = json.dumps({
         "model": model,
         "max_tokens": max_tokens,
@@ -263,4 +333,6 @@ def _call_anthropic(prompt: str, api_key: str, model: str, max_tokens: int = 100
     )
     resp = urllib.request.urlopen(req, timeout=30)
     result = json.loads(resp.read())
-    return result["content"][0]["text"].strip()
+    text = result["content"][0]["text"].strip()
+    usage = result.get("usage", {})
+    return text, usage.get("input_tokens", 0), usage.get("output_tokens", 0)

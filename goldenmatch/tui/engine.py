@@ -24,6 +24,7 @@ class EngineStats:
     oversized_count: int
     hit_rate: float | None = None
     avg_score: float | None = None
+    llm_cost: dict | None = None
 
 
 @dataclass
@@ -182,6 +183,25 @@ class MatchEngine:
                 pairs = score_blocks_parallel(blocks, mk, matched_pairs)
                 all_pairs.extend(pairs)
 
+        # Phase 2b: Probabilistic matchkeys (Fellegi-Sunter with EM)
+        for mk in matchkeys:
+            if mk.type == "probabilistic":
+                if config.blocking is None:
+                    continue
+                from goldenmatch.core.probabilistic import train_em, score_probabilistic
+                em_result = train_em(
+                    collected_df, mk,
+                    max_iterations=mk.em_iterations,
+                    convergence=mk.convergence_threshold,
+                )
+                blocks = build_blocks(combined_lf, config.blocking)
+                for block in blocks:
+                    block_df = block.df.collect() if hasattr(block.df, 'collect') else block.df
+                    pairs = score_probabilistic(block_df, mk, em_result, exclude_pairs=matched_pairs)
+                    all_pairs.extend(pairs)
+                    for a, b, s in pairs:
+                        matched_pairs.add((min(a, b), max(a, b)))
+
         # ── Rerank (optional) ──
         for mk in matchkeys:
             if mk.type == "weighted" and mk.rerank:
@@ -189,17 +209,19 @@ class MatchEngine:
                 break
 
         # ── LLM scorer (optional) ──
+        llm_budget_summary = None
         if config.llm_scorer and config.llm_scorer.enabled and all_pairs:
             from goldenmatch.core.llm_scorer import llm_score_pairs
-            all_pairs = llm_score_pairs(
+            has_budget = config.llm_scorer.budget is not None
+            result = llm_score_pairs(
                 all_pairs, collected_df,
-                auto_threshold=config.llm_scorer.auto_threshold,
-                candidate_lo=config.llm_scorer.candidate_lo,
-                candidate_hi=config.llm_scorer.candidate_hi,
-                provider=config.llm_scorer.provider,
-                model=config.llm_scorer.model,
-                batch_size=config.llm_scorer.batch_size,
+                config=config.llm_scorer,
+                return_budget=has_budget,
             )
+            if has_budget:
+                all_pairs, llm_budget_summary = result
+            else:
+                all_pairs = result
             all_pairs = [(a, b, s) for a, b, s in all_pairs if s > 0.5]
 
         # ── Cluster ──
@@ -247,6 +269,8 @@ class MatchEngine:
 
         # ── Stats ──
         stats = self._compute_stats(clusters, collected_df.height)
+        if llm_budget_summary:
+            stats.llm_cost = llm_budget_summary
 
         return EngineResult(
             clusters=clusters,

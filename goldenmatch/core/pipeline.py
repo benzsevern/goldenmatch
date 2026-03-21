@@ -231,6 +231,38 @@ def run_dedupe(
             )
             all_pairs.extend(pairs)
 
+    # Phase 2b: Probabilistic matchkeys (Fellegi-Sunter with EM)
+    for mk in matchkeys:
+        if mk.type == "probabilistic":
+            if config.blocking is None:
+                continue
+            from goldenmatch.core.probabilistic import train_em, score_probabilistic
+            # Train EM on sample pairs from blocks
+            em_result = train_em(
+                collected_df, mk,
+                max_iterations=mk.em_iterations,
+                convergence=mk.convergence_threshold,
+            )
+            logger.info(
+                "F-S EM: converged=%s, iterations=%d, match_rate=%.4f",
+                em_result.converged, em_result.iterations, em_result.proportion_matched,
+            )
+            blocks = build_blocks(combined_lf, config.blocking)
+            for block in blocks:
+                block_df = block.df.collect() if hasattr(block.df, 'collect') else block.df
+                if across_files_only:
+                    # Filter handled after scoring
+                    pass
+                pairs = score_probabilistic(block_df, mk, em_result, exclude_pairs=matched_pairs)
+                if across_files_only:
+                    pairs = [
+                        (a, b, s) for a, b, s in pairs
+                        if source_lookup.get(a) != source_lookup.get(b)
+                    ]
+                all_pairs.extend(pairs)
+                for a, b, s in pairs:
+                    matched_pairs.add((min(a, b), max(a, b)))
+
     # ── Step 3.3: CROSS-ENCODER RERANKING (optional) ──
     for mk in matchkeys:
         if mk.type == "weighted" and mk.rerank:
@@ -240,15 +272,7 @@ def run_dedupe(
     # ── Step 3.4: LLM SCORER (optional) ──
     if config.llm_scorer and config.llm_scorer.enabled and all_pairs:
         from goldenmatch.core.llm_scorer import llm_score_pairs
-        all_pairs = llm_score_pairs(
-            all_pairs, collected_df,
-            auto_threshold=config.llm_scorer.auto_threshold,
-            candidate_lo=config.llm_scorer.candidate_lo,
-            candidate_hi=config.llm_scorer.candidate_hi,
-            provider=config.llm_scorer.provider,
-            model=config.llm_scorer.model,
-            batch_size=config.llm_scorer.batch_size,
-        )
+        all_pairs = llm_score_pairs(all_pairs, collected_df, config=config.llm_scorer)
         # Filter to scored matches only
         all_pairs = [(a, b, s) for a, b, s in all_pairs if s > 0.5]
 
@@ -515,6 +539,29 @@ def run_match(
             )
             all_pairs.extend(pairs)
 
+    # Phase 2b: Probabilistic matchkeys (Fellegi-Sunter with EM)
+    for mk in matchkeys:
+        if mk.type == "probabilistic":
+            if config.blocking is None:
+                continue
+            from goldenmatch.core.probabilistic import train_em, score_probabilistic
+            em_result = train_em(
+                combined_df, mk,
+                max_iterations=mk.em_iterations,
+                convergence=mk.convergence_threshold,
+            )
+            logger.info(
+                "F-S EM: converged=%s, iterations=%d, match_rate=%.4f",
+                em_result.converged, em_result.iterations, em_result.proportion_matched,
+            )
+            blocks = build_blocks(combined_lf, config.blocking)
+            for block in blocks:
+                block_df = block.df.collect() if hasattr(block.df, 'collect') else block.df
+                pairs = score_probabilistic(block_df, mk, em_result, exclude_pairs=matched_pairs)
+                all_pairs.extend(pairs)
+                for a, b, s in pairs:
+                    matched_pairs.add((min(a, b), max(a, b)))
+
     # ── Step 4.5: CROSS-ENCODER RERANKING (optional) ──
     for mk in matchkeys:
         if mk.type == "weighted" and mk.rerank:
@@ -524,15 +571,7 @@ def run_match(
     # ── Step 4.6: LLM SCORER (optional) ──
     if config.llm_scorer and config.llm_scorer.enabled and all_pairs:
         from goldenmatch.core.llm_scorer import llm_score_pairs
-        all_pairs = llm_score_pairs(
-            all_pairs, combined_df,
-            auto_threshold=config.llm_scorer.auto_threshold,
-            candidate_lo=config.llm_scorer.candidate_lo,
-            candidate_hi=config.llm_scorer.candidate_hi,
-            provider=config.llm_scorer.provider,
-            model=config.llm_scorer.model,
-            batch_size=config.llm_scorer.batch_size,
-        )
+        all_pairs = llm_score_pairs(all_pairs, combined_df, config=config.llm_scorer)
         all_pairs = [(a, b, s) for a, b, s in all_pairs if s > 0.5]
 
     # ── Step 5: Normalize pairs so target ID is always first ──
