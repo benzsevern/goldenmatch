@@ -1,7 +1,8 @@
 # GoldenMatch
 
 ## Environment
-- Windows 11, bash shell (Git Bash) — use Unix paths in scripts
+- Windows 11, bash shell (Git Bash) -- use Unix paths in scripts
+- GCP project: `gen-lang-client-0692108803` (Vertex AI embeddings)
 - Python 3.12 at `C:\Users\bsevern\AppData\Local\Programs\Python\Python312\python.exe`
 - Project lives on D: drive: `D:\show_case\goldenmatch`
 - Two GitHub accounts: `benzsevern` (personal, for this repo) and `benzsevern-mjh` (work)
@@ -40,29 +41,22 @@
   - Blocks are independent — frozen `exclude_pairs` snapshot avoids races
   - For <=2 blocks, skips thread overhead and runs sequentially
   - All call sites (pipeline.py, engine.py, chunked.py) use the shared helper
-- Intra-field early termination in `find_fuzzy_matches`: after each expensive field, checks if any pair can still reach threshold even with perfect remaining scores; breaks early if not
-- Cross-encoder reranking (`rerank: true` on weighted matchkey): re-scores borderline pairs (threshold +/- band) with a pre-trained cross-encoder for improved precision, no training needed
-- Histogram-based auto-select (`auto_select: true` on blocking): evaluates all configured keys, picks the one with smallest max_block_size and >= 50% coverage
-- Dynamic block splitting: adaptive strategy auto-splits oversized blocks by highest-cardinality column when no sub_block_keys configured; picks column with most useful groups (>= 2 records), not just max cardinality
-- Multi-field embedding supports `column_weights` — high-weight fields get text repeated in concatenation, biasing embeddings toward important fields
+- Intra-field early termination in `find_fuzzy_matches`: after each expensive field, breaks early if no pair can reach threshold
 - Standardizers have native Polars fast path (`_NATIVE_STANDARDIZERS` in standardize.py)
 - Matchkey transforms have native Polars fast path (`_try_native_chain` in matchkey.py)
 - Clustering uses iterative Union-Find (not recursive) with lazy pair_scores
 - Blocking key choice dominates fuzzy performance — coarse keys create huge blocks
-- 1M exact dedupe: ~7.8s. 100K fuzzy (name+zip): ~39s via pipeline (was ~100s before parallel + early termination)
-- Benchmark note: `analyze_fuzzy.py` calls `find_fuzzy_matches` directly per block (sequential), not `score_blocks_parallel` — times vary 38-55s depending on block size sampling; parallel speedup only visible through `run_dedupe`/CLI
-- DBLP-ACM best: 97.2% F1 with multi-pass fuzzy (RapidFuzz), no embeddings needed
-- Abt-Buy best: 81.7% F1 with Vertex AI candidates + GPT-4o-mini scorer (~$0.74)
-- Abt-Buy zero-shot best: 62.8% F1 with Vertex AI name+desc embeddings (t=0.88)
-- Amazon-Google best: 44.0% F1 with Vertex AI + 20-label reranking
-- LLM-as-scorer approach: Vertex embeddings generate candidates, GPT-4o-mini scores borderline pairs (0.75-0.95 range), auto-accept pairs above 0.95. Dramatically outperforms fine-tuning and cross-encoder approaches on product matching.
-- Cross-encoder Level 3 (300 labels, CPU): 65.5% F1 on Abt-Buy — modest improvement over Vertex baseline, massively outperformed by LLM scorer
-- MiniLM fine-tuning Level 2 (300 labels): 58.7% F1 on Abt-Buy — worse than Vertex baseline because MiniLM is a weaker model
-- Boost tab logistic regression reranking can hurt on product data where string-distance features are weaker than embeddings. Quality check detects this and recommends --llm-boost instead.
-- Previous 84.8% Abt-Buy claim used top-1-per-record evaluation (invalid methodology) — corrected
-- Multi-field embedding helps structured data (DBLP-ACM) but not product data (Abt-Buy) — descriptions differ in format
+- 1M exact dedupe: ~7.8s. 100K fuzzy (name+zip): ~39s via pipeline
 - Scale curve: 8,200 rec/s at 100K records on laptop (fuzzy + exact + golden)
-- Active sampling saves ~45% labels vs random but value is in fine-tuning, not threshold learning
+
+## Accuracy Strategy
+- Structured data (names, addresses, bibliographic): fuzzy matching alone → 97.2% F1. No embeddings or LLM needed.
+- Product matching: Vertex AI candidates + GPT-4o-mini LLM scorer → 81.7% F1 (~$0.74). Config: `llm_scorer: {enabled: true}`
+- LLM scorer sends borderline pairs (0.75-0.95) to GPT, auto-accepts >0.95. Dramatically outperforms fine-tuning (58.7%) and cross-encoder (65.5%).
+- Boost tab reranking can hurt on product data — quality check warns user to try `--llm-boost` instead
+- Multi-field embedding helps structured data (DBLP-ACM) but not product data — descriptions differ in format across sources
+- Benchmark evaluation: always use threshold-based pair generation, NOT top-1-per-record (argmax)
+- Leipzig benchmarks: `python tests/benchmarks/run_leipzig.py`
 
 ## Code Patterns
 - Internal columns prefixed with `__` (e.g. `__row_id__`, `__source__`, `__mk_*__`)
@@ -106,9 +100,5 @@
 - Rich terminal recording: `Console(record=True)` then `console.export_svg(title='...')`
 - PyPI version must be bumped in both `pyproject.toml` and `goldenmatch/__init__.py`
 - v0.2.0 is live on PyPI — `pip install goldenmatch` works
-- Benchmark evaluation: always use threshold-based pair generation, NOT top-1-per-record (argmax). The latter inflates precision and produces unreproducible numbers.
-- Leipzig benchmark datasets live in `tests/benchmarks/datasets/`. Run with `python tests/benchmarks/run_leipzig.py`
-- For product matching: use LLM scorer (81.7% F1), not fine-tuning (58.7%) or cross-encoder (65.5%). Fine-tuning a weaker model (MiniLM) can't beat Vertex embeddings.
-- For structured data (names, addresses): fuzzy matching alone reaches 97.2% — no embeddings or LLM needed.
 - Adding a TUI tab: update `test_tabs_exist` in `tests/test_tui.py` — asserts exact tab count (currently 6)
 - OpenAI API key: set `OPENAI_API_KEY` env var. Used by LLM scorer and LLM boost. Key stored in `.testing/.env`
