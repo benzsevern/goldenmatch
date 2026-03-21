@@ -28,7 +28,7 @@
 - `goldenmatch/db/` — Postgres integration (connector, sync, reconcile, clusters, ANN index)
 - `goldenmatch/api/` — REST API server (`goldenmatch serve`)
 - `goldenmatch/mcp/` — MCP server for Claude Desktop (`goldenmatch mcp-serve`)
-- New core modules: explainer, report, dashboard, graph, anomaly, diff, rollback, schema_match, chunked, cloud_ingest, api_connector, scheduler, gpu, vertex_embedder
+- Core modules: explainer, report, dashboard, graph, anomaly, diff, rollback, schema_match, chunked, cloud_ingest, api_connector, scheduler, gpu, vertex_embedder, llm_scorer, lineage, match_one
 - Config: Pydantic models in `config/schemas.py`, YAML loading in `config/loader.py`
 - `config/loader.py` normalizes golden_rules and standardization sections from flat YAML
 
@@ -91,7 +91,9 @@
 - Windows drive letter paths (C:\) break `file:source_name` CLI parsing — handle in `_parse_file_source`
 - `ignore_errors=True` needed for `pl.read_csv` on files with junk rows
 - Textual version 8.x installed (despite `>=1.0` pin) — API is stable
-- gcloud CLI hangs on Windows (subprocess never exits) — use GCP REST API directly with cached OAuth tokens from `~/.config/gcloud/application_default_credentials.json`
+- gcloud CLI sometimes hangs on Windows — try with `timeout 30 gcloud ...` first, fall back to REST API if it hangs. User ADC at `~/AppData/Roaming/gcloud/application_default_credentials.json`
+- Vertex AI service account needs `roles/aiplatform.user` for embeddings — grant via `gcloud projects add-iam-policy-binding`. IAM changes take 1-2 minutes to propagate.
+- Vertex AI `text-embedding-004` does NOT support fine-tuning — only inference. Use Colab GPU or local CPU for model training.
 - `import torch` crashes/hangs on machines without GPU — use `goldenmatch.core.gpu.detect_gpu_mode()` to check before loading
 - Polars infers zip/phone as Int64 — explainer/scorer must `str()` values before comparing
 - Unicode em dashes (`—`) break on Windows terminals — use ASCII (`-`) in CLI help text
@@ -104,3 +106,9 @@
 - Rich terminal recording: `Console(record=True)` then `console.export_svg(title='...')`
 - PyPI version must be bumped in both `pyproject.toml` and `goldenmatch/__init__.py`
 - v0.2.0 is live on PyPI — `pip install goldenmatch` works
+- Benchmark evaluation: always use threshold-based pair generation, NOT top-1-per-record (argmax). The latter inflates precision and produces unreproducible numbers.
+- Leipzig benchmark datasets live in `tests/benchmarks/datasets/`. Run with `python tests/benchmarks/run_leipzig.py`
+- For product matching: use LLM scorer (81.7% F1), not fine-tuning (58.7%) or cross-encoder (65.5%). Fine-tuning a weaker model (MiniLM) can't beat Vertex embeddings.
+- For structured data (names, addresses): fuzzy matching alone reaches 97.2% — no embeddings or LLM needed.
+- Adding a TUI tab: update `test_tabs_exist` in `tests/test_tui.py` — asserts exact tab count (currently 6)
+- OpenAI API key: set `OPENAI_API_KEY` env var. Used by LLM scorer and LLM boost. Key stored in `.testing/.env`
