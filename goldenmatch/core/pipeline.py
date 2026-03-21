@@ -359,6 +359,15 @@ def run_dedupe(
     if output_unique and len(unique_df) > 0:
         write_output(unique_df, directory, run_name, "unique", fmt)
 
+    # ── Step 7.5: LINEAGE (always save when outputting) ──
+    if output_golden or output_clusters or output_dupes:
+        try:
+            from goldenmatch.core.lineage import build_lineage, save_lineage
+            lineage = build_lineage(all_pairs, collected_df, matchkeys, clusters)
+            save_lineage(lineage, directory, run_name)
+        except Exception as e:
+            logger.warning("Lineage generation failed: %s", e)
+
     results = {
         "clusters": clusters,
         "golden": golden_df,

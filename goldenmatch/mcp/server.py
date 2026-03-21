@@ -224,6 +224,34 @@ def create_server(file_paths: list[str], config_path: str | None = None) -> Serv
                 },
             ),
             Tool(
+                name="suggest_config",
+                description=(
+                    "Analyze bad merges and suggest config changes. "
+                    "Provide examples of incorrect merges (pairs that should NOT have matched) "
+                    "and GoldenMatch will identify which fields/thresholds to tighten. "
+                    "Example: [{\"record_a\": {...}, \"record_b\": {...}, \"reason\": \"different people\"}]"
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "bad_merges": {
+                            "type": "array",
+                            "description": "List of bad merge examples with record_a, record_b, and optional reason",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "record_a": {"type": "object"},
+                                    "record_b": {"type": "object"},
+                                    "reason": {"type": "string"},
+                                },
+                                "required": ["record_a", "record_b"],
+                            },
+                        },
+                    },
+                    "required": ["bad_merges"],
+                },
+            ),
+            Tool(
                 name="profile_data",
                 description="Get data quality profile: column types, null rates, unique counts, sample values.",
                 inputSchema={"type": "object", "properties": {}},
@@ -281,6 +309,8 @@ def _handle_tool(name: str, args: dict) -> dict:
         return _tool_unmerge_record(args["record_id"])
     elif name == "shatter_cluster":
         return _tool_shatter_cluster(args["cluster_id"])
+    elif name == "suggest_config":
+        return _tool_suggest_config(args.get("bad_merges", []))
     elif name == "profile_data":
         return _tool_profile_data()
     elif name == "export_results":
@@ -490,6 +520,90 @@ def _tool_shatter_cluster(cluster_id: int) -> dict:
         "cluster_id": cluster_id,
         "records_freed": member_count,
         "total_clusters": _result.stats.total_clusters,
+    }
+
+
+def _tool_suggest_config(bad_merges: list[dict]) -> dict:
+    """Analyze bad merges and suggest config changes."""
+    from goldenmatch.core.explainer import explain_pair
+
+    if not bad_merges:
+        return {"error": "Provide at least one bad merge example."}
+
+    matchkeys = _config.get_matchkeys()
+    fields = []
+    threshold = 0.80
+    for mk in matchkeys:
+        if mk.type == "weighted":
+            fields = mk.fields
+            threshold = mk.threshold or 0.80
+            break
+
+    # Analyze each bad merge
+    analyses = []
+    field_scores: dict[str, list[float]] = {}
+
+    for merge in bad_merges:
+        rec_a = merge.get("record_a", {})
+        rec_b = merge.get("record_b", {})
+        reason = merge.get("reason", "")
+
+        exp = explain_pair(rec_a, rec_b, fields, threshold)
+
+        analysis = {
+            "total_score": round(exp.total_score, 4),
+            "is_match": exp.is_match,
+            "reason": reason,
+            "guilty_fields": [],
+        }
+
+        for f in exp.fields:
+            if f.score >= 0.7:  # This field contributed to the bad merge
+                analysis["guilty_fields"].append({
+                    "field": f.field_name,
+                    "scorer": f.scorer,
+                    "score": round(f.score, 4),
+                    "value_a": f.value_a,
+                    "value_b": f.value_b,
+                })
+            field_scores.setdefault(f.field_name, []).append(f.score)
+
+        analyses.append(analysis)
+
+    # Generate suggestions
+    suggestions = []
+
+    # Suggest raising threshold if bad merges have scores close to current threshold
+    bad_scores = [a["total_score"] for a in analyses if a["is_match"]]
+    if bad_scores:
+        max_bad = max(bad_scores)
+        if max_bad < 1.0:
+            suggested_threshold = round(max_bad + 0.05, 2)
+            suggestions.append({
+                "type": "raise_threshold",
+                "current": threshold,
+                "suggested": suggested_threshold,
+                "reason": f"Bad merges have scores up to {max_bad:.2f}. "
+                         f"Raising threshold to {suggested_threshold} would reject them.",
+            })
+
+    # Identify fields that are too permissive
+    for field_name, scores in field_scores.items():
+        avg = sum(scores) / len(scores)
+        if avg >= 0.7:
+            suggestions.append({
+                "type": "reduce_field_weight",
+                "field": field_name,
+                "avg_score_on_bad_merges": round(avg, 3),
+                "reason": f"Field '{field_name}' scores high ({avg:.2f}) on bad merges. "
+                         f"Consider reducing its weight or switching to a stricter scorer.",
+            })
+
+    return {
+        "analyses": analyses,
+        "suggestions": suggestions,
+        "current_threshold": threshold,
+        "bad_merges_analyzed": len(analyses),
     }
 
 

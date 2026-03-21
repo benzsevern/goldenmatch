@@ -11,6 +11,9 @@ Endpoints:
     POST /explain             Explain why two records match
     GET  /clusters            List all clusters
     GET  /clusters/<id>       Get cluster detail
+    GET  /reviews             Review queue (borderline pairs for steward review)
+    GET  /reviews/decisions   List completed review decisions
+    POST /reviews/decide      Approve or reject a pair (steward action)
 """
 
 from __future__ import annotations
@@ -37,6 +40,8 @@ class MatchServer:
         self.result = None
         self._rows: list[dict] = []
         self._id_to_idx: dict[int, int] = {}
+        self._review_queue: list[dict] = []  # pending reviews
+        self._review_decisions: list[dict] = []  # completed reviews
 
     def initialize(self) -> None:
         """Run initial matching and cache results."""
@@ -158,6 +163,75 @@ class MatchServer:
             "members": members,
         }
 
+    def build_review_queue(self, band_lo: float = 0.70, band_hi: float = 0.90, limit: int = 50) -> list[dict]:
+        """Build review queue from borderline pairs."""
+        from goldenmatch.core.explainer import explain_pair
+
+        if not self.result:
+            return []
+
+        matchkeys = self.config.get_matchkeys()
+        fields = []
+        threshold = 0.80
+        for mk in matchkeys:
+            if mk.type == "weighted":
+                fields = mk.fields
+                threshold = mk.threshold or 0.80
+                break
+
+        queue = []
+        for a, b, score in self.result.scored_pairs:
+            if band_lo <= score <= band_hi:
+                idx_a = self._id_to_idx.get(a)
+                idx_b = self._id_to_idx.get(b)
+                if idx_a is None or idx_b is None:
+                    continue
+
+                row_a = {k: v for k, v in self._rows[idx_a].items() if not k.startswith("__")}
+                row_b = {k: v for k, v in self._rows[idx_b].items() if not k.startswith("__")}
+
+                exp = explain_pair(self._rows[idx_a], self._rows[idx_b], fields, threshold)
+
+                queue.append({
+                    "pair_id": f"{a}_{b}",
+                    "row_id_a": a,
+                    "row_id_b": b,
+                    "score": round(score, 4),
+                    "is_match": exp.is_match,
+                    "record_a": row_a,
+                    "record_b": row_b,
+                    "top_contributor": exp.top_contributor,
+                    "weakest_field": exp.weakest_field,
+                    "status": "pending",
+                })
+
+        queue.sort(key=lambda x: abs(x["score"] - threshold))
+        self._review_queue = queue[:limit]
+        return self._review_queue
+
+    def review_decision(self, pair_id: str, decision: str, reviewer: str = "api") -> dict:
+        """Record a review decision (approve/reject)."""
+        from datetime import datetime
+
+        for item in self._review_queue:
+            if item["pair_id"] == pair_id:
+                item["status"] = decision
+                record = {
+                    **item,
+                    "reviewed_by": reviewer,
+                    "reviewed_at": datetime.now().isoformat(),
+                }
+                self._review_decisions.append(record)
+
+                # Apply decision: unmerge if rejected
+                if decision == "reject":
+                    self.engine.unmerge_record(item["row_id_a"])
+                    self.result = self.engine._last_result
+
+                return {"status": "recorded", "pair_id": pair_id, "decision": decision}
+
+        return {"error": f"Pair {pair_id} not found in review queue"}
+
 
 # Global server instance
 _server_instance: MatchServer | None = None
@@ -188,6 +262,18 @@ class APIHandler(BaseHTTPRequestHandler):
                     self._json_response({"error": "Cluster not found"}, 404)
             except ValueError:
                 self._json_response({"error": "Invalid cluster ID"}, 400)
+        elif path == "/reviews":
+            params = parse_qs(parsed.query)
+            lo = float(params.get("lo", ["0.70"])[0])
+            hi = float(params.get("hi", ["0.90"])[0])
+            limit = int(params.get("limit", ["50"])[0])
+            queue = _server_instance.build_review_queue(lo, hi, limit)
+            self._json_response({"queue": queue, "count": len(queue)})
+        elif path == "/reviews/decisions":
+            self._json_response({
+                "decisions": _server_instance._review_decisions,
+                "count": len(_server_instance._review_decisions),
+            })
         else:
             self._json_response({"error": "Not found"}, 404)
 
@@ -220,6 +306,15 @@ class APIHandler(BaseHTTPRequestHandler):
             record_b = data.get("record_b", {})
             explanation = _server_instance.explain_pair(record_a, record_b)
             self._json_response(explanation)
+        elif path == "/reviews/decide":
+            pair_id = data.get("pair_id", "")
+            decision = data.get("decision", "")
+            reviewer = data.get("reviewer", "api")
+            if decision not in ("approve", "reject"):
+                self._json_response({"error": "Decision must be 'approve' or 'reject'"}, 400)
+            else:
+                result = _server_instance.review_decision(pair_id, decision, reviewer)
+                self._json_response(result)
         else:
             self._json_response({"error": "Not found"}, 404)
 
@@ -261,6 +356,8 @@ def start_server(
     print(f"   POST /explain             Explain a match")
     print(f"   GET  /clusters            List clusters")
     print(f"   GET  /clusters/<id>       Cluster detail")
+    print(f"   GET  /reviews             Review queue (steward)")
+    print(f"   POST /reviews/decide      Approve/reject a pair")
     print(f"\n   Press Ctrl+C to stop.\n")
 
     try:

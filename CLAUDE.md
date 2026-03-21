@@ -81,6 +81,10 @@
 - `ANNBlocker.add_to_index(embedding)` / `ANNBlocker.query_one(embedding)` — incremental FAISS ops
 - PPRL: `bloom_filter` transform (CLK via SHA-256, configurable ngram/k/size), `dice`/`jaccard` scorers for fuzzy matching on encrypted data
 - LLM scorer: `llm_score_pairs()` in `core/llm_scorer.py` — sends borderline pairs to GPT/Claude for yes/no match decisions, used as pipeline step after embedding candidate generation
+- Lineage: `core/lineage.py` — `build_lineage` + `save_lineage` saves per-pair field-level explanations to `{run_name}_lineage.json` sidecar. Auto-generated when pipeline writes output.
+- MCP `suggest_config` tool: analyze bad merges, identify guilty fields, suggest threshold/weight changes
+- REST review queue: `GET /reviews` returns borderline pairs for steward review, `POST /reviews/decide` records approve/reject decisions
+- Daemon mode: `watch_daemon()` in `db/watch.py` — adds health endpoint (HTTP /health), PID file, SIGTERM handling to watch mode
 
 ## Gotchas
 - .docx files can't be read by Read tool — use `python-docx` or zipfile+XML
