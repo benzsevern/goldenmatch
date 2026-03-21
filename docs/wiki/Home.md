@@ -56,6 +56,10 @@ goldenmatch setup
 | `goldenmatch rollback RUN_ID` | Undo a previous run |
 | `goldenmatch unmerge RECORD_ID` | Remove a record from its cluster |
 | `goldenmatch runs` | List run history |
+| `goldenmatch init` | Interactive config wizard |
+| `goldenmatch interactive FILE [...]` | Launch TUI |
+| `goldenmatch profile FILE` | Profile data quality |
+| `goldenmatch config save/load/list/show` | Manage config presets |
 
 ## Key Dedupe Flags
 
@@ -69,3 +73,4 @@ goldenmatch setup
 | `--chunked` | Large dataset mode |
 | `--llm-boost` | LLM-powered accuracy boost |
 | `s3://` / `gs://` / `az://` | Cloud storage ingest |
+| `--daemon` | Run watch mode as a background service with health endpoint |

@@ -24,7 +24,7 @@ goldenmatch/
 │   ├── standardize.py      # Per-column standardization
 │   ├── matchkey.py         # Matchkey computation
 │   ├── blocker.py          # 7 blocking strategies
-│   ├── scorer.py           # 8 scoring methods
+│   ├── scorer.py           # 10 scoring methods (incl. dice, jaccard)
 │   ├── cluster.py          # Union-Find clustering
 │   ├── golden.py           # Golden record merging
 │   ├── autoconfig.py       # Zero-config column profiling
@@ -35,7 +35,10 @@ goldenmatch/
 │   ├── threshold.py        # Otsu's method auto-threshold
 │   ├── boost.py            # LLM boost orchestrator
 │   ├── cross_encoder.py    # Ditto-style cross-encoder
-│   └── llm_labeler.py      # LLM pair labeling (Claude/GPT-4)
+│   ├── llm_labeler.py      # LLM pair labeling (Claude/GPT-4)
+│   ├── llm_scorer.py       # LLM scorer (GPT-4o-mini/Claude for borderline pairs)
+│   ├── lineage.py          # Lineage persistence (per-field explanations, JSON sidecar)
+│   └── match_one.py        # Single-record matching primitive for streaming
 │
 ├── db/                     # Database integration
 │   ├── connector.py        # Abstract interface + PostgresConnector
@@ -46,7 +49,8 @@ goldenmatch/
 │   ├── ann_index.py        # Persistent FAISS index
 │   ├── hybrid_blocking.py  # SQL + ANN union blocking
 │   ├── clusters.py         # Persistent cluster management
-│   └── reconcile.py        # Merge-back + conflict resolution
+│   ├── reconcile.py        # Merge-back + conflict resolution
+│   └── watch.py            # Daemon mode (health endpoint, PID file, SIGTERM)
 │
 ├── tui/                    # Interactive TUI (Textual)
 │   ├── app.py              # GoldenMatchApp (gold theme, bindings, routing)
@@ -57,7 +61,7 @@ goldenmatch/
 │   ├── widgets/
 │   │   ├── progress_overlay.py   # Full-screen pipeline progress
 │   │   └── threshold_slider.py   # Live threshold with arrow keys
-│   └── tabs/               # Data, Config, Matches, Golden, Export
+│   └── tabs/               # Data, Config, Matches, Golden, Boost, Export
 │
 └── utils/
     └── transforms.py       # Transform implementations
@@ -161,6 +165,53 @@ The `core/match_one.py` module provides a single-record matching primitive -- th
 - **`add_to_cluster(record_id, matches, clusters)`** — incrementally updates the cluster graph. If the new record matches members of one cluster, it joins. If it bridges two clusters, they merge. Confidence is recomputed automatically.
 
 These primitives enable the `watch` command and incremental DB sync to process single records without re-running the full pipeline.
+
+### MCP Server (12 Tools)
+
+The MCP server (`goldenmatch mcp-serve`) exposes 12 tools for Claude Desktop integration:
+
+1. **match_record** -- match a single record against the dataset
+2. **unmerge_record** -- remove a record from its cluster
+3. **shatter_cluster** -- split a cluster into singletons
+4. **suggest_config** -- analyze bad merges and suggest threshold/weight changes
+5. **explain_match** -- per-field score breakdown for a pair
+6. **list_clusters** -- paginated cluster listing
+7. **get_cluster** -- cluster detail with members and golden record
+8. **search_records** -- full-text search across dataset
+9. **get_stats** -- pipeline statistics
+10. **run_dedupe** -- trigger deduplication
+11. **get_golden_record** -- retrieve a golden record by cluster
+12. **get_config** -- current configuration
+
+### REST API (10 Endpoints)
+
+The REST API server (`goldenmatch serve`) provides:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/match` | POST | Match a record against the dataset |
+| `/clusters` | GET | List clusters (paginated) |
+| `/clusters/{id}` | GET | Cluster detail |
+| `/golden/{id}` | GET | Golden record for a cluster |
+| `/explain/{id_a}/{id_b}` | GET | Per-field match explanation |
+| `/stats` | GET | Pipeline statistics |
+| `/config` | GET | Current configuration |
+| `/reviews` | GET | Borderline pairs for steward review |
+| `/reviews/decide` | POST | Record approve/reject decisions |
+| `/health` | GET | Health check |
+
+### Lineage Persistence
+
+`core/lineage.py` provides `build_lineage()` and `save_lineage()` which save per-pair field-level explanations to a `{run_name}_lineage.json` sidecar file. Auto-generated when the pipeline writes output. Each lineage entry includes field-by-field scores and the overall match decision rationale.
+
+### Daemon Mode
+
+`db/watch.py` provides `watch_daemon()` which extends the `watch` command with:
+- **Health endpoint** -- HTTP server on configurable port responding to `/health`
+- **PID file** -- written on start, cleaned up on exit
+- **SIGTERM handling** -- graceful shutdown on signal
+
+Activated via `goldenmatch watch --daemon`.
 
 ## Test Structure
 

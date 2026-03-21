@@ -167,3 +167,18 @@ When a new record matches an existing cluster:
 | `--dry-run` | Match without writing |
 | `--incremental-column` | Column for incremental detection |
 | `--chunk-size` | Records per chunk (default 10000) |
+
+## Daemon Mode
+
+Run `watch` as a persistent background service:
+
+```bash
+goldenmatch watch --table customers --connection-string "$DATABASE_URL" --daemon
+```
+
+Daemon mode adds:
+- **Health endpoint** -- HTTP server responding to `GET /health` (configurable port)
+- **PID file** -- written on start for process management, cleaned up on exit
+- **SIGTERM handling** -- graceful shutdown on signal
+
+Use the health endpoint for monitoring and orchestration (e.g., Kubernetes liveness probes).

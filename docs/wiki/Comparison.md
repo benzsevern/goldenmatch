@@ -20,6 +20,10 @@ How GoldenMatch compares with other entity resolution tools.
 | HTML report | Yes | No | Yes | No | No |
 | Cluster graph | Yes (interactive) | No | No | No | No |
 | Golden record merge | 5 strategies | No | No | No | No |
+| LLM scorer | Yes (GPT/Claude) | No | No | No | No |
+| Review queue | Yes (REST API) | No | No | No | No |
+| Lineage tracking | Yes (JSON sidecar) | No | Partial | No | No |
+| Daemon mode | Yes (health + PID) | No | No | No | No |
 | License | MIT | MIT | MIT | AGPL | MIT |
 | Status | Active | Active | Active | Stale | Academic |
 

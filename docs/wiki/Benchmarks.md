@@ -69,6 +69,8 @@ Previously ~100s before parallel block scoring and intra-field early termination
 - **Histogram-based auto-select** (opt-in, `auto_select: true`) — evaluates configured blocking keys by group-size histogram and picks the one with smallest max block size.
 - **Dynamic block splitting** — adaptive strategy auto-splits oversized blocks by highest-cardinality column when no `sub_block_keys` are configured.
 - **Weighted multi-field embedding** (opt-in, `column_weights`) — biases record embeddings toward important fields by repeating high-weight field text in the concatenation.
+- **LLM scorer** (opt-in, `llm_scorer: enabled: true`) — sends borderline pairs (score 0.75-0.95) to GPT-4o-mini/Claude for yes/no match decisions. Auto-accepts high-confidence pairs (>0.95). Achieves 81.7% F1 on Abt-Buy at ~$0.74 cost.
+- **PPRL bloom filters** — `bloom_filter` transform + `dice`/`jaccard` scorers for privacy-preserving fuzzy matching on encrypted PII.
 
 ### Pipeline Bottlenecks (at 100K records)
 

@@ -25,7 +25,7 @@ goldenmatch demo
 
 - **Zero-config** — `goldenmatch dedupe file.csv` auto-detects columns, picks scorers, runs automatically
 - **Gold-themed TUI** — interactive interface with keyboard shortcuts, live threshold tuning, setup wizard
-- **8 scoring methods** — exact, Jaro-Winkler, Levenshtein, token sort, soundex, ensemble, embedding, record embedding
+- **10 scoring methods** — exact, Jaro-Winkler, Levenshtein, token sort, soundex, ensemble, embedding, record embedding, dice, jaccard
 - **7 blocking strategies** — static, adaptive, sorted neighborhood, multi-pass, ANN, ann_pairs, canopy
 - **Vertex AI embeddings** — 85%+ F1 accuracy with no GPU needed (Google Cloud managed API)
 - **Database sync** — incremental Postgres matching with persistent ANN index and golden record versioning
@@ -112,7 +112,7 @@ goldenmatch sync --table customers --connection-string "$DATABASE_URL"
 ```
 Files/DB → Ingest → Standardize → Block → Score → Cluster → Golden Records → Output
                                      ↑        ↑
-                              SQL blocking   8 scorers
+                              SQL blocking   10 scorers
                               ANN blocking   ensemble
                               7 strategies   embeddings
                                              parallel blocks
@@ -343,7 +343,7 @@ GoldenMatch includes a gold-themed interactive terminal UI:
 - **Pipeline progress** — full-screen progress with stage tracker (✓/●/○) on first run, footer bar on re-runs
 - **Split-view matches** — cluster list on the left, golden record + member details on the right
 - **Live threshold slider** — arrow keys adjust threshold in 0.05 increments with instant cluster count preview
-- **Keyboard shortcuts** — `1-5` jump to tabs, `F5` run, `?` show all shortcuts, `Ctrl+E` export
+- **Keyboard shortcuts** — `1-6` jump to tabs (Data, Config, Matches, Golden, Boost, Export), `F5` run, `?` show all shortcuts, `Ctrl+E` export
 
 **Data profiling:**
 
@@ -375,7 +375,7 @@ Settings tuned in the TUI can be saved to the project file. Next run picks them 
 | `goldenmatch dedupe FILE [...]` | Deduplicate one or more files |
 | `goldenmatch match TARGET --against REF` | Match target against reference |
 | `goldenmatch sync --table TABLE` | Sync against Postgres database |
-| `goldenmatch watch --table TABLE` | Live stream mode (continuous polling) |
+| `goldenmatch watch --table TABLE` | Live stream mode (continuous polling, `--daemon` for service mode) |
 | `goldenmatch schedule --every 1h FILE` | Run deduplication on a schedule |
 | `goldenmatch serve FILE [...]` | Start REST API server |
 | `goldenmatch mcp-serve FILE [...]` | Start MCP server (Claude Desktop) |
@@ -398,17 +398,19 @@ Settings tuned in the TUI can be saved to the project file. Next run picks them 
 | `--html-report` | Detailed match report with charts |
 | `--chunked` | Large dataset mode (process in chunks) |
 | `--llm-boost` | Improve accuracy with LLM-labeled training |
+| `--daemon` | Run watch mode as a background service with health endpoint |
 | `s3://` / `gs://` / `az://` | Read directly from cloud storage |
 
 ## Architecture
 
 ```
 goldenmatch/
-├── cli/            # 16 CLI commands (Typer)
+├── cli/            # 17 CLI commands (Typer)
 ├── config/         # Pydantic schemas, YAML loader, settings
 ├── core/           # Pipeline: ingest, block, score, cluster, golden, explainer,
 │                   #   report, dashboard, graph, anomaly, diff, rollback,
-│                   #   schema_match, chunked, cloud_ingest, api_connector, scheduler
+│                   #   schema_match, chunked, cloud_ingest, api_connector, scheduler,
+│                   #   llm_scorer, lineage, match_one, gpu, vertex_embedder
 ├── db/             # Postgres: connector, sync, reconcile, clusters, ANN index
 ├── api/            # REST API server
 ├── mcp/            # MCP server for Claude Desktop
