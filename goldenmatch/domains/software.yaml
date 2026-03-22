@@ -1,0 +1,70 @@
+name: software
+signals: ["software", "version", "license", "publisher", "edition", "upgrade", "cd-rom", "dvd-rom", "download"]
+identifier_patterns:
+  version: '\b(?:v\.?\s*)?(\d+(?:\.\d+)+)\b'
+  version_year: '\b(20[0-2]\d)\b'
+  cs_version: '\b((?:cs|cc)\s*\d+)\b'
+  part_number: '\b(\d{5,})\b'
+brand_patterns:
+  - Adobe
+  - Microsoft
+  - Intuit
+  - Symantec
+  - Norton
+  - McAfee
+  - Autodesk
+  - Oracle
+  - IBM
+  - SAP
+  - Sage
+  - QuickBooks
+  - Corel
+  - Webroot
+  - Kaspersky
+  - Trend Micro
+  - VMware
+  - Citrix
+  - Parallels
+  - Acronis
+  - Broderbund
+  - Nuance
+  - Dragon
+attribute_patterns:
+  user_count: '(\d+)\s*(?:user|client|seat|license)\b'
+  platform: '\b(windows?|win|mac(?:intosh)?|linux|unix)\b'
+  edition: '\b(professional|pro|standard|enterprise|premium|basic|ultimate|home|personal|academic|student)\b'
+stop_words:
+  - the
+  - a
+  - an
+  - for
+  - and
+  - or
+  - with
+  - by
+  - from
+  - to
+  - in
+  - of
+  - inc
+  - llc
+  - corp
+  - software
+  - edition
+  - version
+  - ver
+  - cd
+  - dvd
+  - rom
+  - cd-rom
+  - dvd-rom
+  - jewel
+  - case
+  - package
+  - complete
+  - license
+  - media
+  - download
+normalization:
+  lowercase: true
+  strip_punctuation: true

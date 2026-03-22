@@ -1,0 +1,55 @@
+name: electronics
+signals: ["brand", "model", "sku", "upc", "ean", "asin", "megapixel", "mp", "ghz", "watt", "battery", "wireless", "bluetooth"]
+identifier_patterns:
+  model_number: '\b([A-Z]{1,5}[-]?\d{2,}[A-Z0-9]*(?:[-/]\w+)?)\b'
+  sku: '\b(\d{6,}|[A-Z]{2,}\d{4,})\b'
+brand_patterns:
+  - Sony
+  - Samsung
+  - LG
+  - Apple
+  - HP
+  - Dell
+  - Canon
+  - Nikon
+  - Panasonic
+  - Philips
+  - Bose
+  - JBL
+  - Logitech
+  - Microsoft
+  - Intel
+  - AMD
+  - Asus
+  - Acer
+  - Lenovo
+  - Toshiba
+  - Epson
+  - Brother
+  - Xerox
+  - Bosch
+  - Makita
+  - DeWalt
+  - Nike
+  - Adidas
+  - Netgear
+  - D-Link
+  - Linksys
+  - Pioneer
+  - Denon
+  - KitchenAid
+  - Tripp-Lite
+  - Nikon
+attribute_patterns:
+  megapixels: '(\d+\.?\d*)\s*(?:mega\s*pixel|mp)\b'
+  storage_gb: '(\d+)\s*(?:gb|gigabyte)\b'
+  screen_inch: '(\d+\.?\d*)\s*(?:inch|in\.|")\b'
+  ram_gb: '(\d+)\s*gb\s*(?:ram|ddr|memory)\b'
+  watts: '(\d+)\s*(?:watt|w)\b'
+  speed_ghz: '(\d+\.?\d*)\s*ghz\b'
+stop_words: ["the", "a", "an", "for", "and", "with", "by", "from", "to", "in", "of", "black", "white", "silver", "gold", "finish"]
+normalization:
+  strip_hyphens: true
+  uppercase: true
+  strip_region_suffix: true
+  strip_color_suffix: true

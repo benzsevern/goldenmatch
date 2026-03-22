@@ -276,6 +276,73 @@ def create_server(file_paths: list[str], config_path: str | None = None) -> Serv
                     "required": ["output_path"],
                 },
             ),
+            Tool(
+                name="list_domains",
+                description="List available domain extraction rulebooks (built-in + user-defined).",
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            Tool(
+                name="create_domain",
+                description="Create a custom domain extraction rulebook. Define patterns for a specific data domain (medical devices, automotive parts, real estate, etc.).",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Domain name (e.g. 'medical_devices', 'automotive_parts')",
+                        },
+                        "signals": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Column name keywords that trigger this domain (e.g. ['ndc', 'fda', 'implant'])",
+                        },
+                        "identifier_patterns": {
+                            "type": "object",
+                            "description": "Named regex patterns for domain identifiers (e.g. {'ndc': '\\\\b(\\\\d{5}-\\\\d{4}-\\\\d{2})\\\\b'})",
+                        },
+                        "brand_patterns": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Brand/manufacturer names to extract (e.g. ['Medtronic', 'Abbott'])",
+                        },
+                        "attribute_patterns": {
+                            "type": "object",
+                            "description": "Named regex patterns for domain attributes (e.g. {'size': '\\\\b(\\\\d+mm)\\\\b'})",
+                        },
+                        "stop_words": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Words to strip during name normalization",
+                        },
+                        "scope": {
+                            "type": "string",
+                            "enum": ["local", "global"],
+                            "description": "Save locally (.goldenmatch/domains/) or globally (~/.goldenmatch/domains/). Default: local.",
+                            "default": "local",
+                        },
+                    },
+                    "required": ["name", "signals"],
+                },
+            ),
+            Tool(
+                name="test_domain",
+                description="Test a domain extraction rulebook against sample records. Shows what features would be extracted from the loaded data.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "domain_name": {
+                            "type": "string",
+                            "description": "Name of the domain rulebook to test",
+                        },
+                        "sample_size": {
+                            "type": "integer",
+                            "description": "Number of records to test (default 10)",
+                            "default": 10,
+                        },
+                    },
+                    "required": ["domain_name"],
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -315,6 +382,12 @@ def _handle_tool(name: str, args: dict) -> dict:
         return _tool_profile_data()
     elif name == "export_results":
         return _tool_export_results(args["output_path"], args.get("format", "csv"))
+    elif name == "list_domains":
+        return _tool_list_domains()
+    elif name == "create_domain":
+        return _tool_create_domain(args)
+    elif name == "test_domain":
+        return _tool_test_domain(args.get("domain_name", ""), args.get("sample_size", 10))
     else:
         return {"error": f"Unknown tool: {name}"}
 
@@ -644,6 +717,93 @@ def _tool_export_results(output_path: str, fmt: str) -> dict:
             path.write_text("")
 
     return {"exported": str(path), "format": fmt, "records": _result.golden.height if _result.golden is not None else 0}
+
+
+def _tool_list_domains() -> dict:
+    """List available domain extraction rulebooks."""
+    from goldenmatch.core.domain_registry import discover_rulebooks
+    rulebooks = discover_rulebooks()
+    result = []
+    for name, rb in rulebooks.items():
+        result.append({
+            "name": rb.name,
+            "signals": rb.signals,
+            "identifier_patterns": list(rb.identifier_patterns.keys()),
+            "brand_count": len(rb.brand_patterns),
+            "attribute_patterns": list(rb.attribute_patterns.keys()),
+        })
+    return {"domains": result, "count": len(result)}
+
+
+def _tool_create_domain(args: dict) -> dict:
+    """Create a custom domain extraction rulebook."""
+    from goldenmatch.core.domain_registry import DomainRulebook, save_rulebook
+    from pathlib import Path
+
+    name = args["name"]
+    scope = args.get("scope", "local")
+
+    if scope == "global":
+        save_dir = Path.home() / ".goldenmatch" / "domains"
+    else:
+        save_dir = Path(".goldenmatch/domains")
+
+    rulebook = DomainRulebook(
+        name=name,
+        signals=args.get("signals", []),
+        identifier_patterns=args.get("identifier_patterns", {}),
+        brand_patterns=args.get("brand_patterns", []),
+        attribute_patterns=args.get("attribute_patterns", {}),
+        stop_words=args.get("stop_words", []),
+    )
+
+    path = save_rulebook(rulebook, save_dir / f"{name}.yaml")
+    return {
+        "status": "created",
+        "name": name,
+        "path": str(path),
+        "scope": scope,
+        "signals": rulebook.signals,
+        "identifier_patterns": list(rulebook.identifier_patterns.keys()),
+    }
+
+
+def _tool_test_domain(domain_name: str, sample_size: int = 10) -> dict:
+    """Test a domain rulebook against loaded data."""
+    from goldenmatch.core.domain_registry import discover_rulebooks
+
+    if not _rows:
+        return {"error": "No data loaded. Start the MCP server with --file."}
+
+    rulebooks = discover_rulebooks()
+    if domain_name not in rulebooks:
+        return {"error": f"Domain '{domain_name}' not found. Available: {list(rulebooks.keys())}"}
+
+    rb = rulebooks[domain_name]
+    # Get text columns
+    sample_cols = [c for c in _rows[0].keys() if not c.startswith("__") and isinstance(_rows[0].get(c), str)]
+    if not sample_cols:
+        return {"error": "No text columns found in data."}
+
+    text_col = sample_cols[0]
+    results = []
+    for row in _rows[:sample_size]:
+        text = str(row.get(text_col, "") or "")
+        extracted = rb.extract(text)
+        results.append({
+            "original": text[:100],
+            "brand": extracted.get("brand"),
+            "identifiers": extracted.get("identifiers", {}),
+            "name_normalized": extracted.get("name_normalized"),
+            "confidence": round(extracted.get("confidence", 0), 2),
+        })
+
+    return {
+        "domain": domain_name,
+        "text_column": text_col,
+        "sample_size": len(results),
+        "extractions": results,
+    }
 
 
 async def run_server(file_paths: list[str], config_path: str | None = None) -> None:
