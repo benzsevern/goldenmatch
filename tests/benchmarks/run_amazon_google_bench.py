@@ -58,12 +58,18 @@ print(f"Loaded: {df.height} records, {len(gt)} ground truth pairs")
 domain = detect_domain([c for c in df.columns if not c.startswith("__")])
 enhanced, low_conf = extract_features(df, domain, confidence_threshold=0.3)
 
-if "__model_norm__" in enhanced.columns:
+if "__sw_name__" in enhanced.columns:
+    sw_names = enhanced["__sw_name__"].drop_nulls()
+    sw_versions = enhanced["__sw_version__"].drop_nulls()
+    print(f"Domain: {domain.name} (subdomain: {domain.subdomain})")
+    print(f"  SW names: {len(sw_names)}/{df.height}, versions: {len(sw_versions)}/{df.height}")
+elif "__model_norm__" in enhanced.columns:
     models = enhanced["__model_norm__"].drop_nulls()
     brands = enhanced["__brand__"].drop_nulls()
-    print(f"Domain: {domain.name}, models: {len(models)}/{df.height}, brands: {len(brands)}/{df.height}")
+    print(f"Domain: {domain.name} (subdomain: {domain.subdomain})")
+    print(f"  Models: {len(models)}/{df.height}, brands: {len(brands)}/{df.height}")
 else:
-    print(f"Domain: {domain.name} -- no product extraction columns found")
+    print(f"Domain: {domain.name} -- no extraction columns")
 
 row_src = {r["__row_id__"]: r["__source__"] for r in enhanced.select("__row_id__", "__source__").to_dicts()}
 
@@ -134,21 +140,53 @@ emb_pairs = cross_filter(emb_pairs)
 pr, rc, f1 = ev(emb_pairs)
 print(f"\r{'A: emb+ANN baseline':<45s}  {pr:5.1%}  {rc:5.1%}  {f1:5.1%}  {len(emb_pairs):>6d}")
 
-# B: Model norm exact
+# B: Software name exact (if software subdomain detected)
+sw_name_pairs = []
+if "__sw_name__" in collected.columns:
+    mk_sw = MatchkeyConfig(name="sw_name_exact", comparison="exact", fields=[MatchkeyField(field="__sw_name__")])
+    lf2 = compute_matchkeys(collected.lazy(), [mk_sw])
+    collected2 = lf2.collect()
+    sw_name_pairs = find_exact_matches(collected2.lazy(), mk_sw)
+    sw_name_pairs = cross_filter(sw_name_pairs)
+    pr, rc, f1 = ev(sw_name_pairs)
+    print(f"{'B: sw_name_norm exact':<45s}  {pr:5.1%}  {rc:5.1%}  {f1:5.1%}  {len(sw_name_pairs):>6d}")
+
+# B2: Model norm exact (if electronics extraction ran)
 model_pairs = []
 if "__model_norm__" in collected.columns:
     mk_model = MatchkeyConfig(name="model_exact", comparison="exact", fields=[MatchkeyField(field="__model_norm__")])
-    lf2 = compute_matchkeys(collected.lazy(), [mk_model])
-    collected2 = lf2.collect()
-    model_pairs = find_exact_matches(collected2.lazy(), mk_model)
+    lf3 = compute_matchkeys(collected.lazy(), [mk_model])
+    collected3 = lf3.collect()
+    model_pairs = find_exact_matches(collected3.lazy(), mk_model)
     model_pairs = cross_filter(model_pairs)
-    pr, rc, f1 = ev(model_pairs)
-    print(f"{'B: model_norm exact':<45s}  {pr:5.1%}  {rc:5.1%}  {f1:5.1%}  {len(model_pairs):>6d}")
+    if model_pairs:
+        pr, rc, f1 = ev(model_pairs)
+        print(f"{'B2: model_norm exact':<45s}  {pr:5.1%}  {rc:5.1%}  {f1:5.1%}  {len(model_pairs):>6d}")
 
-# C: Model + emb combined
-combined = dedupe(model_pairs + emb_pairs)
+# B3: sw_name blocking + title fuzzy (software-specific strategy)
+sw_fuzzy_pairs = []
+if "__sw_name__" in collected.columns:
+    mk_sw_fuzzy = MatchkeyConfig(
+        name="sw_title_fuzzy", comparison="weighted", threshold=0.65,
+        fields=[MatchkeyField(field="title", scorer="token_sort", weight=1.0, transforms=["lowercase"])],
+    )
+    sw_blocking = BlockingConfig(
+        keys=[BlockingKeyConfig(fields=["__sw_name__"])],
+        max_block_size=200,
+    )
+    sw_lf = compute_matchkeys(collected.lazy(), [mk_sw_fuzzy])
+    sw_collected = sw_lf.collect()
+    sw_blocks = build_blocks(sw_collected.lazy(), sw_blocking)
+    sw_matched = set()
+    sw_fuzzy_pairs = score_blocks_parallel(sw_blocks, mk_sw_fuzzy, sw_matched)
+    sw_fuzzy_pairs = cross_filter(sw_fuzzy_pairs)
+    pr, rc, f1 = ev(sw_fuzzy_pairs)
+    print(f"{'B3: sw_name_block + title_fuzzy(0.65)':<45s}  {pr:5.1%}  {rc:5.1%}  {f1:5.1%}  {len(sw_fuzzy_pairs):>6d}")
+
+# C: All extraction + emb combined
+combined = dedupe(sw_name_pairs + sw_fuzzy_pairs + model_pairs + emb_pairs)
 pr, rc, f1 = ev(combined)
-print(f"{'C: model_norm + emb+ANN':<45s}  {pr:5.1%}  {rc:5.1%}  {f1:5.1%}  {len(combined):>6d}")
+print(f"{'C: extraction + emb+ANN':<45s}  {pr:5.1%}  {rc:5.1%}  {f1:5.1%}  {len(combined):>6d}")
 
 # D: Manufacturer blocking + title fuzzy
 mfr_pairs = []
@@ -171,9 +209,9 @@ if "manufacturer" in collected.columns:
     print(f"{'D: mfr_block + title_fuzzy(0.70)':<45s}  {pr:5.1%}  {rc:5.1%}  {f1:5.1%}  {len(mfr_pairs):>6d}")
 
 # E: Everything combined
-all_combined = dedupe(model_pairs + emb_pairs + mfr_pairs)
+all_combined = dedupe(sw_name_pairs + sw_fuzzy_pairs + model_pairs + emb_pairs + mfr_pairs)
 pr_e, rc_e, f1_e = ev(all_combined)
-print(f"{'E: model + emb + mfr combined':<45s}  {pr_e:5.1%}  {rc_e:5.1%}  {f1_e:5.1%}  {len(all_combined):>6d}")
+print(f"{'E: extraction + emb + mfr combined':<45s}  {pr_e:5.1%}  {rc_e:5.1%}  {f1_e:5.1%}  {len(all_combined):>6d}")
 
 # F: + LLM
 api_key = os.environ.get("OPENAI_API_KEY")

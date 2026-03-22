@@ -28,6 +28,7 @@ class DomainProfile:
     confidence: float
     text_columns: list[str] = field(default_factory=list)  # columns to extract from
     id_columns: list[str] = field(default_factory=list)  # existing ID columns
+    subdomain: str | None = None  # "electronics", "software", etc.
 
 
 # Domain detection heuristics
@@ -84,11 +85,27 @@ def detect_domain(columns: list[str]) -> DomainProfile:
         elif any(p in cl for p in ("id", "sku", "model", "upc", "ean", "asin", "isbn", "doi")):
             id_cols.append(c)
 
+    # Sub-domain detection for products: electronics vs software
+    subdomain = None
+    if best == "product":
+        sw_signals = sum(1 for c in cols_lower if any(
+            p in c for p in ("software", "version", "license", "publisher")
+        ))
+        hw_signals = sum(1 for c in cols_lower if any(
+            p in c for p in ("brand", "model", "sku", "upc", "ean", "weight", "dimensions")
+        ))
+        if sw_signals > hw_signals:
+            subdomain = "software"
+        elif hw_signals > 0:
+            subdomain = "electronics"
+        # If can't tell from columns, will auto-detect from data content
+
     return DomainProfile(
         name=best,
         confidence=confidence,
         text_columns=text_cols,
         id_columns=id_cols,
+        subdomain=subdomain,
     )
 
 
@@ -234,6 +251,122 @@ def model_contains(model_a: str | None, model_b: str | None) -> bool:
     return na in nb or nb in na
 
 
+# ── Software Product Feature Extraction ────────────────────────────────────
+
+_SW_VERSION = re.compile(
+    r"\b(?:v\.?\s*)?(\d+(?:\.\d+)+)\b"  # "6.5", "3.0", "v. 9.4", "v5.0"
+    r"|\b((?:cs|cc)\s*\d+)\b"  # "cs3", "cc 2024"
+    r"|\b(20[0-2]\d)\b",  # year as version "2007", "2006"
+    re.IGNORECASE,
+)
+_SW_EDITION = re.compile(
+    r"\b(professional|pro|standard|enterprise|premium|basic|"
+    r"ultimate|home|personal|academic|student|unlimited|"
+    r"plus|lite|express|starter|essentials?)\b",
+    re.IGNORECASE,
+)
+_SW_PLATFORM = re.compile(
+    r"\b(windows?|win|mac(?:intosh)?|linux|unix|osx?|ios|android)\b"
+    r"|\b(win(?:/mac|\\mac))\b"
+    r"|\bfor\s+(pc|mac)\b",
+    re.IGNORECASE,
+)
+_SW_PART_NUMBER = re.compile(r"\b(\d{5,})\b")
+_SW_UPGRADE = re.compile(r"\b(upgrade|upg|update)\b", re.IGNORECASE)
+
+# Stop words to strip from software product names for normalization
+_SW_STOP_WORDS = frozenset({
+    "the", "a", "an", "for", "and", "or", "with", "by", "from", "to",
+    "in", "of", "-", "inc", "inc.", "llc", "corp", "software", "edition",
+    "version", "ver", "cd", "dvd", "rom", "cd-rom", "dvd-rom",
+    "jewel", "case", "package", "complete", "license", "media",
+})
+
+
+@dataclass
+class SoftwareExtractionResult:
+    """Extracted features from a software product title."""
+
+    name_normalized: str | None = None  # core product name, stripped of noise
+    version: str | None = None
+    edition: str | None = None
+    platform: str | None = None
+    part_number: str | None = None
+    is_upgrade: bool = False
+    confidence: float = 0.0
+
+
+def extract_software_features(text: str) -> SoftwareExtractionResult:
+    """Extract structured features from a software product title."""
+    if not text or not text.strip():
+        return SoftwareExtractionResult(confidence=0.0)
+
+    result = SoftwareExtractionResult()
+    text_lower = text.lower().strip()
+    signals = 0
+    total_possible = 3  # name, version, edition
+
+    # Version
+    ver_match = _SW_VERSION.search(text)
+    if ver_match:
+        result.version = (ver_match.group(1) or ver_match.group(2) or ver_match.group(3) or "").strip().lower()
+        signals += 1
+
+    # Edition
+    ed_match = _SW_EDITION.search(text)
+    if ed_match:
+        result.edition = ed_match.group(1).strip().lower()
+        # Normalize "professional" -> "pro"
+        if result.edition == "professional":
+            result.edition = "pro"
+        signals += 0.5
+
+    # Platform
+    plat_match = _SW_PLATFORM.search(text)
+    if plat_match:
+        result.platform = (plat_match.group(1) or plat_match.group(2) or plat_match.group(3) or "").strip().lower()
+        if result.platform.startswith("win"):
+            result.platform = "win"
+        signals += 0.3
+
+    # Part number
+    pn_match = _SW_PART_NUMBER.search(text)
+    if pn_match:
+        result.part_number = pn_match.group(1)
+        signals += 0.5
+
+    # Upgrade flag
+    if _SW_UPGRADE.search(text):
+        result.is_upgrade = True
+        signals += 0.2
+
+    # Normalized product name: strip version, edition, platform, stop words, punctuation
+    name = text_lower
+    # Remove version strings
+    name = _SW_VERSION.sub(" ", name)
+    # Remove edition
+    name = _SW_EDITION.sub(" ", name)
+    # Remove platform
+    name = _SW_PLATFORM.sub(" ", name)
+    # Remove part numbers
+    name = _SW_PART_NUMBER.sub(" ", name)
+    # Remove upgrade keywords
+    name = _SW_UPGRADE.sub(" ", name)
+    # Remove parenthetical content
+    name = re.sub(r"\([^)]*\)", " ", name)
+    # Remove punctuation
+    name = re.sub(r"[^\w\s]", " ", name)
+    # Remove stop words and collapse whitespace
+    words = [w for w in name.split() if w not in _SW_STOP_WORDS and len(w) > 1]
+    result.name_normalized = " ".join(words).strip() if words else None
+
+    if result.name_normalized and len(result.name_normalized) >= 3:
+        signals += 1
+
+    result.confidence = min(1.0, signals / total_possible)
+    return result
+
+
 # ── Bibliographic Feature Extraction ──────────────────────────────────────
 
 _YEAR_PATTERN = re.compile(r"\b(19|20)\d{2}\b")
@@ -282,12 +415,103 @@ def extract_features(
         return df, []
 
     if domain.name == "product":
-        return _extract_product_features_df(df, domain, confidence_threshold)
+        # Auto-detect software vs electronics from data if not already set
+        if domain.subdomain is None:
+            domain.subdomain = _detect_product_subdomain(df, domain)
+            logger.info("Product subdomain auto-detected: %s", domain.subdomain)
+
+        if domain.subdomain == "software":
+            return _extract_software_features_df(df, domain, confidence_threshold)
+        else:
+            return _extract_product_features_df(df, domain, confidence_threshold)
     elif domain.name == "bibliographic":
         return _extract_biblio_features_df(df, domain, confidence_threshold)
     else:
         # Person and company domains — minimal extraction for now
         return df, []
+
+
+def _detect_product_subdomain(df: pl.DataFrame, domain: DomainProfile) -> str:
+    """Auto-detect whether product data is electronics or software.
+
+    Samples text columns and counts software-specific signals vs
+    electronics-specific signals.
+    """
+    text_col = domain.text_columns[0] if domain.text_columns else None
+    if not text_col or text_col not in df.columns:
+        return "electronics"
+
+    sample = df.head(min(200, df.height))
+    sw_signals = 0
+    hw_signals = 0
+
+    for row in sample.select([text_col]).to_dicts():
+        text = str(row.get(text_col, "") or "").lower()
+        # Software signals
+        if any(w in text for w in ("software", "license", "edition", "upgrade", "upg",
+                                    "cd-rom", "dvd-rom", "download", "subscription")):
+            sw_signals += 1
+        if _SW_VERSION.search(text):
+            sw_signals += 0.5
+        # Electronics signals
+        if _MODEL_NUMBER.search(text.upper()):
+            hw_signals += 1
+        if any(w in text for w in ("megapixel", "mp", "ghz", "mhz", "watt",
+                                    "inch", "battery", "wireless", "bluetooth")):
+            hw_signals += 1
+
+    logger.debug("Product subdomain detection: sw=%.0f, hw=%.0f", sw_signals, hw_signals)
+    return "software" if sw_signals > hw_signals else "electronics"
+
+
+def _extract_software_features_df(
+    df: pl.DataFrame,
+    domain: DomainProfile,
+    confidence_threshold: float,
+) -> tuple[pl.DataFrame, list[int]]:
+    """Extract software product features into derived columns."""
+    text_col = domain.text_columns[0]
+
+    names_norm = []
+    versions = []
+    editions = []
+    platforms = []
+    part_numbers = []
+    confidences = []
+    low_confidence_ids = []
+
+    for row in df.select(["__row_id__", text_col]).to_dicts():
+        text = str(row.get(text_col, "") or "")
+        rid = row["__row_id__"]
+
+        result = extract_software_features(text)
+        names_norm.append(result.name_normalized)
+        versions.append(result.version)
+        editions.append(result.edition)
+        platforms.append(result.platform)
+        part_numbers.append(result.part_number)
+        confidences.append(result.confidence)
+
+        if result.confidence < confidence_threshold:
+            low_confidence_ids.append(rid)
+
+    enhanced = df.with_columns([
+        pl.Series("__sw_name__", names_norm, dtype=pl.Utf8),
+        pl.Series("__sw_version__", versions, dtype=pl.Utf8),
+        pl.Series("__sw_edition__", editions, dtype=pl.Utf8),
+        pl.Series("__sw_platform__", platforms, dtype=pl.Utf8),
+        pl.Series("__sw_part_num__", part_numbers, dtype=pl.Utf8),
+        pl.Series("__extract_confidence__", confidences, dtype=pl.Float64),
+    ])
+
+    n_names = sum(1 for n in names_norm if n)
+    n_versions = sum(1 for v in versions if v)
+    logger.info(
+        "Software extraction: %d/%d names, %d/%d versions, %d low-confidence",
+        n_names, df.height, n_versions, df.height, len(low_confidence_ids),
+    )
+
+    return enhanced, low_confidence_ids
 
 
 def _extract_product_features_df(
