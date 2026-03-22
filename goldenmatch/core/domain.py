@@ -195,6 +195,45 @@ def extract_product_features(text: str) -> ExtractionResult:
     return result
 
 
+# ── Model Number Normalization ─────────────────────────────────────────────
+
+_REGION_SUFFIXES = re.compile(r"(NA|US|EU|UK|CA|AU|JP)$")
+_COLOR_SUFFIXES = re.compile(r"(BK|WH|BF|WF|SL|GR|BL|RD|GD|SV)$")
+
+
+def normalize_model(model: str | None) -> str | None:
+    """Normalize a model number for matching.
+
+    Applies: uppercase, strip hyphens/spaces/slashes, strip region/color suffixes.
+    "CL-51" -> "CL51", "GS105NA" -> "GS105", "KX-TG6700B" -> "KXTG6700B"
+    """
+    if not model:
+        return None
+    n = model.upper().replace("-", "").replace(" ", "").replace("/", "")
+    # Strip region suffixes (NA, US, EU, etc.)
+    n = _REGION_SUFFIXES.sub("", n)
+    # Strip color suffixes (BK, WH, BF, WF, etc.) only if result is still 4+ chars
+    stripped = _COLOR_SUFFIXES.sub("", n)
+    if len(stripped) >= 4:
+        n = stripped
+    return n
+
+
+def model_contains(model_a: str | None, model_b: str | None) -> bool:
+    """Check if one normalized model is contained in the other.
+
+    Handles cases like "KX-TG6700B" vs "TG6700B" where one includes
+    a manufacturer prefix the other doesn't.
+    """
+    if not model_a or not model_b:
+        return False
+    na = normalize_model(model_a)
+    nb = normalize_model(model_b)
+    if not na or not nb:
+        return False
+    return na in nb or nb in na
+
+
 # ── Bibliographic Feature Extraction ──────────────────────────────────────
 
 _YEAR_PATTERN = re.compile(r"\b(19|20)\d{2}\b")
@@ -283,10 +322,17 @@ def _extract_product_features_df(
         if result.confidence < confidence_threshold:
             low_confidence_ids.append(rid)
 
+    # Normalize models for matching
+    models_norm = [normalize_model(m) for m in models]
+
+    # Normalize brands
+    brands_norm = [b.upper().strip() if b else None for b in brands]
+
     # Add derived columns
     enhanced = df.with_columns([
-        pl.Series("__brand__", brands, dtype=pl.Utf8),
+        pl.Series("__brand__", brands_norm, dtype=pl.Utf8),
         pl.Series("__model__", models, dtype=pl.Utf8),
+        pl.Series("__model_norm__", models_norm, dtype=pl.Utf8),
         pl.Series("__color__", colors, dtype=pl.Utf8),
         pl.Series("__specs__", specs_strs, dtype=pl.Utf8),
         pl.Series("__extract_confidence__", confidences, dtype=pl.Float64),

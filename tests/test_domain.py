@@ -85,6 +85,54 @@ class TestProductFeatureExtraction:
         assert "MX-2000" in result.parenthetical
 
 
+class TestModelNormalization:
+    def test_strip_hyphens(self):
+        from goldenmatch.core.domain import normalize_model
+        assert normalize_model("CL-51") == "CL51"
+        assert normalize_model("Z-2300") == "Z2300"
+        assert normalize_model("DSC-T77") == "DSCT77"
+
+    def test_uppercase(self):
+        from goldenmatch.core.domain import normalize_model
+        assert normalize_model("cl51") == "CL51"
+
+    def test_strip_region_suffix(self):
+        from goldenmatch.core.domain import normalize_model
+        assert normalize_model("GS105NA") == "GS105"
+        assert normalize_model("JFS516NA") == "JFS516"
+
+    def test_strip_color_suffix(self):
+        from goldenmatch.core.domain import normalize_model
+        assert normalize_model("NNH965BK") == "NNH965"
+
+    def test_short_model_preserved(self):
+        from goldenmatch.core.domain import normalize_model
+        # Don't strip suffix if result would be too short
+        assert normalize_model("ABNA") is not None
+
+    def test_none_input(self):
+        from goldenmatch.core.domain import normalize_model
+        assert normalize_model(None) is None
+
+    def test_model_contains(self):
+        from goldenmatch.core.domain import model_contains
+        assert model_contains("KX-TG6700B", "TG6700B")
+        assert model_contains("JFS516NA", "JFS516")
+        assert not model_contains("DSC-T77", "DSC-T700")
+
+    def test_model_norm_column_in_df(self):
+        df = pl.DataFrame({
+            "__row_id__": [1, 2],
+            "name": ["Sony CL-51 Cartridge", "Canon CL51 Ink"],
+        })
+        domain = DomainProfile(name="product", confidence=0.9, text_columns=["name"])
+        enhanced, _ = extract_features(df, domain)
+        assert "__model_norm__" in enhanced.columns
+        norms = enhanced["__model_norm__"].to_list()
+        # Both should normalize to the same value
+        assert norms[0] == norms[1]
+
+
 class TestBiblioFeatureExtraction:
     def test_extract_year(self):
         features = extract_biblio_features("A Theory for Record Linkage 1969")
@@ -120,8 +168,8 @@ class TestDataFrameExtraction:
 
         # First two should have brands, third shouldn't
         brands = enhanced["__brand__"].to_list()
-        assert brands[0] == "Sony"
-        assert brands[1] == "Canon"
+        assert brands[0] == "SONY"
+        assert brands[1] == "CANON"
 
     def test_low_confidence_identified(self):
         df = pl.DataFrame({
