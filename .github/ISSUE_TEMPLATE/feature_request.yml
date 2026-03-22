@@ -1,0 +1,38 @@
+name: Feature Request
+description: Suggest an enhancement or new feature
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea? We'd love to hear it. For domain pack requests, consider posting in [Discussions](../../discussions/3) instead.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: "What are you trying to do that GoldenMatch doesn't support well?"
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: "How would you like this to work? Config examples, CLI usage, etc."
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Scoring / Accuracy
+        - Blocking
+        - Domain Packs
+        - CLI / UX
+        - Database / Connectors
+        - Performance / Scale
+        - API / MCP
+        - Documentation
+        - Other
+    validations:
+      required: true
