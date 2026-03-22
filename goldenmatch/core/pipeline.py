@@ -186,6 +186,45 @@ def run_dedupe(
     if config.standardization and config.standardization.rules:
         combined_lf = apply_standardization(combined_lf, config.standardization.rules)
 
+    # ── Step 1.5c: DOMAIN FEATURE EXTRACTION ──
+    domain_cfg = config.domain
+    if domain_cfg and domain_cfg.enabled:
+        from goldenmatch.core.domain import detect_domain, extract_features
+        combined_df_tmp = combined_lf.collect()
+        user_cols = [c for c in combined_df_tmp.columns if not c.startswith("__")]
+
+        if domain_cfg.mode == "auto" or domain_cfg.mode is None:
+            domain_profile = detect_domain(user_cols)
+        else:
+            from goldenmatch.core.domain import DomainProfile
+            domain_profile = DomainProfile(
+                name=domain_cfg.mode, confidence=1.0,
+                text_columns=[c for c in user_cols if any(p in c.lower() for p in ("name", "title", "description", "product"))],
+            )
+
+        if domain_profile.confidence > 0.3:
+            logger.info("Domain detected: %s (confidence %.2f)", domain_profile.name, domain_profile.confidence)
+            combined_df_tmp, low_conf_ids = extract_features(
+                combined_df_tmp, domain_profile, domain_cfg.confidence_threshold,
+            )
+
+            # LLM validation for low-confidence extractions
+            if domain_cfg.llm_validation and low_conf_ids:
+                from goldenmatch.core.llm_extract import llm_extract_features, apply_llm_extractions
+                budget = None
+                if domain_cfg.budget:
+                    from goldenmatch.core.llm_budget import BudgetTracker
+                    budget = BudgetTracker(domain_cfg.budget)
+                text_col = domain_profile.text_columns[0] if domain_profile.text_columns else user_cols[0]
+                extractions = llm_extract_features(
+                    combined_df_tmp, low_conf_ids, text_col,
+                    domain=domain_profile.name, budget_tracker=budget,
+                )
+                combined_df_tmp = apply_llm_extractions(combined_df_tmp, extractions, domain_profile.name)
+                logger.info("LLM validated %d/%d low-confidence extractions", len(extractions), len(low_conf_ids))
+
+            combined_lf = combined_df_tmp.lazy()
+
     # ── Step 2: TRANSFORM ──
     combined_lf = compute_matchkeys(combined_lf, matchkeys)
 

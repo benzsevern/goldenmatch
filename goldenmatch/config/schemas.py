@@ -333,6 +333,17 @@ class LLMScorerConfig(BaseModel):
     budget: BudgetConfig | None = None
 
 
+# ── Domain Extraction Config ──────────────────────────────────────────────
+
+
+class DomainConfig(BaseModel):
+    enabled: bool = False
+    mode: str | None = None  # "product", "person", "bibliographic", "company", "auto"
+    confidence_threshold: float = 0.3  # below this, route to LLM
+    llm_validation: bool = True  # whether to use LLM for low-confidence extractions
+    budget: BudgetConfig | None = None  # reuses budget config
+
+
 # ── MatchSettingsConfig ─────────────────────────────────────────────────────
 
 
@@ -354,6 +365,7 @@ class GoldenMatchConfig(BaseModel):
     validation: ValidationConfig | None = None
     llm_boost: bool = False
     llm_scorer: LLMScorerConfig | None = None
+    domain: DomainConfig | None = None
 
     @model_validator(mode="after")
     def _validate_fuzzy_needs_blocking(self) -> "GoldenMatchConfig":
