@@ -111,6 +111,22 @@ blocking:
 
 Best for: text-heavy data without embedding dependencies.
 
+### Learned
+
+Data-driven predicate selection. Automatically discovers blocking rules from a sample of matched pairs. Two-pass approach: sample + static blocking to get training pairs, then learn predicates that maximize recall while minimizing comparison space.
+
+```yaml
+blocking:
+  strategy: learned
+  learned_sample_size: 5000
+  learned_min_recall: 0.90
+  learned_min_reduction: 0.80
+  learned_predicate_depth: 2
+  learned_cache_path: .goldenmatch/learned_rules.json
+```
+
+Best for: when you don't know which blocking keys work best -- let the data decide. Achieves 96.9% F1 on DBLP-ACM, matching hand-tuned static blocking.
+
 ## Auto-select Best Key
 
 When multiple blocking keys are configured, `auto_select: true` runs histogram analysis on each key and picks the one with the smallest maximum block size (while maintaining >= 50% record coverage):

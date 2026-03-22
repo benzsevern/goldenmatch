@@ -21,7 +21,7 @@ goldenmatch setup
 | Page | What it covers |
 |------|----------------|
 | [Pipeline Overview](Pipeline-Overview.md) | Ingest, Block, Score, Cluster, Golden Records |
-| [Blocking Strategies](Blocking-Strategies.md) | 7 strategies: static, adaptive, multi-pass, ANN, canopy |
+| [Blocking Strategies](Blocking-Strategies.md) | 8+ strategies: static, adaptive, multi-pass, ANN, canopy, learned |
 
 ## Advanced Features
 
@@ -36,7 +36,7 @@ goldenmatch setup
 
 | Page | Details |
 |------|---------|
-| [Benchmarks](Benchmarks.md) | 97.2% DBLP-ACM, 81.7% Abt-Buy, 8,200 rec/s |
+| [Benchmarks](Benchmarks.md) | 97.2% DBLP-ACM, 72.2% Abt-Buy (domain+LLM), 8,200 rec/s |
 | [Comparison](Comparison.md) | vs dedupe, Splink, Zingg, Ditto |
 | [Architecture](Architecture.md) | Project structure and module map |
 
@@ -59,6 +59,9 @@ goldenmatch setup
 | `goldenmatch init` | Interactive config wizard |
 | `goldenmatch interactive FILE [...]` | Launch TUI |
 | `goldenmatch profile FILE` | Profile data quality |
+| `goldenmatch evaluate FILE --gt GT.csv` | Evaluate against ground truth (P/R/F1) |
+| `goldenmatch incremental BASE --new NEW` | Match new records against existing base |
+| `goldenmatch analyze-blocking FILE` | Analyze and suggest blocking strategies |
 | `goldenmatch config save/load/list/show` | Manage config presets |
 
 ## Key Dedupe Flags

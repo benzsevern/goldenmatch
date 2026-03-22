@@ -145,9 +145,30 @@ output:
   format: csv
 ```
 
+## dbt-goldenmatch Package (New in v0.3.1)
+
+A standalone `dbt-goldenmatch` package provides DuckDB-based entity resolution for dbt pipelines:
+
+```python
+from dbt_goldenmatch.materialize import run_goldenmatch_dedupe
+
+result = run_goldenmatch_dedupe(
+    input_table="raw_customers",
+    config_path="match.yaml",
+    output_table="deduped_customers",
+    database="warehouse.duckdb",
+)
+```
+
 ## Snowflake / BigQuery
 
-GoldenMatch doesn't connect to Snowflake or BigQuery directly, but you can bridge via:
+GoldenMatch has native connectors for Snowflake, BigQuery, and Databricks (v0.3.0+):
+
+```bash
+pip install goldenmatch[snowflake]   # or [bigquery] or [databricks]
+```
+
+You can also bridge via:
 
 ### Snowflake via Postgres FDW
 

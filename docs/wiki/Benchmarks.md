@@ -10,9 +10,9 @@ GoldenMatch is benchmarked against the [University of Leipzig entity resolution 
 |---------|---------|--------------|-----------|--------|-----|------|
 | **DBLP-ACM** | 2.6K vs 2.3K | multi-pass + fuzzy | 96.4% | 98.0% | **97.2%** | 3.6s |
 | **DBLP-Scholar** | 2.6K vs 64K | multi-pass + fuzzy | 67.2% | 84.1% | **74.7%** | 83.9s |
-| **Abt-Buy** | 1K vs 1K | Vertex AI + GPT-4o-mini scorer | 88.3% | 76.1% | **81.7%** | ~$0.74 |
-| **Abt-Buy** (zero-shot) | 1K vs 1K | Vertex AI (name+desc, t=0.88) | 43.0% | 78.1% | **62.8%** | ~$0.05 |
-| **Amazon-Google** | 1.4K vs 3.2K | Vertex AI + 20-label reranking | 36.7% | 55.0% | **44.0%** | ~$0.10 |
+| **Abt-Buy** | 1K vs 1K | Domain extraction + emb + LLM | 94.8% | 58.3% | **72.2%** | $0.04 |
+| **Abt-Buy** (Vertex AI) | 1K vs 1K | Vertex AI + GPT-4o-mini scorer | 88.3% | 76.1% | **81.7%** | ~$0.74 |
+| **Amazon-Google** | 1.4K vs 3.2K | emb+ANN + LLM | 63.3% | 35.2% | **45.3%** | $0.02 |
 
 **Structured data (DBLP-ACM):** RapidFuzz multi-pass fuzzy at 97.2% — zero cost, within 2pts of Ditto. **Product matching (Abt-Buy):** Vertex AI for candidate generation + GPT-4o-mini as scorer on borderline pairs achieves 81.7% — within 8pts of Ditto (89.3%) but with zero training labels and no GPU.
 
@@ -20,7 +20,7 @@ GoldenMatch is benchmarked against the [University of Leipzig entity resolution 
 
 | Tool | DBLP-ACM | Abt-Buy | Approach | Training Required |
 |------|----------|---------|----------|-------------------|
-| **GoldenMatch** | **97.2%** | **81.7%** | multi-pass fuzzy + Vertex AI + LLM scorer | No |
+| **GoldenMatch** | **97.2%** | **72.2%** (local) / **81.7%** (Vertex) | multi-pass fuzzy + domain extraction + LLM | No |
 | **Ditto** | 99.0% | 89.3% | Fine-tuned DistilBERT | Yes (1000+ labels) |
 | **DeepMatcher** | 98.4% | 62.8% | Deep learning | Yes |
 | **Splink** | ~95% | ~70% | Fellegi-Sunter (Spark) | Yes (labels) |
@@ -30,8 +30,8 @@ GoldenMatch is benchmarked against the [University of Leipzig entity resolution 
 ### Key Findings
 
 - **DBLP-ACM (97.2%)**: Within 2pts of Ditto with zero training — competitive with state-of-the-art. RapidFuzz fuzzy matching beats Vertex AI embeddings on this dataset.
-- **Abt-Buy (81.7%)**: Vertex AI for candidate generation + GPT-4o-mini as scorer on borderline pairs. The LLM understands product semantics (model number abbreviations, naming conventions) in a way embeddings alone cannot. Cost: ~$0.74. Zero-shot (embeddings only): 62.8%.
-- **Amazon-Google (44.0%)**: Vertex AI embeddings + 20-label active learning reranking. Product catalogs with different naming conventions remain the hardest entity resolution task.
+- **Abt-Buy (72.2% local / 81.7% Vertex)**: Domain extraction (brand, model, SKU) + embedding ANN + LLM scorer on borderline pairs. Local pipeline uses MiniLM embeddings + domain extraction for $0.04. Vertex AI pipeline achieves 81.7% at ~$0.74.
+- **Amazon-Google (45.3%)**: Clean emb+ANN + LLM pipeline. Software product matching is inherently harder -- adding domain extraction or token normalization hurts F1 (more noise). SOTA is ~78% (GPT-4 few-shot, Ditto fine-tuned).
 - **DBLP-Scholar (74.7%)**: Multi-pass blocking + fuzzy scoring.
 
 See [Comparison with Other Tools](Comparison.md) for a full feature-by-feature breakdown.

@@ -7,7 +7,7 @@ Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode
 [![PyPI](https://img.shields.io/pypi/v/goldenmatch?color=d4a017)](https://pypi.org/project/goldenmatch/)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-792%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-855%20passing-brightgreen)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/benzsevern/goldenmatch/blob/main/scripts/gpu_colab_notebook.ipynb)
 
 ### See it in action
@@ -26,7 +26,7 @@ goldenmatch demo
 - **Zero-config** — `goldenmatch dedupe file.csv` auto-detects columns, picks scorers, runs automatically
 - **Gold-themed TUI** — interactive interface with keyboard shortcuts, live threshold tuning, setup wizard
 - **10+ scoring methods** — exact, Jaro-Winkler, Levenshtein, token sort, soundex, ensemble, embedding, record embedding, dice, jaccard + plugin extensible
-- **8 blocking strategies** — static, adaptive, sorted neighborhood, multi-pass, ANN, ann_pairs, canopy, **learned** (data-driven predicate selection)
+- **8+ blocking strategies** — static, adaptive, sorted neighborhood, multi-pass, ANN, ann_pairs, canopy, **learned** (data-driven predicate selection)
 - **Fellegi-Sunter probabilistic matching** — EM-trained m/u probabilities, automatic threshold estimation, comparison vectors with 2/3-level agreement
 - **Vertex AI embeddings** — 85%+ F1 accuracy with no GPU needed (Google Cloud managed API)
 - **Database sync** — incremental Postgres matching with persistent ANN index and golden record versioning
@@ -59,6 +59,12 @@ goldenmatch demo
 - **Natural language explainability** — template-based per-pair and per-cluster explanations at zero LLM cost
 - **Streaming / CDC mode** — incremental record matching with micro-batch or immediate processing
 - **Multi-table graph ER** — match across entity types with cross-relationship evidence propagation
+- **7 domain packs** — pre-built YAML rulebooks for electronics, software, healthcare, financial, real estate, people, retail
+- **Evaluation CLI** — `goldenmatch evaluate` reports precision/recall/F1 against ground truth CSV
+- **Incremental matching** — `goldenmatch incremental` matches new CSV records against an existing base dataset
+- **GitHub Actions "Try It"** — zero-install demo via `workflow_dispatch` (paste a CSV URL, get results)
+- **Codespaces ready** — one-click dev environment with `.devcontainer` config
+- **dbt integration** — `dbt-goldenmatch` package for DuckDB-based entity resolution in dbt pipelines
 
 ## Installation
 
@@ -87,7 +93,7 @@ Guides you through GPU mode selection, Vertex AI / Colab / local GPU configurati
 
 ![GPU Selection](docs/screenshots/setup-gpu.svg)
 
-## Benchmarks (v0.3.0)
+## Benchmarks (v0.3.1)
 
 Tested on [Leipzig benchmark datasets](https://dbs.uni-leipzig.de/research/projects/object-matching/benchmark-datasets-for-entity-resolution) (DBLP-ACM, Abt-Buy).
 
@@ -101,6 +107,7 @@ Tested on [Leipzig benchmark datasets](https://dbs.uni-leipzig.de/research/proje
 | Abt-Buy (product) | Embedding + ANN | 35.5% | 59.4% | 44.5% | $0 |
 | Abt-Buy | Model extraction + emb | 39.3% | 71.0% | 50.6% | $0 |
 | Abt-Buy | **Domain + emb + LLM** | **94.8%** | **58.3%** | **72.2%** | **$0.04** |
+| Amazon-Google (software) | emb+ANN + LLM | 63.3% | 35.2% | **45.3%** | $0.02 |
 
 ### Speed
 
@@ -253,6 +260,7 @@ output:
 | `ann` | ANN via FAISS on sentence-transformer embeddings |
 | `ann_pairs` | Direct-pair ANN scoring (50-100x faster than `ann`) |
 | `canopy` | TF-IDF canopy clustering |
+| `learned` | Data-driven predicate selection (auto-discovers blocking rules) |
 
 ## Database Integration
 
@@ -422,6 +430,9 @@ Settings tuned in the TUI can be saved to the project file. Next run picks them 
 | `goldenmatch init` | Interactive config wizard |
 | `goldenmatch interactive FILE [...]` | Launch TUI |
 | `goldenmatch profile FILE` | Profile data quality |
+| `goldenmatch evaluate FILE --gt GT.csv` | Evaluate matching against ground truth |
+| `goldenmatch incremental BASE --new NEW` | Match new records against existing base |
+| `goldenmatch analyze-blocking FILE` | Analyze data and suggest blocking strategies |
 | `goldenmatch config save/load/list/show` | Manage config presets |
 
 **Key dedupe flags:**
@@ -442,12 +453,17 @@ Settings tuned in the TUI can be saved to the project file. Next run picks them 
 
 ```
 goldenmatch/
-├── cli/            # 17 CLI commands (Typer)
+├── cli/            # 19 CLI commands (Typer)
 ├── config/         # Pydantic schemas, YAML loader, settings
 ├── core/           # Pipeline: ingest, block, score, cluster, golden, explainer,
 │                   #   report, dashboard, graph, anomaly, diff, rollback,
 │                   #   schema_match, chunked, cloud_ingest, api_connector, scheduler,
-│                   #   llm_scorer, lineage, match_one, gpu, vertex_embedder
+│                   #   llm_scorer, lineage, match_one, evaluate, gpu, vertex_embedder,
+│                   #   probabilistic, learned_blocking, streaming, graph_er, domain
+├── domains/        # 7 built-in YAML domain packs (electronics, software, healthcare, ...)
+├── plugins/        # Plugin system (scorers, transforms, connectors, golden strategies)
+├── connectors/     # Enterprise connectors (Snowflake, Databricks, BigQuery, HubSpot, Salesforce)
+├── backends/       # DuckDB backend for out-of-core processing
 ├── db/             # Postgres: connector, sync, reconcile, clusters, ANN index
 ├── api/            # REST API server
 ├── mcp/            # MCP server for Claude Desktop
@@ -455,7 +471,7 @@ goldenmatch/
 └── utils/          # Transforms, helpers
 ```
 
-**Run tests:** `pytest` (688 tests)
+**Run tests:** `pytest` (855 tests)
 
 ## License
 

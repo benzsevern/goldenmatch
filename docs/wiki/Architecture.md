@@ -37,8 +37,19 @@ goldenmatch/
 │   ├── cross_encoder.py    # Ditto-style cross-encoder
 │   ├── llm_labeler.py      # LLM pair labeling (Claude/GPT-4)
 │   ├── llm_scorer.py       # LLM scorer (GPT-4o-mini/Claude for borderline pairs)
+│   ├── llm_budget.py       # Budget tracking for LLM calls (cost caps, model tiering)
 │   ├── lineage.py          # Lineage persistence (per-field explanations, JSON sidecar)
-│   └── match_one.py        # Single-record matching primitive for streaming
+│   ├── match_one.py        # Single-record matching primitive for streaming
+│   ├── evaluate.py         # Evaluation engine (precision, recall, F1 from ground truth)
+│   ├── probabilistic.py    # Fellegi-Sunter EM-trained probabilistic matching
+│   ├── learned_blocking.py # Data-driven blocking predicate selection
+│   ├── streaming.py        # StreamProcessor for incremental/CDC matching
+│   ├── graph_er.py         # Multi-table graph entity resolution
+│   ├── domain.py           # Product domain extraction (brand, model, specs)
+│   ├── domain_registry.py  # Custom YAML domain rulebooks
+│   ├── llm_extract.py      # LLM-based feature extraction for low-confidence records
+│   ├── explain.py          # Template-based NL explanations (zero LLM cost)
+│   └── anomaly.py          # Anomaly detection (fake emails, placeholder data)
 │
 ├── db/                     # Database integration
 │   ├── connector.py        # Abstract interface + PostgresConnector
@@ -51,6 +62,30 @@ goldenmatch/
 │   ├── clusters.py         # Persistent cluster management
 │   ├── reconcile.py        # Merge-back + conflict resolution
 │   └── watch.py            # Daemon mode (health endpoint, PID file, SIGTERM)
+│
+├── domains/                # Built-in YAML domain packs
+│   ├── electronics.yaml    # Electronics: model numbers, SKUs, specs
+│   ├── software.yaml       # Software: versions, editions, platforms
+│   ├── healthcare.yaml     # Healthcare: NDC, NPI, ICD-10, pharma brands
+│   ├── financial.yaml      # Financial: CUSIP, ISIN, LEI, institutions
+│   ├── real_estate.yaml    # Real estate: ZIP, APN, MLS, property attributes
+│   ├── people.yaml         # People: SSN, DOB, phone, email
+│   └── retail.yaml         # Retail: UPC, EAN, GTIN, CPG brands
+│
+├── plugins/                # Plugin system
+│   ├── registry.py         # PluginRegistry singleton (entry point discovery)
+│   └── base.py             # Protocol classes (ScorerPlugin, TransformPlugin, etc.)
+│
+├── connectors/             # Enterprise data source connectors
+│   ├── base.py             # BaseConnector ABC + load_connector()
+│   ├── snowflake.py        # Snowflake connector
+│   ├── databricks.py       # Databricks connector
+│   ├── bigquery.py         # BigQuery connector
+│   ├── hubspot.py          # HubSpot connector
+│   └── salesforce.py       # Salesforce connector
+│
+├── backends/               # Storage backends
+│   └── duckdb_backend.py   # DuckDB for out-of-core processing
 │
 ├── tui/                    # Interactive TUI (Textual)
 │   ├── app.py              # GoldenMatchApp (gold theme, bindings, routing)
@@ -215,7 +250,7 @@ Activated via `goldenmatch watch --daemon`.
 
 ## Test Structure
 
-688 tests across:
+855 tests across:
 - `tests/test_*.py` — unit tests for core modules
 - `tests/test_db.py` — Postgres integration tests
 - `tests/test_reconcile.py` — reconciliation + versioning tests
