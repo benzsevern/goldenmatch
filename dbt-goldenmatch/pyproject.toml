@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dbt-goldenmatch"
+version = "0.1.0"
+description = "dbt integration for GoldenMatch entity resolution"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Ben Severn", email = "benzsevern@gmail.com" }]
+dependencies = [
+    "goldenmatch>=0.3.0",
+    "dbt-core>=1.7",
+    "duckdb>=0.9",
+]
+
+[project.entry-points."goldenmatch.plugins"]
+dbt = "dbt_goldenmatch:DbtPlugin"

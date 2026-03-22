@@ -1,0 +1,25 @@
+name: people
+signals: ["name", "first_name", "last_name", "dob", "ssn", "email", "phone", "address", "gender", "age"]
+identifier_patterns:
+  ssn: '\b(\d{3}-\d{2}-\d{4})\b'
+  dob: '\b(\d{1,2}/\d{1,2}/\d{2,4})\b'
+  phone: '\b(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\b'
+  email: '\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b'
+  drivers_license: '\b([A-Z]\d{7,12})\b'
+brand_patterns: []
+attribute_patterns:
+  age: '\b(\d{1,3})\s*(?:years?\s*old|yo|y\.o\.)\b'
+  zip: '\b(\d{5}(?:-\d{4})?)\b'
+stop_words:
+  - mr
+  - mrs
+  - ms
+  - dr
+  - jr
+  - sr
+  - ii
+  - iii
+  - iv
+normalization:
+  lowercase: true
+  strip_punctuation: true

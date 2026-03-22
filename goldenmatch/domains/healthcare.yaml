@@ -1,0 +1,59 @@
+name: healthcare
+signals: ["ndc", "patient", "diagnosis", "icd", "cpt", "npi", "fda", "implant", "sterile", "dosage", "mg", "ml", "prescription"]
+identifier_patterns:
+  ndc: '\b(\d{5}-\d{4}-\d{2})\b'
+  npi: '(?:NPI\s*:?\s*)\b(\d{10})\b'
+  icd10: '\b([A-Z]\d{2}(?:\.\d{1,4})?)\b'
+  cpt: '(?:CPT\s*:?\s*)\b(\d{5})\b'
+brand_patterns:
+  - Medtronic
+  - Abbott
+  - Johnson & Johnson
+  - Baxter
+  - Boston Scientific
+  - Stryker
+  - Becton Dickinson
+  - Zimmer Biomet
+  - Edwards Lifesciences
+  - Cardinal Health
+  - McKesson
+  - AmerisourceBergen
+  - Pfizer
+  - Merck
+  - Roche
+  - Novartis
+  - AstraZeneca
+  - Bristol-Myers Squibb
+  - Eli Lilly
+  - Amgen
+attribute_patterns:
+  dosage_mg: '(\d+(?:\.\d+)?)\s*mg\b'
+  dosage_ml: '(\d+(?:\.\d+)?)\s*ml\b'
+  gauge: '(\d+)\s*(?:ga|gauge)\b'
+  length_mm: '(\d+(?:\.\d+)?)\s*mm\b'
+  count: '(\d+)\s*(?:count|ct|pack|pk)\b'
+stop_words:
+  - the
+  - a
+  - an
+  - for
+  - and
+  - with
+  - sterile
+  - disposable
+  - single
+  - use
+  - each
+  - per
+  - box
+  - case
+  - unit
+  - dose
+  - tablet
+  - capsule
+  - injection
+  - solution
+  - suspension
+normalization:
+  lowercase: true
+  strip_punctuation: true

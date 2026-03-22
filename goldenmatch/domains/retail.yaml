@@ -1,0 +1,52 @@
+name: retail
+signals: ["upc", "ean", "gtin", "sku", "asin", "brand", "price", "size", "flavor", "color", "pack", "oz", "lb"]
+identifier_patterns:
+  upc: '\b(\d{12})\b'
+  ean: '\b(\d{13})\b'
+  gtin: '\b(\d{14})\b'
+  asin: '\b([A-Z0-9]{10})\b'
+  sku: '\b([A-Z]{2,}\d{4,})\b'
+brand_patterns:
+  - Procter & Gamble
+  - Unilever
+  - Nestle
+  - PepsiCo
+  - Coca-Cola
+  - Kraft Heinz
+  - General Mills
+  - Kellogg
+  - Mars
+  - Colgate-Palmolive
+  - Johnson & Johnson
+  - Henkel
+  - Reckitt
+  - Church & Dwight
+  - Tide
+  - Clorox
+  - SC Johnson
+  - Dial
+  - Arm & Hammer
+  - Bounty
+attribute_patterns:
+  oz: '(\d+(?:\.\d+)?)\s*(?:fl\s*)?oz\b'
+  lb: '(\d+(?:\.\d+)?)\s*(?:lb|lbs|pound)\b'
+  count: '(\d+)\s*(?:count|ct|pk|pack)\b'
+  size: '\b(small|medium|large|xl|xxl|s|m|l)\b'
+stop_words:
+  - the
+  - a
+  - an
+  - for
+  - and
+  - with
+  - new
+  - improved
+  - original
+  - classic
+  - value
+  - pack
+  - size
+  - family
+normalization:
+  lowercase: true
+  strip_punctuation: true

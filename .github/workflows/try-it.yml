@@ -1,0 +1,122 @@
+name: "Try GoldenMatch"
+
+on:
+  workflow_dispatch:
+    inputs:
+      csv_url:
+        description: "URL to a CSV file (raw GitHub URL, public URL, or gist)"
+        required: true
+        type: string
+      config:
+        description: "Match config (simple|fuzzy|exact) or raw YAML"
+        required: false
+        default: "simple"
+        type: string
+      name_columns:
+        description: "Comma-separated name columns (e.g. first_name,last_name)"
+        required: false
+        type: string
+      email_column:
+        description: "Email column name"
+        required: false
+        type: string
+
+jobs:
+  dedupe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install GoldenMatch
+        run: pip install goldenmatch
+
+      - name: Download CSV
+        run: |
+          curl -fsSL "${{ github.event.inputs.csv_url }}" -o input.csv
+          echo "=== First 5 rows ==="
+          head -6 input.csv
+
+      - name: Generate config
+        run: |
+          python -c "
+          import sys, yaml
+
+          preset = '${{ github.event.inputs.config }}'
+          name_cols = '${{ github.event.inputs.name_columns }}'.strip()
+          email_col = '${{ github.event.inputs.email_column }}'.strip()
+
+          if preset in ('simple', 'exact', 'fuzzy'):
+              matchkeys = []
+              if email_col:
+                  matchkeys.append({
+                      'name': 'exact_email',
+                      'type': 'exact',
+                      'fields': [{'field': email_col, 'transforms': ['lowercase', 'strip']}],
+                  })
+              if name_cols:
+                  fields = []
+                  for col in name_cols.split(','):
+                      col = col.strip()
+                      fields.append({
+                          'field': col,
+                          'transforms': ['lowercase', 'strip'],
+                          'scorer': 'jaro_winkler',
+                          'weight': 1.0,
+                      })
+                  matchkeys.append({
+                      'name': 'fuzzy_name',
+                      'type': 'weighted',
+                      'threshold': 0.85,
+                      'fields': fields,
+                  })
+              if not matchkeys:
+                  import polars as pl
+                  df = pl.read_csv('input.csv', n_rows=5)
+                  str_cols = [c for c in df.columns if df[c].dtype == pl.Utf8][:3]
+                  for col in str_cols:
+                      matchkeys.append({
+                          'name': f'exact_{col}',
+                          'type': 'exact',
+                          'fields': [{'field': col, 'transforms': ['lowercase', 'strip']}],
+                      })
+              config = {'matchkeys': matchkeys}
+          else:
+              config = yaml.safe_load(preset)
+
+          with open('config.yaml', 'w') as f:
+              yaml.dump(config, f, default_flow_style=False)
+          print('Generated config:')
+          print(yaml.dump(config, default_flow_style=False))
+          "
+
+      - name: Run GoldenMatch
+        run: goldenmatch dedupe input.csv --config config.yaml --output results.csv
+
+      - name: Show results summary
+        run: |
+          python -c "
+          import polars as pl
+          df = pl.read_csv('results.csv')
+          total = df.height
+          dupes = df.filter(pl.col('__classification__') == 'dupe').height if '__classification__' in df.columns else 0
+          clusters = df['__cluster_id__'].n_unique() if '__cluster_id__' in df.columns else 0
+          print(f'Total records: {total}')
+          print(f'Clusters found: {clusters}')
+          print(f'Duplicate records: {dupes}')
+          print(f'Match rate: {dupes/total:.1%}' if total else 'N/A')
+          print()
+          print('First 20 rows:')
+          print(df.head(20))
+          "
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: goldenmatch-results
+          path: results.csv
+          retention-days: 30

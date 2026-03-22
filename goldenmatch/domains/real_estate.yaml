@@ -1,0 +1,54 @@
+name: real_estate
+signals: ["address", "parcel", "mls", "sqft", "acre", "bed", "bath", "lot", "zoning", "apn", "deed", "listing"]
+identifier_patterns:
+  zip: '\b(\d{5}(?:-\d{4})?)\b'
+  apn: '\b(\d{3}-\d{3}-\d{3}(?:-\d{3})?)\b'
+  mls: '\b(?:MLS\s*#?\s*)(\w{6,12})\b'
+brand_patterns:
+  - Keller Williams
+  - RE/MAX
+  - Coldwell Banker
+  - Century 21
+  - Berkshire Hathaway
+  - Sotheby's
+  - Compass
+  - eXp Realty
+  - Redfin
+  - Zillow
+attribute_patterns:
+  sqft: '(\d{1,3}(?:,\d{3})*)\s*(?:sq\s*ft|sqft|sf)\b'
+  acres: '(\d+(?:\.\d+)?)\s*(?:acre|ac)\b'
+  bedrooms: '(\d+)\s*(?:bed|br|bedroom)\b'
+  bathrooms: '(\d+(?:\.\d+)?)\s*(?:bath|ba|bathroom)\b'
+  year_built: '\b((?:19|20)\d{2})\b'
+  price: '\$\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)'
+stop_words:
+  - the
+  - a
+  - an
+  - for
+  - and
+  - with
+  - in
+  - at
+  - on
+  - street
+  - st
+  - avenue
+  - ave
+  - road
+  - rd
+  - drive
+  - dr
+  - lane
+  - ln
+  - boulevard
+  - blvd
+  - suite
+  - ste
+  - unit
+  - apt
+  - apartment
+normalization:
+  uppercase: true
+  strip_punctuation: false

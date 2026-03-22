@@ -23,6 +23,8 @@ from goldenmatch.cli.setup import setup_cmd
 from goldenmatch.cli.demo import demo_cmd
 from goldenmatch.cli.rollback import rollback_cmd, runs_cmd, unmerge_cmd
 from goldenmatch.cli.schedule import schedule_cmd
+from goldenmatch.cli.evaluate import evaluate_cmd
+from goldenmatch.cli.incremental import incremental_cmd
 from goldenmatch.prefs.store import PresetStore
 
 LOGO = r"""[bold bright_yellow]
@@ -98,6 +100,8 @@ app.command("rollback", help="Undo a previous merge run.")(rollback_cmd)
 app.command("runs", help="List previous runs for rollback.")(runs_cmd)
 app.command("unmerge", help="Remove a record from its cluster (per-entity unmerge).")(unmerge_cmd)
 app.command("schedule", help="Run deduplication on a schedule.")(schedule_cmd)
+app.command("evaluate", help="Evaluate matching quality against ground truth pairs.")(evaluate_cmd)
+app.command("incremental", help="Match new records against an existing base dataset.")(incremental_cmd)
 
 
 @app.command("analyze-blocking")

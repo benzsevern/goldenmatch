@@ -12,7 +12,7 @@
 
 ## Testing
 - `pytest --tb=short` from project root — all tests must pass after every change
-- 792 tests (+ 6 skipped for optional deps), run in ~30s
+- 855 tests (+ 6 skipped for optional deps), run in ~49s
 - Fixtures in `tests/conftest.py`: `sample_csv`, `sample_csv_b`, `sample_parquet`
 - TUI tests use `pytest-asyncio` with `app.run_test()` pilot
 - Benchmark scripts in `tests/bench_1m.py`, `tests/analyze_results.py` (not part of test suite)
@@ -25,14 +25,16 @@
 - Pipeline: ingest → column_map → auto_fix → validate → standardize → matchkeys → block → score → cluster → golden → output
 - `goldenmatch/core/` — pipeline modules (no Textual dependency)
 - `goldenmatch/tui/` — Textual TUI + MatchEngine (engine.py has no Textual dependency)
-- `goldenmatch/cli/` — Typer CLI commands (17 commands, including `unmerge`)
+- `goldenmatch/cli/` — Typer CLI commands (19 commands, including `unmerge`, `evaluate`, `incremental`)
 - `goldenmatch/db/` — Postgres integration (connector, sync, reconcile, clusters, ANN index)
 - `goldenmatch/api/` — REST API server (`goldenmatch serve`)
 - `goldenmatch/mcp/` — MCP server for Claude Desktop (`goldenmatch mcp-serve`)
 - `goldenmatch/plugins/` — Plugin system (registry, base protocols for scorer/transform/connector/golden_strategy)
 - `goldenmatch/connectors/` — Data source connectors (Snowflake, Databricks, BigQuery, HubSpot, Salesforce)
 - `goldenmatch/backends/` — Storage backends (DuckDB for out-of-core processing)
-- Core modules: explainer, explain, report, dashboard, graph, anomaly, diff, rollback, schema_match, chunked, cloud_ingest, api_connector, scheduler, gpu, vertex_embedder, llm_scorer, llm_budget, lineage, match_one, probabilistic, learned_blocking, streaming, graph_er
+- `goldenmatch/domains/` — Built-in YAML domain packs (electronics, software, healthcare, financial, real_estate, people, retail)
+- `dbt-goldenmatch/` — Separate package for dbt integration via DuckDB
+- Core modules: explainer, explain, evaluate, report, dashboard, graph, anomaly, diff, rollback, schema_match, chunked, cloud_ingest, api_connector, scheduler, gpu, vertex_embedder, llm_scorer, llm_budget, lineage, match_one, probabilistic, learned_blocking, streaming, graph_er
 - Config: Pydantic models in `config/schemas.py`, YAML loading in `config/loader.py`
 - `config/loader.py` normalizes golden_rules and standardization sections from flat YAML
 
@@ -55,8 +57,9 @@
 
 ## Accuracy Strategy
 - Structured data (names, addresses, bibliographic): fuzzy matching alone → 97.2% F1. No embeddings or LLM needed.
-- Product matching: domain extraction + emb+ANN + LLM → **72.2% F1** (precision 94.8%, cost $0.04). Config: `domain: {enabled: true, mode: product}` + `llm_scorer: {enabled: true, budget: {max_cost_usd: 0.10}}`
-- Domain-aware feature extraction: regex extracts brand/model/SKU/color/specs at O(N), model normalization (strip hyphens, region/color suffixes), containment matching. 393/1081 Abt-Buy pairs matched on model alone.
+- Product matching (electronics/Abt-Buy): domain extraction + emb+ANN + LLM → **72.2% F1** (P=94.8%, $0.04). Domain extraction gets 393/1081 model matches for free.
+- Product matching (software/Amazon-Google): emb+ANN + LLM → **45.3% F1** (P=63.3%, $0.02). Clean emb+ANN pipeline is best — adding domain extraction/token normalization/mfr blocking adds noise and hurts F1. SOTA is ~78% (GPT-4 few-shot, Ditto fine-tuned).
+- Product matching lesson: adding candidate sources (domain extraction, token normalization, manufacturer blocking) helps electronics (Abt-Buy) but HURTS software (Amazon-Google). More pairs = more noise. For domains without precise identifiers, keep the candidate set clean and let the LLM filter.
 - LLM scorer sends borderline pairs (0.75-0.95) to GPT, auto-accepts >0.95. Budget cap of $0.05 covers typical datasets.
 - Fellegi-Sunter probabilistic: 98.8% precision, 57.6% recall, 72.8% F1 on DBLP-ACM. Opt-in for automatic parameter estimation and high-precision use cases. Uses Splink-style EM (fix u from random pairs, train only m).
 - Learned blocking: auto-discovers predicates, 96.9% F1 matching hand-tuned static blocking
@@ -65,7 +68,7 @@
 - Benchmark evaluation: always use threshold-based pair generation, NOT top-1-per-record (argmax)
 - Leipzig benchmarks: `python tests/benchmarks/run_leipzig.py`
 - v0.3.0 benchmarks: `python tests/benchmarks/run_v030_quick.py` (F-S, learned blocking, LLM budget)
-- Domain extraction benchmark: `python tests/benchmarks/run_domain_bench.py` (Abt-Buy with model extraction + LLM)
+- Domain extraction benchmark: `python tests/benchmarks/run_domain_bench.py` (Abt-Buy) and `run_amazon_google_bench.py`
 - LLM+embedding benchmark: `python tests/benchmarks/run_llm_budget_bench.py` (requires OPENAI_API_KEY)
 
 ## Code Patterns
@@ -98,9 +101,17 @@
 - DuckDB backend: `backends/duckdb_backend.py` — user-maintained DuckDB read/write. `read_table()`, `write_table()`, `list_tables()`. Optional dep.
 - Streaming: `core/streaming.py` — `StreamProcessor` for incremental record matching (immediate or micro-batch). Uses `match_one` → `add_to_cluster`.
 - Graph ER: `core/graph_er.py` — multi-table entity resolution with evidence propagation across relationships. Iterative convergence.
+- Domain extraction: `core/domain.py` — auto-detects product subdomain (electronics vs software), extracts brand/model/SKU/color/specs (electronics) or name/version/edition/platform (software). Model normalization strips hyphens, region/color suffixes. Pipeline step between standardize and matchkeys.
+- LLM extraction: `core/llm_extract.py` — LLM-based feature extraction for low-confidence records. Reuses BudgetTracker. O(N) preprocessing, not O(N^2) pair scoring.
+- Domain registry: `core/domain_registry.py` — YAML-based custom domain rulebooks. Search paths: `.goldenmatch/domains/` (local), `~/.goldenmatch/domains/` (global), `goldenmatch/domains/` (built-in). MCP tools: `list_domains`, `create_domain`, `test_domain`
 - MCP `suggest_config` tool: analyze bad merges, identify guilty fields, suggest threshold/weight changes
 - REST review queue: `GET /reviews` returns borderline pairs for steward review, `POST /reviews/decide` records approve/reject decisions
 - Daemon mode: `watch_daemon()` in `db/watch.py` — adds health endpoint (HTTP /health), PID file, SIGTERM handling to watch mode
+- Evaluation: `core/evaluate.py` — `EvalResult` dataclass, `evaluate_pairs()`, `evaluate_clusters()`, `load_ground_truth_csv()`. CLI: `goldenmatch evaluate --config X --ground-truth Y`
+- Incremental CLI: `cli/incremental.py` — match new CSV records against existing base dataset. Handles exact (Polars join) and fuzzy (match_one brute-force) matchkeys separately
+- Domain packs: 7 built-in YAML rulebooks in `goldenmatch/domains/` — electronics, software, healthcare, financial, real_estate, people, retail. Auto-discovered by `discover_rulebooks()`
+- GitHub infrastructure: `.github/workflows/try-it.yml` (workflow_dispatch demo), `.devcontainer/` (Codespaces)
+- dbt integration: `dbt-goldenmatch/` separate package with `run_goldenmatch_dedupe()` for DuckDB tables
 
 ## Gotchas
 - .docx files can't be read by Read tool — use `python-docx` or zipfile+XML
@@ -121,6 +132,16 @@
 - GitHub Wiki needs `_Sidebar.md` and `_Footer.md` for custom nav/footer
 - Rich terminal recording: `Console(record=True)` then `console.export_svg(title='...')`
 - PyPI version must be bumped in both `pyproject.toml` and `goldenmatch/__init__.py`
-- v0.3.0 is live on PyPI — `pip install goldenmatch` works
+- v0.3.1 is live on PyPI — `pip install goldenmatch` works
 - Adding a TUI tab: update `test_tabs_exist` in `tests/test_tui.py` — asserts exact tab count (currently 6)
 - OpenAI API key: set `OPENAI_API_KEY` env var. Used by LLM scorer and LLM boost. Key stored in `.testing/.env`
+- Leipzig benchmark CSVs have invalid UTF-8 — use `pl.read_csv(encoding="utf8-lossy", ignore_errors=True)`, not `load_file()`
+- Fellegi-Sunter EM: blocking fields must be excluded from training (always agree within blocks, no discrimination). Pass `blocking_fields=` to `train_em()`.
+- Fellegi-Sunter EM: u-probabilities must be estimated from random pairs and FIXED during EM (Splink approach). Training both m and u on blocked pairs causes collapse.
+- Fellegi-Sunter: comparison_vector must apply field transforms before scoring — without `apply_transforms()`, case differences cause false disagrees
+- `_call_openai` / `_call_anthropic` return `(text, input_tokens, output_tokens)` tuples (changed in v0.3.0 for budget tracking)
+- GitHub Actions `pypi` environment needs PYPI_TOKEN secret for token-based publishing fallback (trusted publishing not configured)
+- `match_one()` returns empty list for exact matchkeys (threshold=None). Incremental CLI handles exact separately via `find_exact_matches()` Polars join
+- `evaluate_clusters()` uses cluster members→pairs expansion. `run_dedupe()` does NOT return `scored_pairs` — use clusters dict instead
+- `load_ground_truth_csv()` tries int conversion on IDs — GoldenMatch row IDs are int64, ground truth CSVs may have strings
+- Financial/healthcare domain regex patterns require contextual prefixes (CUSIP:, LEI:, NPI:, CPT:) to avoid false positives on generic number patterns

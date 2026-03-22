@@ -1,0 +1,34 @@
+name: "Try GoldenMatch on my data"
+description: "Submit a CSV URL to test GoldenMatch deduplication"
+title: "[Try It] "
+labels: ["try-it"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Try GoldenMatch
+        Want to try GoldenMatch on your data without installing anything?
+
+        **Option 1 (recommended):** Use the [Try GoldenMatch workflow](../../actions/workflows/try-it.yml) directly.
+
+        **Option 2:** Fill out this form and a maintainer will trigger the workflow for you.
+  - type: input
+    id: csv_url
+    attributes:
+      label: CSV URL
+      description: "Public URL to your CSV file (GitHub raw URL, gist, etc.)"
+      placeholder: "https://raw.githubusercontent.com/..."
+    validations:
+      required: true
+  - type: input
+    id: columns
+    attributes:
+      label: Name columns
+      description: "Comma-separated columns to match on (e.g. first_name,last_name)"
+      placeholder: "first_name,last_name"
+  - type: input
+    id: email
+    attributes:
+      label: Email column
+      description: "Email column name (optional)"
+      placeholder: "email"
