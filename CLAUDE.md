@@ -55,7 +55,8 @@
 
 ## Accuracy Strategy
 - Structured data (names, addresses, bibliographic): fuzzy matching alone → 97.2% F1. No embeddings or LLM needed.
-- Product matching: embedding+ANN baseline 44.5% F1 → +LLM scorer **66.3% F1** (precision 35%→95%, cost $0.04). Config: `llm_scorer: {enabled: true, budget: {max_cost_usd: 0.10}}`
+- Product matching: domain extraction + emb+ANN + LLM → **72.2% F1** (precision 94.8%, cost $0.04). Config: `domain: {enabled: true, mode: product}` + `llm_scorer: {enabled: true, budget: {max_cost_usd: 0.10}}`
+- Domain-aware feature extraction: regex extracts brand/model/SKU/color/specs at O(N), model normalization (strip hyphens, region/color suffixes), containment matching. 393/1081 Abt-Buy pairs matched on model alone.
 - LLM scorer sends borderline pairs (0.75-0.95) to GPT, auto-accepts >0.95. Budget cap of $0.05 covers typical datasets.
 - Fellegi-Sunter probabilistic: 98.8% precision, 57.6% recall, 72.8% F1 on DBLP-ACM. Opt-in for automatic parameter estimation and high-precision use cases. Uses Splink-style EM (fix u from random pairs, train only m).
 - Learned blocking: auto-discovers predicates, 96.9% F1 matching hand-tuned static blocking
@@ -64,6 +65,7 @@
 - Benchmark evaluation: always use threshold-based pair generation, NOT top-1-per-record (argmax)
 - Leipzig benchmarks: `python tests/benchmarks/run_leipzig.py`
 - v0.3.0 benchmarks: `python tests/benchmarks/run_v030_quick.py` (F-S, learned blocking, LLM budget)
+- Domain extraction benchmark: `python tests/benchmarks/run_domain_bench.py` (Abt-Buy with model extraction + LLM)
 - LLM+embedding benchmark: `python tests/benchmarks/run_llm_budget_bench.py` (requires OPENAI_API_KEY)
 
 ## Code Patterns

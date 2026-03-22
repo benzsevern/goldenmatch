@@ -99,7 +99,8 @@ Tested on [Leipzig benchmark datasets](https://dbs.uni-leipzig.de/research/proje
 | DBLP-ACM | Fellegi-Sunter (opt-in) | 98.8% | 57.6% | 72.8% | $0 |
 | DBLP-ACM | Learned blocking | 97.6% | 96.3% | 96.9% | $0 |
 | Abt-Buy (product) | Embedding + ANN | 35.5% | 59.4% | 44.5% | $0 |
-| Abt-Buy | **Embedding + ANN + LLM** | **95.4%** | **50.9%** | **66.3%** | **$0.04** |
+| Abt-Buy | Model extraction + emb | 39.3% | 71.0% | 50.6% | $0 |
+| Abt-Buy | **Domain + emb + LLM** | **94.8%** | **58.3%** | **72.2%** | **$0.04** |
 
 ### Speed
 
