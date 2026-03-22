@@ -23,7 +23,7 @@ goldenmatch/
 │   ├── autofix.py          # Auto data quality fixes
 │   ├── standardize.py      # Per-column standardization
 │   ├── matchkey.py         # Matchkey computation
-│   ├── blocker.py          # 7 blocking strategies
+│   ├── blocker.py          # 8+ blocking strategies
 │   ├── scorer.py           # 10 scoring methods (incl. dice, jaccard)
 │   ├── cluster.py          # Union-Find clustering
 │   ├── golden.py           # Golden record merging

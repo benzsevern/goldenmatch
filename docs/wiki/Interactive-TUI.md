@@ -63,7 +63,7 @@ When running without a config file, the TUI shows a summary of auto-detected col
 
 ## Tabs
 
-The main view has 5 tabs:
+The main view has 6 tabs:
 
 | Tab | Key | Contents |
 |-----|-----|----------|
@@ -71,7 +71,8 @@ The main view has 5 tabs:
 | **Config** | `2` | Matchkey builder, field selection, scorer/weight configuration |
 | **Matches** | `3` | Split-view: cluster list + golden record detail |
 | **Golden** | `4` | All golden records with confidence scores |
-| **Export** | `5` | Save config, save preset, run full job with output options |
+| **Boost** | `5` | Active learning: label borderline pairs (y/n/s), retrain classifier |
+| **Export** | `6` | Save config, save preset, run full job with output options |
 
 ## Matches Split View
 
@@ -150,7 +151,7 @@ Press `?` to see all shortcuts:
 
 | Key | Action |
 |-----|--------|
-| `1-5` | Jump to tab |
+| `1-6` | Jump to tab |
 | `F5` | Run / re-run matching |
 | `F2` | Save config to `.goldenmatch.yaml` |
 | `Ctrl+R` | Re-run matching |

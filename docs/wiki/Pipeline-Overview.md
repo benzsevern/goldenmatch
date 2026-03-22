@@ -3,7 +3,7 @@
 GoldenMatch processes records through a sequential pipeline:
 
 ```
-Ingest → Auto-Fix → Standardize → Matchkeys → Block → Score → Cluster → Golden → Output
+Ingest → Auto-Fix → Standardize → Domain Extraction → Matchkeys → Block → Score → Cluster → Golden → Output
 ```
 
 ## Stage Details
@@ -40,35 +40,39 @@ standardization:
   zip: [zip5]              # 5-digit zip codes
 ```
 
-### 4. Matchkeys
+### 4. Domain Extraction (Optional)
+
+For product data, auto-detects the domain (electronics vs software) and extracts structured features (brand, model, SKU, version). Uses YAML-based domain packs -- 7 built-in (electronics, software, healthcare, financial, real estate, people, retail) plus custom rulebooks.
+
+### 5. Matchkeys
 
 Define what constitutes a match:
 
 - **Exact matchkeys**: Records with identical transformed values are duplicates
 - **Weighted matchkeys**: Multiple fields scored independently, combined with weights
 
-### 5. Block
+### 6. Block
 
 Reduce the comparison space. Instead of comparing every pair (O(n²)), blocking groups records by shared attributes and only compares within groups.
 
 See [Blocking Strategies](Blocking-Strategies.md) for details.
 
-### 6. Score
+### 7. Score
 
 Compare record pairs within blocks using the configured scorer. Each pair gets a similarity score between 0.0 and 1.0.
 
-See [Matchkeys & Scoring](Matchkeys-and-Scoring.md) for details.
+Scorers include exact, Jaro-Winkler, Levenshtein, token sort, soundex, ensemble, embedding, record embedding, dice, jaccard, and Fellegi-Sunter probabilistic.
 
-### 7. Cluster
+### 8. Cluster
 
 Group matched pairs into clusters using iterative Union-Find. If A matches B and B matches C, they form one cluster {A, B, C}.
 
-### 8. Golden Record
+### 9. Golden Record
 
 Merge each cluster into a single canonical record using configured strategies.
 
-See [Golden Records](Golden-Records.md) for details.
+Strategies: most_complete, majority_vote, source_priority, most_recent, first_non_null.
 
-### 9. Output
+### 10. Output
 
 Write results as CSV, Parquet, or to database tables.
