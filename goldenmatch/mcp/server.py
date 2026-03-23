@@ -343,6 +343,65 @@ def create_server(file_paths: list[str], config_path: str | None = None) -> Serv
                     "required": ["domain_name"],
                 },
             ),
+            Tool(
+                name="pprl_auto_config",
+                description=(
+                    "Analyze the loaded dataset and recommend optimal PPRL (privacy-preserving record linkage) configuration. "
+                    "Returns recommended fields, bloom filter parameters, threshold, and explanation."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "security_level": {
+                            "type": "string",
+                            "enum": ["standard", "high", "paranoid"],
+                            "description": "Security level (default: high)",
+                            "default": "high",
+                        },
+                        "use_llm": {
+                            "type": "boolean",
+                            "description": "Use LLM for enhanced recommendations (requires API key)",
+                            "default": False,
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="pprl_link",
+                description=(
+                    "Run privacy-preserving record linkage between two parties' data. "
+                    "Computes bloom filters, matches records without sharing raw data. "
+                    "Specify fields, threshold, and security level."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_a": {
+                            "type": "string",
+                            "description": "Path to party A's CSV file",
+                        },
+                        "file_b": {
+                            "type": "string",
+                            "description": "Path to party B's CSV file",
+                        },
+                        "fields": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Field names to match on (e.g. ['first_name', 'last_name', 'zip_code'])",
+                        },
+                        "threshold": {
+                            "type": "number",
+                            "description": "Match threshold (default: auto-detected)",
+                        },
+                        "security_level": {
+                            "type": "string",
+                            "enum": ["standard", "high", "paranoid"],
+                            "default": "high",
+                        },
+                    },
+                    "required": ["file_a", "file_b", "fields"],
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -388,6 +447,10 @@ def _handle_tool(name: str, args: dict) -> dict:
         return _tool_create_domain(args)
     elif name == "test_domain":
         return _tool_test_domain(args.get("domain_name", ""), args.get("sample_size", 10))
+    elif name == "pprl_auto_config":
+        return _tool_pprl_auto_config(args.get("security_level", "high"), args.get("use_llm", False))
+    elif name == "pprl_link":
+        return _tool_pprl_link(args)
     else:
         return {"error": f"Unknown tool: {name}"}
 
@@ -803,6 +866,90 @@ def _tool_test_domain(domain_name: str, sample_size: int = 10) -> dict:
         "text_column": text_col,
         "sample_size": len(results),
         "extractions": results,
+    }
+
+
+def _tool_pprl_auto_config(security_level: str = "high", use_llm: bool = False) -> dict:
+    """Auto-configure PPRL parameters from loaded data."""
+    if not _rows:
+        return {"error": "No data loaded. Start the MCP server with --file."}
+
+    import polars as pl
+    from goldenmatch.pprl.autoconfig import auto_configure_pprl, auto_configure_pprl_llm
+
+    df = pl.DataFrame(_rows)
+
+    if use_llm:
+        result = auto_configure_pprl_llm(df, security_level=security_level)
+    else:
+        result = auto_configure_pprl(df, security_level=security_level)
+
+    return {
+        "recommended_fields": result.recommended_fields,
+        "threshold": result.recommended_config.threshold,
+        "security_level": result.recommended_config.security_level,
+        "ngram_size": result.recommended_config.ngram_size,
+        "hash_functions": result.recommended_config.hash_functions,
+        "bloom_filter_size": result.recommended_config.bloom_filter_size,
+        "explanation": result.explanation,
+        "field_profiles": [
+            {
+                "column": p.column,
+                "field_type": p.field_type,
+                "avg_length": round(p.avg_length, 1),
+                "cardinality": p.cardinality,
+                "usefulness_score": round(p.usefulness_score, 2),
+            }
+            for p in result.field_profiles
+        ],
+    }
+
+
+def _tool_pprl_link(args: dict) -> dict:
+    """Run PPRL linkage between two files."""
+    import polars as pl
+    from pathlib import Path
+    from goldenmatch.pprl.protocol import PPRLConfig, run_pprl
+
+    file_a = Path(args["file_a"])
+    file_b = Path(args["file_b"])
+    if not file_a.exists():
+        return {"error": f"File not found: {file_a}"}
+    if not file_b.exists():
+        return {"error": f"File not found: {file_b}"}
+
+    fields = args["fields"]
+    threshold = args.get("threshold", 0.85)
+    security_level = args.get("security_level", "high")
+
+    _LEVELS = {"standard": (2, 20, 512), "high": (2, 30, 1024), "paranoid": (3, 40, 2048)}
+    ngram, hashes, size = _LEVELS.get(security_level, (2, 30, 1024))
+
+    config = PPRLConfig(
+        fields=fields, threshold=threshold, security_level=security_level,
+        ngram_size=ngram, hash_functions=hashes, bloom_filter_size=size,
+    )
+
+    df_a = pl.read_csv(file_a)
+    df_b = pl.read_csv(file_b)
+
+    result = run_pprl(df_a, df_b, config)
+
+    cluster_summary = []
+    for cid, members in sorted(result.clusters.items())[:20]:
+        cluster_summary.append({
+            "cluster_id": cid,
+            "members": [{"party": pid, "record_id": rid} for pid, rid in members],
+        })
+
+    return {
+        "clusters_found": len(result.clusters),
+        "match_pairs": result.match_count,
+        "total_comparisons": result.total_comparisons,
+        "security_level": security_level,
+        "threshold": threshold,
+        "fields": fields,
+        "clusters": cluster_summary,
     }
 
 
