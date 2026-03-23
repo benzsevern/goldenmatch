@@ -9,7 +9,7 @@ Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode
 [![Downloads](https://img.shields.io/pypi/dm/goldenmatch?color=blue&label=downloads)](https://pypi.org/project/goldenmatch/)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-911%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-924%20passing-brightgreen)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/benzsevern/goldenmatch/blob/main/scripts/gpu_colab_notebook.ipynb)
 
 ### See it in action
@@ -87,6 +87,141 @@ pip install goldenmatch[duckdb]           # + DuckDB backend
 
 # Run the setup wizard to configure GPU, API keys, and database:
 goldenmatch setup
+```
+
+## Python API
+
+GoldenMatch exposes 95 functions and classes from a single import:
+
+```python
+import goldenmatch as gm
+```
+
+### Quick Start
+
+```python
+import goldenmatch as gm
+
+# Deduplicate a CSV (zero-config)
+result = gm.dedupe("customers.csv")
+
+# Exact + fuzzy matching
+result = gm.dedupe("customers.csv", exact=["email"], fuzzy={"name": 0.85, "zip": 0.95})
+result.golden.write_csv("deduped.csv")
+print(result)  # DedupeResult(records=5000, clusters=847, match_rate=12.0%)
+
+# Match across files
+result = gm.match("new_customers.csv", "master.csv", fuzzy={"name": 0.85})
+result.to_csv("matches.csv")
+
+# With YAML config
+result = gm.dedupe("data.csv", config="config.yaml")
+
+# With LLM scorer for product matching
+result = gm.dedupe("products.csv", fuzzy={"title": 0.80}, llm_scorer=True)
+
+# With Ray backend for large datasets
+result = gm.dedupe("huge.parquet", exact=["email"], backend="ray")
+```
+
+### Privacy-Preserving Linkage
+
+```python
+import goldenmatch as gm
+
+# Auto-configured PPRL (picks fields and threshold automatically)
+result = gm.pprl_link("hospital_a.csv", "hospital_b.csv")
+print(f"Found {result['match_count']} matches across {len(result['clusters'])} clusters")
+
+# Manual field selection
+result = gm.pprl_link("party_a.csv", "party_b.csv",
+    fields=["first_name", "last_name", "dob", "zip"],
+    threshold=0.85, security_level="high")
+
+# Auto-config analysis
+config = gm.pprl_auto_config(df)
+print(config.recommended_fields)  # ['first_name', 'last_name', 'zip_code', 'birth_year']
+```
+
+### Evaluate Accuracy
+
+```python
+import goldenmatch as gm
+
+# Measure precision/recall/F1 against ground truth
+metrics = gm.evaluate("data.csv", config="config.yaml", ground_truth="gt.csv")
+print(f"F1: {metrics['f1']:.1%}, Precision: {metrics['precision']:.1%}")
+
+# Evaluate programmatically
+result = gm.evaluate_pairs(predicted_pairs, ground_truth_set)
+print(result.f1)
+```
+
+### Build Configs Programmatically
+
+```python
+import goldenmatch as gm
+
+# Auto-generate config from data
+config = gm.auto_configure([("data.csv", "source")])
+
+# Or build manually
+config = gm.GoldenMatchConfig(
+    matchkeys=[
+        gm.MatchkeyConfig(name="exact_email", type="exact",
+            fields=[gm.MatchkeyField(field="email", transforms=["lowercase"])]),
+        gm.MatchkeyConfig(name="fuzzy_name", type="weighted", threshold=0.85,
+            fields=[
+                gm.MatchkeyField(field="name", scorer="jaro_winkler", weight=0.7),
+                gm.MatchkeyField(field="zip", scorer="exact", weight=0.3),
+            ]),
+    ],
+    blocking=gm.BlockingConfig(strategy="learned"),
+    llm_scorer=gm.LLMScorerConfig(enabled=True, mode="cluster"),
+    backend="ray",
+)
+```
+
+### Streaming / Incremental
+
+```python
+import goldenmatch as gm
+
+# Match a single new record against existing data
+matches = gm.match_one(new_record, existing_df, matchkey)
+
+# Stream processor for continuous matching
+processor = gm.StreamProcessor(df, config)
+matches = processor.process_record(new_record)
+```
+
+### Advanced Features
+
+```python
+import goldenmatch as gm
+
+# Domain extraction
+rulebooks = gm.discover_rulebooks()  # 7 built-in packs
+enhanced_df, low_conf = gm.extract_with_rulebook(df, "title", rulebooks["electronics"])
+
+# Fellegi-Sunter probabilistic
+em_result = gm.train_em(df, matchkey, n_sample_pairs=10000)
+pairs = gm.score_probabilistic(block_df, matchkey, em_result)
+
+# Explain a match decision
+explanation = gm.explain_pair(record_a, record_b, matchkey)
+
+# Cluster operations
+gm.unmerge_record(record_id, clusters)  # Remove from cluster
+gm.unmerge_cluster(cluster_id, clusters)  # Shatter to singletons
+
+# Data quality
+df, fixes = gm.auto_fix_dataframe(df)
+anomalies = gm.detect_anomalies(df)
+column_map = gm.auto_map_columns(df_a, df_b)  # Schema matching
+
+# Graph ER (multi-table)
+clusters = gm.run_graph_er(entities, relationships)
 ```
 
 ## Setup Wizard
@@ -474,6 +609,8 @@ Settings tuned in the TUI can be saved to the project file. Next run picks them 
 ```
 goldenmatch/
 ├── cli/            # 21 CLI commands (Typer)
+│                   #   Python API: 95 public exports from `import goldenmatch as gm`
+│                   #   -- every feature accessible without knowing internal module structure
 ├── config/         # Pydantic schemas, YAML loader, settings
 ├── core/           # Pipeline: ingest, block, score, cluster, golden, explainer,
 │                   #   report, dashboard, graph, anomaly, diff, rollback,
@@ -491,7 +628,7 @@ goldenmatch/
 └── utils/          # Transforms, helpers
 ```
 
-**Run tests:** `pytest` (911 tests)
+**Run tests:** `pytest` (924 tests)
 
 ## License
 

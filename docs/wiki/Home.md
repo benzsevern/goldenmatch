@@ -22,6 +22,7 @@ goldenmatch setup
 |------|----------------|
 | [Pipeline Overview](Pipeline-Overview.md) | Ingest, Block, Score, Cluster, Golden Records |
 | [Blocking Strategies](Blocking-Strategies.md) | 8+ strategies: static, adaptive, multi-pass, ANN, canopy, learned |
+| [Python API](Python-API) | `import goldenmatch as gm` -- 95 exports, zero-config to advanced |
 
 ## Advanced Features
 

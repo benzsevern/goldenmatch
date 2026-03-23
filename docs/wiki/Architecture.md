@@ -250,6 +250,22 @@ The REST API server (`goldenmatch serve`) provides:
 
 Activated via `goldenmatch watch --daemon`.
 
+## Python API
+
+All features are accessible via `import goldenmatch as gm` (95 public exports). The API has three tiers:
+
+**Tier 1 -- Convenience functions** (most users):
+- `gm.dedupe()`, `gm.match()`, `gm.pprl_link()`, `gm.evaluate()`
+- Simple kwargs, typed result objects, docstrings with examples
+
+**Tier 2 -- Config + pipeline** (power users):
+- `gm.GoldenMatchConfig`, `gm.MatchkeyConfig`, `gm.BlockingConfig`
+- `gm.run_dedupe()`, `gm.build_clusters()`, `gm.build_blocks()`
+
+**Tier 3 -- Full toolkit** (library developers):
+- Every scorer, blocker, clusterer, explainer, domain tool, LLM function
+- `gm.train_em()`, `gm.llm_cluster_pairs()`, `gm.run_graph_er()`, etc.
+
 ## Test Structure
 
 911 tests across:
