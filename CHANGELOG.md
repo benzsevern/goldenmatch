@@ -6,6 +6,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-03-23
+
+### Changed
+- **Production/Stable** -- dropped Beta label. Semver strictly enforced from this release.
+- Public API surface frozen: 96 exports from `import goldenmatch as gm`, 21 CLI commands, config YAML schema, REST endpoints, MCP tools. See `docs/api-stability.md`.
+
+### Added
+- Clean Python API: `gm.dedupe()`, `gm.match()`, `gm.pprl_link()`, `gm.evaluate()` with typed results
+- 96 public exports covering every feature (config, pipeline, streaming, LLM, PPRL, domain, explain, etc.)
+- REST API client: `gm.Client("http://localhost:8000")`
+- Jupyter/notebook display: `_repr_html_()` on DedupeResult and MatchResult
+- CI/CD quality gates: `goldenmatch evaluate --min-f1 0.90` exits code 1 if below threshold
+- 7 runnable example scripts in `examples/`
+- `goldenmatch label` CLI for interactive ground truth building
+
 ## [0.7.0] - 2026-03-23
 
 ### Added

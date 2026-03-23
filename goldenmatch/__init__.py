@@ -27,7 +27,7 @@ Quick start:
 
 All features are accessible via `import goldenmatch as gm`.
 """
-__version__ = "0.7.1"
+__version__ = "1.0.0"
 
 # ── High-level API (convenience functions) ────────────────────────────────
 from goldenmatch._api import (
