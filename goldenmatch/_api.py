@@ -1,0 +1,469 @@
+"""Clean top-level API for GoldenMatch.
+
+Designed for discoverability by coding AIs and human developers.
+Thin convenience layer over the existing pipeline modules.
+
+Usage:
+    import goldenmatch as gm
+
+    result = gm.dedupe("data.csv", exact=["email"], fuzzy={"name": 0.85})
+    result.golden.write_csv("output.csv")
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import polars as pl
+
+
+@dataclass
+class DedupeResult:
+    """Result of a deduplication run.
+
+    Attributes:
+        golden: DataFrame of golden (canonical) records.
+        clusters: Dict of cluster_id -> cluster info (members, pair_scores, confidence).
+        dupes: DataFrame of duplicate records.
+        unique: DataFrame of unique (non-duplicate) records.
+        stats: Summary statistics (total_records, total_clusters, match_rate, etc.).
+        scored_pairs: List of (id_a, id_b, score) tuples for all matched pairs.
+        config: The GoldenMatchConfig used for this run.
+    """
+    golden: pl.DataFrame | None = None
+    clusters: dict[int, dict] = field(default_factory=dict)
+    dupes: pl.DataFrame | None = None
+    unique: pl.DataFrame | None = None
+    stats: dict = field(default_factory=dict)
+    scored_pairs: list[tuple[int, int, float]] = field(default_factory=list)
+    config: Any = None
+
+    def to_csv(self, path: str, which: str = "golden") -> Path:
+        """Write results to CSV.
+
+        Args:
+            path: Output file path.
+            which: Which result to write: "golden", "dupes", "unique", or "all".
+        """
+        p = Path(path)
+        if which == "golden" and self.golden is not None:
+            self.golden.write_csv(p)
+        elif which == "dupes" and self.dupes is not None:
+            self.dupes.write_csv(p)
+        elif which == "unique" and self.unique is not None:
+            self.unique.write_csv(p)
+        elif which == "all":
+            stem = p.stem
+            parent = p.parent
+            if self.golden is not None:
+                self.golden.write_csv(parent / f"{stem}_golden.csv")
+            if self.dupes is not None:
+                self.dupes.write_csv(parent / f"{stem}_dupes.csv")
+            if self.unique is not None:
+                self.unique.write_csv(parent / f"{stem}_unique.csv")
+        return p
+
+    @property
+    def match_rate(self) -> float:
+        """Percentage of records that are duplicates."""
+        return self.stats.get("match_rate", 0.0)
+
+    @property
+    def total_records(self) -> int:
+        return self.stats.get("total_records", 0)
+
+    @property
+    def total_clusters(self) -> int:
+        return self.stats.get("total_clusters", 0)
+
+    def __repr__(self) -> str:
+        return (
+            f"DedupeResult(records={self.total_records}, "
+            f"clusters={self.total_clusters}, "
+            f"match_rate={self.match_rate:.1%})"
+        )
+
+
+@dataclass
+class MatchResult:
+    """Result of a list-match run.
+
+    Attributes:
+        matched: DataFrame of matched target records with scores.
+        unmatched: DataFrame of unmatched target records.
+        stats: Summary statistics.
+    """
+    matched: pl.DataFrame | None = None
+    unmatched: pl.DataFrame | None = None
+    stats: dict = field(default_factory=dict)
+
+    def to_csv(self, path: str) -> Path:
+        """Write matched results to CSV."""
+        p = Path(path)
+        if self.matched is not None:
+            self.matched.write_csv(p)
+        return p
+
+    def __repr__(self) -> str:
+        n_matched = self.matched.height if self.matched is not None else 0
+        n_unmatched = self.unmatched.height if self.unmatched is not None else 0
+        return f"MatchResult(matched={n_matched}, unmatched={n_unmatched})"
+
+
+def load_config(path: str) -> Any:
+    """Load a GoldenMatch YAML config file.
+
+    Args:
+        path: Path to YAML config file.
+
+    Returns:
+        GoldenMatchConfig Pydantic model.
+    """
+    from goldenmatch.config.loader import load_config as _load
+    return _load(path)
+
+
+def dedupe(
+    *files: str,
+    config: str | Any | None = None,
+    exact: list[str] | None = None,
+    fuzzy: dict[str, float] | None = None,
+    blocking: list[str] | None = None,
+    threshold: float | None = None,
+    llm_scorer: bool = False,
+    backend: str | None = None,
+) -> DedupeResult:
+    """Deduplicate one or more files.
+
+    Args:
+        *files: Paths to CSV/Excel/Parquet files.
+        config: Path to YAML config, or a GoldenMatchConfig object, or None for auto-config.
+        exact: List of column names for exact matching (e.g., ["email", "phone"]).
+        fuzzy: Dict of column name -> threshold for fuzzy matching (e.g., {"name": 0.85}).
+        blocking: List of column names for blocking (e.g., ["zip"]).
+        threshold: Override fuzzy match threshold for all fields.
+        llm_scorer: Enable LLM scoring for borderline pairs (requires OPENAI_API_KEY).
+        backend: Processing backend: None (default Polars), "ray", "duckdb".
+
+    Returns:
+        DedupeResult with golden records, clusters, dupes, unique, and stats.
+
+    Examples:
+        # Zero-config
+        result = gm.dedupe("customers.csv")
+
+        # Exact + fuzzy
+        result = gm.dedupe("customers.csv", exact=["email"], fuzzy={"name": 0.85, "zip": 0.95})
+
+        # With YAML config
+        result = gm.dedupe("file1.csv", "file2.csv", config="match.yaml")
+
+        # With LLM scorer
+        result = gm.dedupe("products.csv", fuzzy={"title": 0.80}, llm_scorer=True)
+    """
+    from goldenmatch.core.pipeline import run_dedupe
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField,
+        BlockingConfig, BlockingKeyConfig, LLMScorerConfig,
+    )
+
+    # Build config
+    if isinstance(config, str):
+        cfg = load_config(config)
+    elif config is not None:
+        cfg = config
+    else:
+        cfg = _build_config(exact, fuzzy, blocking, threshold, llm_scorer, backend)
+
+    if backend and hasattr(cfg, "backend"):
+        cfg.backend = backend
+
+    # Build file specs
+    file_specs = [(str(f), Path(f).stem) for f in files]
+
+    # Run pipeline
+    result = run_dedupe(file_specs, cfg)
+
+    return DedupeResult(
+        golden=result.get("golden"),
+        clusters=result.get("clusters", {}),
+        dupes=result.get("dupes"),
+        unique=result.get("unique"),
+        stats=_extract_stats(result),
+        scored_pairs=_extract_pairs(result),
+        config=cfg,
+    )
+
+
+def match(
+    target: str,
+    reference: str,
+    *,
+    config: str | Any | None = None,
+    exact: list[str] | None = None,
+    fuzzy: dict[str, float] | None = None,
+    blocking: list[str] | None = None,
+    threshold: float | None = None,
+    backend: str | None = None,
+) -> MatchResult:
+    """Match a target file against a reference file.
+
+    Args:
+        target: Path to target CSV/Excel/Parquet.
+        reference: Path to reference CSV/Excel/Parquet.
+        config: Path to YAML config, or a GoldenMatchConfig object.
+        exact: List of column names for exact matching.
+        fuzzy: Dict of column name -> threshold for fuzzy matching.
+        blocking: List of column names for blocking.
+        threshold: Override fuzzy match threshold.
+        backend: Processing backend: None, "ray", "duckdb".
+
+    Returns:
+        MatchResult with matched and unmatched DataFrames.
+
+    Examples:
+        result = gm.match("new_customers.csv", "master.csv", fuzzy={"name": 0.85})
+        result.matched.write_csv("matches.csv")
+    """
+    from goldenmatch.core.pipeline import run_match
+    from goldenmatch.config.schemas import GoldenMatchConfig
+
+    if isinstance(config, str):
+        cfg = load_config(config)
+    elif config is not None:
+        cfg = config
+    else:
+        cfg = _build_config(exact, fuzzy, blocking, threshold, backend=backend)
+
+    if backend and hasattr(cfg, "backend"):
+        cfg.backend = backend
+
+    target_spec = (str(target), Path(target).stem)
+    ref_specs = [(str(reference), Path(reference).stem)]
+
+    result = run_match(target_spec, ref_specs, cfg)
+
+    return MatchResult(
+        matched=result.get("matched"),
+        unmatched=result.get("unmatched"),
+        stats=_extract_stats(result),
+    )
+
+
+def pprl_link(
+    file_a: str,
+    file_b: str,
+    *,
+    fields: list[str] | None = None,
+    threshold: float | None = None,
+    security_level: str = "high",
+    protocol: str = "trusted_third_party",
+    auto_config: bool = True,
+) -> dict:
+    """Privacy-preserving record linkage between two files.
+
+    Args:
+        file_a: Path to party A's CSV.
+        file_b: Path to party B's CSV.
+        fields: Field names to match on. If None and auto_config=True, auto-detected.
+        threshold: Match threshold. If None and auto_config=True, auto-detected.
+        security_level: "standard", "high", or "paranoid".
+        protocol: "trusted_third_party" or "smc".
+        auto_config: Auto-detect fields and threshold from data.
+
+    Returns:
+        Dict with clusters, match_count, total_comparisons.
+
+    Examples:
+        result = gm.pprl_link("hospital_a.csv", "hospital_b.csv", fields=["name", "dob", "zip"])
+        print(f"Found {result['match_count']} matches across {len(result['clusters'])} clusters")
+    """
+    from goldenmatch.pprl.protocol import PPRLConfig, run_pprl
+    from goldenmatch.pprl.autoconfig import auto_configure_pprl
+
+    df_a = pl.read_csv(file_a, ignore_errors=True, encoding="utf8-lossy")
+    df_b = pl.read_csv(file_b, ignore_errors=True, encoding="utf8-lossy")
+
+    if fields is None and auto_config:
+        auto_result = auto_configure_pprl(df_a, security_level=security_level)
+        fields = auto_result.recommended_fields
+        if threshold is None:
+            threshold = auto_result.recommended_config.threshold
+
+    if fields is None:
+        raise ValueError("fields must be specified or auto_config must be True")
+    if threshold is None:
+        threshold = 0.85
+
+    _LEVELS = {"standard": (2, 20, 512), "high": (2, 30, 1024), "paranoid": (3, 40, 2048)}
+    ng, hf, bs = _LEVELS.get(security_level, (2, 30, 1024))
+
+    config = PPRLConfig(
+        fields=fields, threshold=threshold, security_level=security_level,
+        ngram_size=ng, hash_functions=hf, bloom_filter_size=bs,
+        protocol=protocol,
+    )
+
+    result = run_pprl(df_a, df_b, config)
+
+    return {
+        "clusters": result.clusters,
+        "match_count": result.match_count,
+        "total_comparisons": result.total_comparisons,
+        "config": {
+            "fields": fields,
+            "threshold": threshold,
+            "security_level": security_level,
+        },
+    }
+
+
+def evaluate(
+    *files: str,
+    config: str | Any,
+    ground_truth: str,
+    col_a: str = "id_a",
+    col_b: str = "id_b",
+) -> dict:
+    """Evaluate matching accuracy against ground truth.
+
+    Args:
+        *files: Input data files.
+        config: Path to YAML config or GoldenMatchConfig object.
+        ground_truth: Path to ground truth CSV with pair columns.
+        col_a: Column name for ID A in ground truth.
+        col_b: Column name for ID B in ground truth.
+
+    Returns:
+        Dict with precision, recall, f1, tp, fp, fn.
+
+    Examples:
+        metrics = gm.evaluate("data.csv", config="config.yaml", ground_truth="gt.csv")
+        print(f"F1: {metrics['f1']:.1%}")
+    """
+    from goldenmatch.core.pipeline import run_dedupe
+    from goldenmatch.core.evaluate import evaluate_clusters, load_ground_truth_csv
+
+    if isinstance(config, str):
+        cfg = load_config(config)
+    else:
+        cfg = config
+
+    file_specs = [(str(f), Path(f).stem) for f in files]
+    gt_pairs = load_ground_truth_csv(str(ground_truth), col_a, col_b)
+
+    result = run_dedupe(file_specs, cfg)
+    clusters = result.get("clusters", {})
+
+    eval_result = evaluate_clusters(clusters, gt_pairs)
+    return eval_result.summary()
+
+
+# ── Internal helpers ──
+
+
+def _build_config(
+    exact: list[str] | None = None,
+    fuzzy: dict[str, float] | None = None,
+    blocking: list[str] | None = None,
+    threshold: float | None = None,
+    llm_scorer: bool = False,
+    backend: str | None = None,
+) -> Any:
+    """Build a GoldenMatchConfig from simple kwargs."""
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField,
+        BlockingConfig, BlockingKeyConfig, LLMScorerConfig,
+    )
+
+    matchkeys = []
+
+    if exact:
+        for col in exact:
+            matchkeys.append(MatchkeyConfig(
+                name=f"exact_{col}",
+                type="exact",
+                fields=[MatchkeyField(field=col, transforms=["lowercase", "strip"])],
+            ))
+
+    if fuzzy:
+        fields = []
+        for col, weight in fuzzy.items():
+            fields.append(MatchkeyField(
+                field=col,
+                scorer="jaro_winkler",
+                weight=weight,
+                transforms=["lowercase", "strip"],
+            ))
+        t = threshold or 0.85
+        matchkeys.append(MatchkeyConfig(
+            name="fuzzy",
+            type="weighted",
+            threshold=t,
+            fields=fields,
+        ))
+
+    if not matchkeys:
+        # Auto-config: will be handled by pipeline's auto-suggest
+        matchkeys.append(MatchkeyConfig(
+            name="auto",
+            type="exact",
+            fields=[MatchkeyField(field="__placeholder__")],
+        ))
+
+    blocking_config = None
+    if blocking:
+        blocking_config = BlockingConfig(
+            keys=[BlockingKeyConfig(fields=blocking, transforms=["lowercase"])],
+        )
+    elif fuzzy:
+        # Auto-suggest blocking for fuzzy matchkeys
+        blocking_config = BlockingConfig(keys=[], auto_suggest=True)
+
+    llm_config = None
+    if llm_scorer:
+        llm_config = LLMScorerConfig(enabled=True)
+
+    return GoldenMatchConfig(
+        matchkeys=matchkeys,
+        blocking=blocking_config,
+        llm_scorer=llm_config,
+        backend=backend,
+    )
+
+
+def _extract_stats(result: dict) -> dict:
+    """Compute stats from pipeline result."""
+    clusters = result.get("clusters", {})
+    golden = result.get("golden")
+    dupes = result.get("dupes")
+    unique = result.get("unique")
+
+    total_records = 0
+    if golden is not None:
+        total_records += golden.height
+    if dupes is not None:
+        total_records += dupes.height
+    if unique is not None:
+        total_records += unique.height
+
+    total_clusters = sum(1 for c in clusters.values() if c.get("size", 0) > 1)
+    matched_records = sum(c.get("size", 0) for c in clusters.values() if c.get("size", 0) > 1)
+    match_rate = matched_records / total_records if total_records > 0 else 0.0
+
+    return {
+        "total_records": total_records,
+        "total_clusters": total_clusters,
+        "matched_records": matched_records,
+        "match_rate": match_rate,
+    }
+
+
+def _extract_pairs(result: dict) -> list:
+    """Extract scored pairs from cluster pair_scores."""
+    pairs = []
+    for cid, cinfo in result.get("clusters", {}).items():
+        for (a, b), score in cinfo.get("pair_scores", {}).items():
+            pairs.append((a, b, score))
+    return pairs
