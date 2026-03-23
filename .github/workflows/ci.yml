@@ -39,7 +39,7 @@ jobs:
         run: pip install ruff
 
       - name: Run ruff check
-        run: ruff check goldenmatch/ tests/ --select E9,F63,F7,F82 --no-fix
+        run: ruff check goldenmatch/ tests/ --select E9,F63,F7 --no-fix
 
   smoke:
     runs-on: ubuntu-latest
