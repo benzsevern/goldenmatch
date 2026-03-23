@@ -12,7 +12,7 @@
 
 ## Testing
 - `pytest --tb=short` from project root — all tests must pass after every change
-- 911 tests (+ 6 skipped for optional deps), run in ~41s
+- 935 tests (+ 6 skipped for optional deps), run in ~48s
 - Fixtures in `tests/conftest.py`: `sample_csv`, `sample_csv_b`, `sample_parquet`
 - TUI tests use `pytest-asyncio` with `app.run_test()` pilot
 - Benchmark scripts in `tests/bench_1m.py`, `tests/analyze_results.py` (not part of test suite)
@@ -20,6 +20,10 @@
 - DB tests (`test_db.py`, `test_reconcile.py`) need PostgreSQL — skip with `--ignore` if not available
 - `import torch` hangs on this machine — tests mocking GPU must patch `_has_cuda`/`_has_mps` at module level
 - `testing.postgresql` teardown errors on Windows (SIGINT) are harmless — tests still pass
+- CI workflow: `.github/workflows/ci.yml` -- test matrix (3.11/3.12/3.13), ruff lint (E9/F63/F7 only), smoke test. Ignores test_db, test_reconcile, test_mcp_and_watch
+- Ray tests require `ray` optional dep -- use `pytest.mark.skipif(not HAS_RAY)` pattern
+- Windows drive letter tests must use `@pytest.mark.skipif(sys.platform != "win32")` -- Path.stem behaves differently on Linux
+- sdist includes benchmark datasets (can bloat to 500MB+) -- add large data dirs to `.gitignore` before building
 
 ## Architecture
 - Pipeline: ingest → column_map → auto_fix → validate → standardize → matchkeys → block → score → cluster → golden → output
@@ -116,6 +120,13 @@
 - Domain packs: 7 built-in YAML rulebooks in `goldenmatch/domains/` — electronics, software, healthcare, financial, real_estate, people, retail. Auto-discovered by `discover_rulebooks()`
 - GitHub infrastructure: `.github/workflows/try-it.yml` (workflow_dispatch demo), `.devcontainer/` (Codespaces)
 - dbt integration: `dbt-goldenmatch/` separate package with `run_goldenmatch_dedupe()` for DuckDB tables
+- Python API: `_api.py` provides `dedupe()`, `match()`, `pprl_link()`, `evaluate()` convenience functions. `__init__.py` re-exports 96 symbols. `DedupeResult`/`MatchResult` have `_repr_html_()` for Jupyter.
+- REST client: `client.py` — `Client(base_url)` with `.match()`, `.list_clusters()`, `.explain()`, `.reviews()`. Uses stdlib `urllib` only.
+- CI/CD quality gates: `goldenmatch evaluate --min-f1 0.90 --min-precision 0.80` exits code 1 if thresholds not met
+- Pipeline backend selection: `_get_block_scorer(config)` in pipeline.py returns `score_blocks_parallel` or `score_blocks_ray` based on `config.backend`
+- PPRL vectorized similarity: use numpy matrix multiply (`mat_a @ mat_b.T`) for bloom filter dice, NOT per-pair Python loops. 13x speedup.
+- PPRL auto-config: penalize near-unique fields (IDs), long fields (>15 chars), high-null fields. Min threshold 0.85. max_fields=4 beats 6.
+- NCVR voter data: tab-delimited, 488MB zip at `tests/benchmarks/datasets/NCVR/`. Gitignored. `birth_year` only (no full DOB). `ssn` is Y/N flag not actual SSN.
 
 ## Gotchas
 - .docx files can't be read by Read tool — use `python-docx` or zipfile+XML
@@ -149,3 +160,9 @@
 - `evaluate_clusters()` uses cluster members→pairs expansion. `run_dedupe()` does NOT return `scored_pairs` — use clusters dict instead
 - `load_ground_truth_csv()` tries int conversion on IDs — GoldenMatch row IDs are int64, ground truth CSVs may have strings
 - Financial/healthcare domain regex patterns require contextual prefixes (CUSIP:, LEI:, NPI:, CPT:) to avoid false positives on generic number patterns
+- `ruff check` with F82 (undefined name) flags string type annotations as false positives -- exclude from CI
+- `score_blocks_parallel` requires `matched_pairs` arg (set) -- benchmark scripts must pass it
+- `run_dedupe()` return dict has NO `stats` key -- compute stats from clusters/golden/dupes/unique DataFrames
+- Unicode box drawing chars (pipe/dash) crash on Windows cp1252 terminal -- use ASCII in benchmark scripts
+- GitHub release triggers publish workflow -- `twine upload --skip-existing` avoids double-publish errors
+- `discover_rulebooks()` returns all 7 packs -- domain match tests must accept retail alongside electronics (overlapping signals like "brand", "sku")
