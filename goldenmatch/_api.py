@@ -84,6 +84,38 @@ class DedupeResult:
             f"match_rate={self.match_rate:.1%})"
         )
 
+    def _repr_html_(self) -> str:
+        """Rich HTML display for Jupyter notebooks."""
+        rows = [
+            ("Total Records", str(self.total_records)),
+            ("Clusters", str(self.total_clusters)),
+            ("Match Rate", f"{self.match_rate:.1%}"),
+            ("Duplicates", str(self.dupes.height) if self.dupes is not None else "0"),
+            ("Unique", str(self.unique.height) if self.unique is not None else "0"),
+        ]
+        html = "<h3>GoldenMatch Dedupe Result</h3>"
+        html += '<table style="border-collapse:collapse">'
+        for label, val in rows:
+            html += f'<tr><td style="padding:4px 12px;font-weight:bold">{label}</td>'
+            html += f'<td style="padding:4px 12px">{val}</td></tr>'
+        html += "</table>"
+        if self.golden is not None and self.golden.height > 0:
+            html += "<h4>Golden Records (first 10)</h4>"
+            display_cols = [c for c in self.golden.columns if not c.startswith("__")][:6]
+            sample = self.golden.select(display_cols).head(10)
+            html += '<table style="border-collapse:collapse;border:1px solid #ddd">'
+            html += "<tr>" + "".join(
+                f'<th style="padding:4px 8px;border:1px solid #ddd;background:#f5f5f5">{c}</th>'
+                for c in display_cols
+            ) + "</tr>"
+            for row in sample.to_dicts():
+                html += "<tr>" + "".join(
+                    f'<td style="padding:4px 8px;border:1px solid #ddd">{row.get(c, "")}</td>'
+                    for c in display_cols
+                ) + "</tr>"
+            html += "</table>"
+        return html
+
 
 @dataclass
 class MatchResult:
@@ -109,6 +141,28 @@ class MatchResult:
         n_matched = self.matched.height if self.matched is not None else 0
         n_unmatched = self.unmatched.height if self.unmatched is not None else 0
         return f"MatchResult(matched={n_matched}, unmatched={n_unmatched})"
+
+    def _repr_html_(self) -> str:
+        """Rich HTML display for Jupyter notebooks."""
+        n_matched = self.matched.height if self.matched is not None else 0
+        n_unmatched = self.unmatched.height if self.unmatched is not None else 0
+        html = "<h3>GoldenMatch Match Result</h3>"
+        html += f"<p>Matched: {n_matched} | Unmatched: {n_unmatched}</p>"
+        if self.matched is not None and self.matched.height > 0:
+            display_cols = [c for c in self.matched.columns if not c.startswith("__")][:6]
+            sample = self.matched.select(display_cols).head(10)
+            html += '<table style="border-collapse:collapse;border:1px solid #ddd">'
+            html += "<tr>" + "".join(
+                f'<th style="padding:4px 8px;border:1px solid #ddd;background:#f5f5f5">{c}</th>'
+                for c in display_cols
+            ) + "</tr>"
+            for row in sample.to_dicts():
+                html += "<tr>" + "".join(
+                    f'<td style="padding:4px 8px;border:1px solid #ddd">{row.get(c, "")}</td>'
+                    for c in display_cols
+                ) + "</tr>"
+            html += "</table>"
+        return html
 
 
 def load_config(path: str) -> Any:

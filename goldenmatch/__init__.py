@@ -167,6 +167,9 @@ from goldenmatch.core.rollback import rollback_run
 from goldenmatch.output.writer import write_output
 from goldenmatch.output.report import generate_dedupe_report
 
+# ── REST API Client ──────────────────────────────────────────────────────
+from goldenmatch.client import Client
+
 # ── Shortcuts ────────────────────────────────────────────────────────────
 explain_pair = explain_pair_nl
 explain_cluster = explain_cluster_nl
@@ -234,4 +237,6 @@ __all__ = [
     "generate_diff", "rollback_run",
     # Output
     "write_output", "generate_dedupe_report",
+    # REST API Client
+    "Client",
 ]

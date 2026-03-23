@@ -24,8 +24,15 @@ def evaluate_cmd(
     col_b: str = typer.Option("id_b", "--col-b", help="Ground truth column B"),
     threshold: Optional[float] = typer.Option(None, "--threshold", "-t", help="Override match threshold"),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Save results to JSON"),
+    min_f1: Optional[float] = typer.Option(None, "--min-f1", help="Minimum F1 score (exit code 1 if below). For CI/CD quality gates."),
+    min_precision: Optional[float] = typer.Option(None, "--min-precision", help="Minimum precision (exit code 1 if below)"),
+    min_recall: Optional[float] = typer.Option(None, "--min-recall", help="Minimum recall (exit code 1 if below)"),
 ) -> None:
-    """Evaluate matching quality against ground truth pairs."""
+    """Evaluate matching quality against ground truth pairs.
+
+    Use --min-f1, --min-precision, --min-recall as CI/CD quality gates:
+    goldenmatch evaluate data.csv -c config.yaml --gt gt.csv --min-f1 0.90
+    """
     from goldenmatch.core.pipeline import run_dedupe
 
     if not ground_truth.exists():
@@ -73,3 +80,17 @@ def evaluate_cmd(
         import json
         output.write_text(json.dumps(summary, indent=2))
         console.print(f"\n[green]Results saved to {output}[/green]")
+
+    # CI/CD quality gates
+    failed = False
+    if min_f1 is not None and summary["f1"] < min_f1:
+        err_console.print(f"[red]FAIL: F1 {summary['f1']:.1%} < minimum {min_f1:.1%}[/red]")
+        failed = True
+    if min_precision is not None and summary["precision"] < min_precision:
+        err_console.print(f"[red]FAIL: Precision {summary['precision']:.1%} < minimum {min_precision:.1%}[/red]")
+        failed = True
+    if min_recall is not None and summary["recall"] < min_recall:
+        err_console.print(f"[red]FAIL: Recall {summary['recall']:.1%} < minimum {min_recall:.1%}[/red]")
+        failed = True
+    if failed:
+        raise typer.Exit(1)
