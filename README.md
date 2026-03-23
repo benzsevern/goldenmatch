@@ -91,7 +91,7 @@ goldenmatch setup
 
 ## Python API
 
-GoldenMatch exposes 95 functions and classes from a single import:
+GoldenMatch exposes 95 functions and classes from a single import. See [examples/](examples/) for complete runnable scripts.
 
 ```python
 import goldenmatch as gm
