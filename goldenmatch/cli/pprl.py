@@ -106,3 +106,63 @@ def pprl_link(
                 })
         pl.DataFrame(rows).write_csv(output)
         console.print(f"\n[green]Results saved to {output}[/green]")
+
+
+@pprl_app.command("auto-config")
+def pprl_auto_config(
+    file: Path = typer.Argument(..., help="Data file to analyze (CSV)"),
+    security: str = typer.Option("high", "--security", "-s", help="Security level: standard, high, paranoid"),
+    use_llm: bool = typer.Option(False, "--llm", help="Use LLM for enhanced recommendations"),
+) -> None:
+    """Analyze data and recommend optimal PPRL configuration."""
+    import polars as pl
+    from goldenmatch.pprl.autoconfig import auto_configure_pprl, auto_configure_pprl_llm
+
+    if not file.exists():
+        err_console.print(f"[red]File not found: {file}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold]Analyzing {file.name}...[/bold]")
+    df = pl.read_csv(file, ignore_errors=True, encoding="utf8-lossy")
+    console.print(f"  {df.height} records, {len(df.columns)} columns\n")
+
+    if use_llm:
+        result = auto_configure_pprl_llm(df, security_level=security)
+    else:
+        result = auto_configure_pprl(df, security_level=security)
+
+    # Display field profiles
+    table = Table(title="Field Analysis")
+    table.add_column("Field", style="bold")
+    table.add_column("Type")
+    table.add_column("Avg Len", justify="right")
+    table.add_column("Cardinality", justify="right")
+    table.add_column("Score", justify="right")
+    table.add_column("Selected", justify="center")
+
+    for p in result.field_profiles:
+        selected = "Y" if p.column in result.recommended_fields else ""
+        table.add_row(
+            p.column, p.field_type,
+            f"{p.avg_length:.1f}", str(p.cardinality),
+            f"{p.usefulness_score:.2f}", selected,
+        )
+    console.print(table)
+
+    # Display recommended config
+    config = result.recommended_config
+    console.print(f"\n[bold]Recommended Configuration:[/bold]")
+    console.print(f"  Fields: {', '.join(result.recommended_fields)}")
+    console.print(f"  Threshold: {config.threshold}")
+    console.print(f"  Security: {config.security_level}")
+    console.print(f"  Bloom filter: {config.ngram_size}-gram, {config.hash_functions} hashes, {config.bloom_filter_size}-bit")
+
+    # Print as YAML config
+    console.print(f"\n[bold]YAML config:[/bold]")
+    console.print(f"  pprl:")
+    console.print(f"    fields: [{', '.join(result.recommended_fields)}]")
+    console.print(f"    threshold: {config.threshold}")
+    console.print(f"    security_level: {config.security_level}")
+    console.print(f"    bloom_filter_size: {config.bloom_filter_size}")
+    console.print(f"    hash_functions: {config.hash_functions}")
+    console.print(f"    ngram_size: {config.ngram_size}")

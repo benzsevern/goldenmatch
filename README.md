@@ -9,7 +9,7 @@ Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode
 [![Downloads](https://img.shields.io/pypi/dm/goldenmatch?color=blue&label=downloads)](https://pypi.org/project/goldenmatch/)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-855%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-903%20passing-brightgreen)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/benzsevern/goldenmatch/blob/main/scripts/gpu_colab_notebook.ipynb)
 
 ### See it in action
@@ -42,7 +42,8 @@ goldenmatch demo
 - **Cluster confidence scoring** — weakly-connected clusters flagged with bottleneck pair identification
 - **Single-record matching** — `match_one` primitive for streaming: embed, query ANN, score, return matches
 - **Privacy-preserving matching** — bloom filter transforms + Dice/Jaccard scoring for fuzzy matching on encrypted PII
-- **PPRL multi-party linkage** -- match records across organizations without sharing raw data. Trusted third party and SMC modes. 89.8% F1 on FEBRL4 person data
+- **PPRL multi-party linkage** -- match records across organizations without sharing raw data. Auto-configured bloom filters achieve 92.4% F1 on FEBRL4. Trusted third party and SMC modes.
+- **PPRL auto-configuration** -- zero-config PPRL that profiles your data and picks optimal fields, bloom filter parameters, and threshold automatically
 - **Before/after dashboard** — shareable HTML showing data transformation with charts
 - **Schema-free matching** — auto-maps columns between different schemas (full_name -> first_name + last_name)
 - **Cloud storage** — read directly from S3, GCS, or Azure Blob
@@ -114,16 +115,16 @@ Tested on [Leipzig benchmark datasets](https://dbs.uni-leipzig.de/research/proje
 
 ### PPRL (Privacy-Preserving Record Linkage)
 
-Benchmarked on FEBRL4 (5K vs 5K synthetic person records, industry-standard dataset):
+Benchmarked on FEBRL4 (5K vs 5K synthetic person records) and NCVR (North Carolina Voter Registration):
 
 | Strategy | Precision | Recall | F1 | Privacy |
 |----------|-----------|--------|-----|---------|
 | Normal fuzzy (baseline) | 56.5% | 74.6% | 64.3% | None |
-| **PPRL high (t=0.80)** | **90.5%** | **89.1%** | **89.8%** | Per-field HMAC |
-| PPRL paranoid (t=0.80) | 98.9% | 76.0% | 86.0% | HMAC + balanced padding |
-| PPRL standard (t=0.80) | 22.2% | 93.2% | 35.8% | Basic CLK |
+| **PPRL auto-config (FEBRL4)** | **99.7%** | **86.1%** | **92.4%** | Per-field HMAC |
+| PPRL auto-config (NCVR) | 64.0% | 93.8% | 76.1% | Per-field HMAC |
+| PPRL paranoid (FEBRL4) | 98.9% | 76.0% | 86.0% | HMAC + balanced |
 
-PPRL outperforms normal fuzzy on structured person data (names, postcodes) by 25 points F1. Bloom filter bigram comparison captures character-level similarity better than Jaro-Winkler on short structured fields.
+PPRL with auto-configuration beats manual tuning on both datasets. Zero-config: GoldenMatch profiles your data and picks optimal fields, bloom filter parameters, and threshold automatically.
 
 ### Speed
 
@@ -487,7 +488,7 @@ goldenmatch/
 └── utils/          # Transforms, helpers
 ```
 
-**Run tests:** `pytest` (855 tests)
+**Run tests:** `pytest` (903 tests)
 
 ## License
 

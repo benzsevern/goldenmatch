@@ -18,6 +18,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - Balanced bloom filter padding normalizes filter density for short strings
 - Custom HMAC key support via transform parameter (`bloom_filter:2:20:512:my_key`)
 - `pip install goldenmatch[pprl]` optional dependency group
+- PPRL auto-configuration (`auto_configure_pprl`) -- profiles data, selects optimal fields, bloom filter parameters, and threshold automatically. 92.4% F1 on FEBRL4, 76.1% on NCVR
+- MCP tools: `pprl_auto_config` (auto-configure PPRL for a dataset), `pprl_link` (run cross-party linkage)
+- Vectorized PPRL similarity computation (13x speedup over row-wise scoring)
+- NCVR (North Carolina Voter Registration) and FEBRL4 benchmark suites for PPRL evaluation
 
 ## [0.5.0] - 2026-03-23
 

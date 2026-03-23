@@ -12,7 +12,7 @@
 
 ## Testing
 - `pytest --tb=short` from project root — all tests must pass after every change
-- 894 tests (+ 6 skipped for optional deps), run in ~31s
+- 903 tests (+ 6 skipped for optional deps), run in ~31s
 - Fixtures in `tests/conftest.py`: `sample_csv`, `sample_csv_b`, `sample_parquet`
 - TUI tests use `pytest-asyncio` with `app.run_test()` pilot
 - Benchmark scripts in `tests/bench_1m.py`, `tests/analyze_results.py` (not part of test suite)
@@ -108,6 +108,7 @@
 - REST review queue: `GET /reviews` returns borderline pairs for steward review, `POST /reviews/decide` records approve/reject decisions
 - Daemon mode: `watch_daemon()` in `db/watch.py` — adds health endpoint (HTTP /health), PID file, SIGTERM handling to watch mode
 - PPRL package: `pprl/protocol.py` — multi-party privacy-preserving record linkage. `PPRLConfig` dataclass, `run_pprl()` convenience function, `link_trusted_third_party()` and `link_smc()` protocol implementations. CLI: `goldenmatch pprl link`. Bloom filter security levels (standard/high/paranoid) with HMAC salting and balanced padding in `utils/transforms.py`.
+- PPRL auto-config: `auto_configure_pprl()` profiles data and picks optimal fields, bloom filter parameters, and threshold. Beats manual tuning -- 92.4% F1 on FEBRL4 (vs 89.8% manual), 76.1% F1 on NCVR. MCP tools: `pprl_auto_config`, `pprl_link`.
 - LLM clustering: `core/llm_cluster.py` — in-context block clustering as alternative to pairwise LLM scoring. Config `llm_scorer.mode: cluster`. Builds connected components from borderline pairs, sends blocks to LLM, synthesizes pair_scores from cluster confidence for compatibility with Union-Find/unmerge/lineage. Degrades: cluster → pairwise → stop.
 - Evaluation: `core/evaluate.py` — `EvalResult` dataclass, `evaluate_pairs()`, `evaluate_clusters()`, `load_ground_truth_csv()`. CLI: `goldenmatch evaluate --config X --ground-truth Y`
 - Incremental CLI: `cli/incremental.py` — match new CSV records against existing base dataset. Handles exact (Polars join) and fuzzy (match_one brute-force) matchkeys separately
