@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-03-23
+
+### Added
+- `gm.dedupe_df()` -- deduplicate a Polars DataFrame directly (no file I/O)
+- `gm.match_df()` -- match two Polars DataFrames directly (no file I/O)
+- `gm.score_strings()` -- score two strings with a named similarity algorithm
+- `gm.score_pair_df()` -- score a pair of record dicts
+- `gm.explain_pair_df()` -- explain a pair match from record dicts
+- Internal: `run_dedupe_df()` and `run_match_df()` pipeline entry points
+- These functions are the prerequisite for native SQL extensions (Postgres/DuckDB)
+
 ## [1.0.0] - 2026-03-23
 
 ### Changed
