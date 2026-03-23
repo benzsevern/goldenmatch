@@ -35,6 +35,9 @@ from goldenmatch._api import (
     dedupe_df,
     match,
     match_df,
+    score_strings,
+    score_pair_df,
+    explain_pair_df,
     pprl_link,
     evaluate,
     load_config,
@@ -181,7 +184,9 @@ __all__ = [
     # Version
     "__version__",
     # High-level API
-    "dedupe", "dedupe_df", "match", "match_df", "pprl_link", "evaluate", "load_config",
+    "dedupe", "dedupe_df", "match", "match_df",
+    "score_strings", "score_pair_df", "explain_pair_df",
+    "pprl_link", "evaluate", "load_config",
     "DedupeResult", "MatchResult",
     # Config
     "GoldenMatchConfig", "MatchkeyConfig", "MatchkeyField",

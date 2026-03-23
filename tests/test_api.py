@@ -273,3 +273,77 @@ class TestMatchDf:
     def test_match_df_importable(self):
         import goldenmatch as gm
         assert hasattr(gm, "match_df")
+
+
+class TestScoreStrings:
+    def test_score_strings_jaro_winkler(self):
+        import goldenmatch as gm
+        score = gm.score_strings("John Smith", "Jon Smyth", "jaro_winkler")
+        assert isinstance(score, float)
+        assert 0.7 < score < 1.0
+
+    def test_score_strings_exact(self):
+        import goldenmatch as gm
+        assert gm.score_strings("hello", "hello", "exact") == 1.0
+        assert gm.score_strings("hello", "world", "exact") == 0.0
+
+    def test_score_strings_levenshtein(self):
+        import goldenmatch as gm
+        score = gm.score_strings("kitten", "sitting", "levenshtein")
+        assert isinstance(score, float)
+        assert 0.0 < score < 1.0
+
+    def test_score_strings_importable(self):
+        import goldenmatch as gm
+        assert hasattr(gm, "score_strings")
+
+
+class TestScorePairDf:
+    def test_score_pair_basic(self):
+        import goldenmatch as gm
+        score = gm.score_pair_df(
+            {"name": "John Smith", "email": "j@x.com"},
+            {"name": "Jon Smyth", "email": "j@x.com"},
+            fuzzy={"name": 0.85},
+            exact=["email"],
+        )
+        assert isinstance(score, float)
+        assert 0.0 <= score <= 1.0
+        assert score > 0.5
+
+    def test_score_pair_with_scorer(self):
+        import goldenmatch as gm
+        score = gm.score_pair_df(
+            {"name": "John Smith"},
+            {"name": "Jon Smyth"},
+            fuzzy={"name": 0.85},
+        )
+        assert isinstance(score, float)
+        assert score > 0.7
+
+    def test_score_pair_no_match(self):
+        import goldenmatch as gm
+        score = gm.score_pair_df(
+            {"name": "Alice"},
+            {"name": "Zebra"},
+            fuzzy={"name": 0.85},
+        )
+        assert score < 0.5
+
+
+class TestExplainPairDf:
+    def test_explain_basic(self):
+        import goldenmatch as gm
+        explanation = gm.explain_pair_df(
+            {"name": "John Smith", "email": "j@x.com"},
+            {"name": "Jon Smyth", "email": "j@x.com"},
+            fuzzy={"name": 0.85},
+            exact=["email"],
+        )
+        assert isinstance(explanation, str)
+        assert len(explanation) > 0
+
+    def test_explain_importable(self):
+        import goldenmatch as gm
+        assert hasattr(gm, "explain_pair_df")
+        assert hasattr(gm, "score_pair_df")

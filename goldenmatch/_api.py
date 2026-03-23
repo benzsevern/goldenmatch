@@ -351,6 +351,129 @@ def match_df(
     )
 
 
+def score_strings(
+    value_a: str,
+    value_b: str,
+    scorer: str = "jaro_winkler",
+) -> float:
+    """Score two strings using a named similarity scorer.
+
+    Maps to the SQL function: SELECT goldenmatch_score('John', 'Jon', 'jaro_winkler');
+
+    Args:
+        value_a: First string.
+        value_b: Second string.
+        scorer: Scoring algorithm: "jaro_winkler", "levenshtein", "exact",
+                "token_sort", "soundex_match".
+
+    Returns:
+        Similarity score between 0.0 and 1.0.
+    """
+    from goldenmatch.core.scorer import score_field
+    result = score_field(value_a, value_b, scorer)
+    return result if result is not None else 0.0
+
+
+def score_pair_df(
+    record_a: dict,
+    record_b: dict,
+    *,
+    fuzzy: dict[str, float] | None = None,
+    exact: list[str] | None = None,
+    scorer: str = "jaro_winkler",
+) -> float:
+    """Score a pair of records.
+
+    Args:
+        record_a: First record as dict.
+        record_b: Second record as dict.
+        fuzzy: Dict of field -> weight for fuzzy scoring.
+        exact: List of fields for exact matching.
+        scorer: Default scorer for fuzzy fields.
+
+    Returns:
+        Overall match score between 0.0 and 1.0.
+    """
+    from goldenmatch.core.scorer import score_pair
+    from goldenmatch.config.schemas import MatchkeyField
+
+    fields = []
+    if exact:
+        for col in exact:
+            fields.append(MatchkeyField(field=col, scorer="exact", weight=1.0,
+                                        transforms=["lowercase", "strip"]))
+    if fuzzy:
+        for col, weight in fuzzy.items():
+            fields.append(MatchkeyField(field=col, scorer=scorer, weight=weight,
+                                        transforms=["lowercase", "strip"]))
+
+    if not fields:
+        common = set(record_a.keys()) & set(record_b.keys())
+        for col in sorted(common):
+            fields.append(MatchkeyField(field=col, scorer=scorer, weight=1.0,
+                                        transforms=["lowercase", "strip"]))
+
+    return score_pair(record_a, record_b, fields)
+
+
+def explain_pair_df(
+    record_a: dict,
+    record_b: dict,
+    *,
+    fuzzy: dict[str, float] | None = None,
+    exact: list[str] | None = None,
+    scorer: str = "jaro_winkler",
+) -> str:
+    """Generate a natural language explanation for a record pair.
+
+    Args:
+        record_a: First record as dict.
+        record_b: Second record as dict.
+        fuzzy: Dict of field -> weight for fuzzy scoring.
+        exact: List of fields for exact matching.
+        scorer: Default scorer for fuzzy fields.
+
+    Returns:
+        Human-readable explanation string.
+    """
+    from goldenmatch.core.scorer import score_field
+    from goldenmatch.core.explain import explain_pair_nl
+    from goldenmatch.config.schemas import MatchkeyField
+    from goldenmatch.utils.transforms import apply_transforms
+
+    fields = []
+    if exact:
+        for col in exact:
+            fields.append(MatchkeyField(field=col, scorer="exact", weight=1.0,
+                                        transforms=["lowercase", "strip"]))
+    if fuzzy:
+        for col, weight in fuzzy.items():
+            fields.append(MatchkeyField(field=col, scorer=scorer, weight=weight,
+                                        transforms=["lowercase", "strip"]))
+
+    field_scores = []
+    weighted_sum = 0.0
+    weight_sum = 0.0
+    for f in fields:
+        val_a = apply_transforms(record_a.get(f.field), f.transforms)
+        val_b = apply_transforms(record_b.get(f.field), f.transforms)
+        fs = score_field(val_a, val_b, f.scorer)
+        if fs is not None:
+            field_scores.append({
+                "field": f.field,
+                "scorer": f.scorer,
+                "score": fs,
+                "value_a": str(val_a) if val_a is not None else "",
+                "value_b": str(val_b) if val_b is not None else "",
+            })
+            weighted_sum += fs * f.weight
+            weight_sum += f.weight
+
+    overall = weighted_sum / weight_sum if weight_sum > 0 else 0.0
+
+    return explain_pair_nl(record_a, record_b, field_scores, overall)
+
+
 def match(
     target: str,
     reference: str,
