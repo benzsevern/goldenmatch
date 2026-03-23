@@ -83,13 +83,42 @@ def profile_for_pprl(df: pl.DataFrame) -> list[FieldProfile]:
         cardinality = non_null.n_unique()
         null_pct = df[col].null_count() / df.height
 
-        # Usefulness score: high cardinality + short length + low null rate = good
-        # Normalized to 0-1
-        card_score = min(cardinality / df.height, 1.0)  # higher is better
+        # PPRL usefulness: moderate cardinality + short length + low null rate
+        # For PPRL, near-unique fields (IDs) are USELESS -- they differ across parties
+        # Sweet spot: cardinality between 10% and 80% of record count
+        card_ratio = cardinality / df.height
+        if card_ratio > 0.95:
+            # Near-unique (IDs, keys) -- terrible for PPRL
+            card_score = 0.0
+        elif card_ratio > 0.8:
+            # High cardinality -- slightly penalized
+            card_score = 0.3
+        elif card_ratio > 0.1:
+            # Good range -- names, addresses
+            card_score = 0.8
+        elif card_ratio > 0.02:
+            # Low cardinality (gender, state) -- useful as secondary
+            card_score = 0.5
+        else:
+            # Near-constant (Y/N flags, single values) -- not useful
+            card_score = 0.1
+
         len_score = max(0, 1.0 - avg_len / 50)  # shorter is better for BF
         null_score = 1.0 - null_pct
 
-        usefulness = 0.5 * card_score + 0.3 * len_score + 0.2 * null_score
+        usefulness = 0.4 * card_score + 0.3 * len_score + 0.3 * null_score
+
+        # Penalize fields that look like IDs/keys
+        if any(p in col_lower for p in ["_id", "reg_num", "ncid", "rec_id", "key", "code_id"]):
+            usefulness = max(usefulness - 0.5, 0.0)
+
+        # Penalize fields with very high null rates (>50%)
+        if null_pct > 0.5:
+            usefulness = max(usefulness - 0.3, 0.0)
+
+        # Penalize long fields (addresses, descriptions) -- they saturate BFs
+        if avg_len > 15:
+            usefulness = max(usefulness - 0.2, 0.0)
 
         # Boost known person fields
         if field_type in ("first_name", "last_name"):
@@ -97,7 +126,7 @@ def profile_for_pprl(df: pl.DataFrame) -> list[FieldProfile]:
         elif field_type in ("zip", "birth_year", "dob", "gender"):
             usefulness = min(usefulness + 0.2, 1.0)
         elif field_type in ("ssn", "phone", "email"):
-            usefulness = min(usefulness + 0.25, 1.0)
+            usefulness = min(usefulness + 0.15, 1.0)
 
         profiles.append(FieldProfile(
             column=col,
@@ -114,7 +143,7 @@ def profile_for_pprl(df: pl.DataFrame) -> list[FieldProfile]:
 def auto_configure_pprl(
     df: pl.DataFrame,
     security_level: str = "high",
-    max_fields: int = 6,
+    max_fields: int = 4,
 ) -> PPRLAutoConfigResult:
     """Automatically determine optimal PPRL configuration from data.
 
@@ -244,18 +273,20 @@ def _estimate_threshold(
     if not scores:
         return 0.85  # safe default
 
-    # Find valley in score histogram (bimodal: non-matches vs matches)
+    # Find threshold above the non-match distribution
+    # Random sample pairs are almost all non-matches. The threshold must be
+    # ABOVE the non-match cloud to avoid massive false positives.
     scores_arr = np.array(scores)
-    # Use percentile-based approach: threshold at 90th percentile
-    # (most pairs are non-matches, true matches cluster at the top)
-    p90 = float(np.percentile(scores_arr, 90))
-    p95 = float(np.percentile(scores_arr, 95))
+    p97 = float(np.percentile(scores_arr, 97))
+    p99 = float(np.percentile(scores_arr, 99))
 
-    # Pick threshold between p90 and p95
-    threshold = round((p90 + p95) / 2, 2)
+    # Threshold just above the non-match cloud
+    threshold = round((p97 + p99) / 2, 2)
 
-    # Clamp to reasonable range
-    threshold = max(0.70, min(0.95, threshold))
+    # PPRL needs higher thresholds than normal matching because bloom filter
+    # dice scores cluster higher than string-level similarity scores.
+    # Clamp to 0.85-0.95 range — below 0.85 almost always produces too many FPs.
+    threshold = max(0.85, min(0.95, threshold))
 
     return threshold
 
