@@ -304,6 +304,53 @@ def dedupe_df(
     )
 
 
+def match_df(
+    target: pl.DataFrame,
+    reference: pl.DataFrame,
+    *,
+    config: Any | None = None,
+    exact: list[str] | None = None,
+    fuzzy: dict[str, float] | None = None,
+    blocking: list[str] | None = None,
+    threshold: float | None = None,
+    backend: str | None = None,
+) -> MatchResult:
+    """Match a target DataFrame against a reference DataFrame (no file I/O).
+
+    Same as match() but accepts DataFrames instead of file paths.
+
+    Args:
+        target: Polars DataFrame of target records.
+        reference: Polars DataFrame of reference records.
+        config: GoldenMatchConfig object, or None for auto-config from kwargs.
+        exact: List of column names for exact matching.
+        fuzzy: Dict of column name -> threshold for fuzzy matching.
+        blocking: List of column names for blocking.
+        threshold: Override fuzzy match threshold.
+        backend: Processing backend: None, "ray".
+
+    Returns:
+        MatchResult with matched and unmatched DataFrames.
+    """
+    from goldenmatch.core.pipeline import run_match_df
+
+    if isinstance(config, str):
+        config = load_config(config)
+    elif config is None:
+        config = _build_config(exact, fuzzy, blocking, threshold, backend=backend)
+
+    if backend and hasattr(config, "backend"):
+        config.backend = backend
+
+    result = run_match_df(target, reference, config)
+
+    return MatchResult(
+        matched=result.get("matched"),
+        unmatched=result.get("unmatched"),
+        stats=_extract_stats(result),
+    )
+
+
 def match(
     target: str,
     reference: str,

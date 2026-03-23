@@ -234,3 +234,42 @@ class TestDedupeDf:
     def test_dedupe_df_importable(self):
         import goldenmatch as gm
         assert hasattr(gm, "dedupe_df")
+
+
+class TestMatchDf:
+    def test_match_df_exact(self):
+        import goldenmatch as gm
+        target = pl.DataFrame({
+            "name": ["John Smith", "Jane Doe"],
+            "email": ["john@x.com", "jane@y.com"],
+        })
+        reference = pl.DataFrame({
+            "name": ["JOHN SMITH", "Bob Jones"],
+            "email": ["john@x.com", "bob@z.com"],
+        })
+        result = gm.match_df(target, reference, exact=["email"])
+        assert isinstance(result, gm.MatchResult)
+
+    def test_match_df_fuzzy(self):
+        import goldenmatch as gm
+        target = pl.DataFrame({
+            "name": ["John Smith"],
+            "zip": ["10001"],
+        })
+        reference = pl.DataFrame({
+            "name": ["Jon Smyth"],
+            "zip": ["10001"],
+        })
+        result = gm.match_df(target, reference, fuzzy={"name": 0.75}, blocking=["zip"])
+        assert isinstance(result, gm.MatchResult)
+
+    def test_match_df_no_matches(self):
+        import goldenmatch as gm
+        target = pl.DataFrame({"email": ["a@x.com"]})
+        reference = pl.DataFrame({"email": ["b@y.com"]})
+        result = gm.match_df(target, reference, exact=["email"])
+        assert isinstance(result, gm.MatchResult)
+
+    def test_match_df_importable(self):
+        import goldenmatch as gm
+        assert hasattr(gm, "match_df")

@@ -576,6 +576,29 @@ def run_match(
     combined_df = pl.concat(all_frames)
     combined_lf = combined_df.lazy()
 
+    return _run_match_pipeline(
+        combined_lf, config, matchkeys, target_ids,
+        output_matched, output_unmatched, output_scores,
+        output_report, match_mode,
+    )
+
+
+def _run_match_pipeline(
+    combined_lf: pl.LazyFrame,
+    config: GoldenMatchConfig,
+    matchkeys: list,
+    target_ids: set,
+    output_matched: bool = False,
+    output_unmatched: bool = False,
+    output_scores: bool = False,
+    output_report: bool = False,
+    match_mode: str = "best",
+) -> dict:
+    """Shared match pipeline logic (post-ingest).
+
+    This function contains all pipeline steps from auto-fix/validation through
+    output. Both run_match() and run_match_df() delegate to this function.
+    """
     # ── Step 2.5a: AUTO-FIX + VALIDATION ──
     if config.validation and config.validation.auto_fix:
         combined_df_tmp = combined_lf.collect()
@@ -764,3 +787,32 @@ def run_match(
         "report": report,
         "quarantine": quarantine_df_match,
     }
+
+
+def run_match_df(
+    target_df: pl.DataFrame,
+    reference_df: pl.DataFrame,
+    config: GoldenMatchConfig,
+    target_name: str = "target",
+    reference_name: str = "reference",
+) -> dict:
+    """Run match pipeline on DataFrames directly (no file I/O)."""
+    matchkeys = config.get_matchkeys()
+    required = _get_required_columns(config)
+    validate_columns(target_df.lazy(), required)
+    validate_columns(reference_df.lazy(), required)
+
+    target_lf = target_df.lazy()
+    target_lf = target_lf.with_columns(pl.lit(target_name).alias("__source__"))
+    target_lf = _add_row_ids(target_lf, offset=0)
+    target_collected = target_lf.collect()
+    target_ids = set(target_collected["__row_id__"].to_list())
+
+    ref_lf = reference_df.lazy()
+    ref_lf = ref_lf.with_columns(pl.lit(reference_name).alias("__source__"))
+    ref_lf = _add_row_ids(ref_lf, offset=len(target_collected))
+    ref_collected = ref_lf.collect()
+
+    combined_lf = pl.concat([target_collected, ref_collected]).lazy()
+
+    return _run_match_pipeline(combined_lf, config, matchkeys, target_ids)
