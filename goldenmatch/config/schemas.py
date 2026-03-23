@@ -331,6 +331,9 @@ class LLMScorerConfig(BaseModel):
     candidate_hi: float = 0.95  # upper bound (same as auto_threshold)
     batch_size: int = 20
     budget: BudgetConfig | None = None
+    mode: str = "pairwise"  # "pairwise" (legacy) or "cluster" (in-context LLM clustering)
+    cluster_max_size: int = 100  # max records per LLM cluster block
+    cluster_min_size: int = 5  # below this, fall back to pairwise
 
 
 # ── Domain Extraction Config ──────────────────────────────────────────────

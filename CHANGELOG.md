@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-23
+
+### Added
+- In-context LLM clustering (`mode: cluster`) -- send blocks of 50-100 borderline records to LLM for direct cluster assignment instead of pairwise yes/no scoring
+- Uncertainty scores -- LLM returns confidence per cluster, surfaced in cluster metadata and review queue
+- `core/llm_cluster.py` -- new module with component detection, graph splitting, structured JSON parsing, pairwise fallback
+- LLMScorerConfig gains `mode`, `cluster_max_size`, `cluster_min_size` fields
+- Budget-aware degradation: cluster mode -> pairwise fallback -> stop
+
 ## [0.4.0] - 2026-03-23
 
 ### Added

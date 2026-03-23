@@ -217,13 +217,21 @@ class MatchEngine:
         # ── LLM scorer (optional) ──
         llm_budget_summary = None
         if config.llm_scorer and config.llm_scorer.enabled and all_pairs:
-            from goldenmatch.core.llm_scorer import llm_score_pairs
             has_budget = config.llm_scorer.budget is not None
-            result = llm_score_pairs(
-                all_pairs, collected_df,
-                config=config.llm_scorer,
-                return_budget=has_budget,
-            )
+            if config.llm_scorer.mode == "cluster":
+                from goldenmatch.core.llm_cluster import llm_cluster_pairs
+                result = llm_cluster_pairs(
+                    all_pairs, collected_df,
+                    config=config.llm_scorer,
+                    return_budget=has_budget,
+                )
+            else:
+                from goldenmatch.core.llm_scorer import llm_score_pairs
+                result = llm_score_pairs(
+                    all_pairs, collected_df,
+                    config=config.llm_scorer,
+                    return_budget=has_budget,
+                )
             if has_budget:
                 all_pairs, llm_budget_summary = result
             else:

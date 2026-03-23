@@ -313,8 +313,12 @@ def run_dedupe(
 
     # ── Step 3.4: LLM SCORER (optional) ──
     if config.llm_scorer and config.llm_scorer.enabled and all_pairs:
-        from goldenmatch.core.llm_scorer import llm_score_pairs
-        all_pairs = llm_score_pairs(all_pairs, collected_df, config=config.llm_scorer)
+        if config.llm_scorer.mode == "cluster":
+            from goldenmatch.core.llm_cluster import llm_cluster_pairs
+            all_pairs = llm_cluster_pairs(all_pairs, collected_df, config=config.llm_scorer)
+        else:
+            from goldenmatch.core.llm_scorer import llm_score_pairs
+            all_pairs = llm_score_pairs(all_pairs, collected_df, config=config.llm_scorer)
         # Filter to scored matches only
         all_pairs = [(a, b, s) for a, b, s in all_pairs if s > 0.5]
 
@@ -615,8 +619,12 @@ def run_match(
 
     # ── Step 4.6: LLM SCORER (optional) ──
     if config.llm_scorer and config.llm_scorer.enabled and all_pairs:
-        from goldenmatch.core.llm_scorer import llm_score_pairs
-        all_pairs = llm_score_pairs(all_pairs, combined_df, config=config.llm_scorer)
+        if config.llm_scorer.mode == "cluster":
+            from goldenmatch.core.llm_cluster import llm_cluster_pairs
+            all_pairs = llm_cluster_pairs(all_pairs, combined_df, config=config.llm_scorer)
+        else:
+            from goldenmatch.core.llm_scorer import llm_score_pairs
+            all_pairs = llm_score_pairs(all_pairs, combined_df, config=config.llm_scorer)
         all_pairs = [(a, b, s) for a, b, s in all_pairs if s > 0.5]
 
     # ── Step 5: Normalize pairs so target ID is always first ──
