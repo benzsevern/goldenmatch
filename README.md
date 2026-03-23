@@ -9,7 +9,7 @@ Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode
 [![Downloads](https://img.shields.io/pypi/dm/goldenmatch?color=blue&label=downloads)](https://pypi.org/project/goldenmatch/)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-903%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-911%20passing-brightgreen)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/benzsevern/goldenmatch/blob/main/scripts/gpu_colab_notebook.ipynb)
 
 ### See it in action
@@ -68,6 +68,8 @@ goldenmatch demo
 - **Incremental matching** — `goldenmatch incremental` matches new CSV records against an existing base dataset
 - **GitHub Actions "Try It"** — zero-install demo via `workflow_dispatch` (paste a CSV URL, get results)
 - **Codespaces ready** — one-click dev environment with `.devcontainer` config
+- **Ray distributed backend** -- scale to 10M+ records with `pip install goldenmatch[ray]` and `--backend ray`. Zero config locally, Ray cluster for 50M+
+- **Ground truth builder** -- `goldenmatch label` shows pairs interactively, type y/n/s to build ground truth CSV for accuracy measurement
 - **dbt integration** — `dbt-goldenmatch` package for DuckDB-based entity resolution in dbt pipelines
 
 ## Installation
@@ -450,6 +452,7 @@ Settings tuned in the TUI can be saved to the project file. Next run picks them 
 | `goldenmatch evaluate FILE --gt GT.csv` | Evaluate matching against ground truth |
 | `goldenmatch incremental BASE --new NEW` | Match new records against existing base |
 | `goldenmatch analyze-blocking FILE` | Analyze data and suggest blocking strategies |
+| `goldenmatch label FILE --config --gt` | Interactively label pairs to build ground truth CSV |
 | `goldenmatch config save/load/list/show` | Manage config presets |
 
 **Key dedupe flags:**
@@ -470,7 +473,7 @@ Settings tuned in the TUI can be saved to the project file. Next run picks them 
 
 ```
 goldenmatch/
-├── cli/            # 19 CLI commands (Typer)
+├── cli/            # 21 CLI commands (Typer)
 ├── config/         # Pydantic schemas, YAML loader, settings
 ├── core/           # Pipeline: ingest, block, score, cluster, golden, explainer,
 │                   #   report, dashboard, graph, anomaly, diff, rollback,
@@ -488,7 +491,7 @@ goldenmatch/
 └── utils/          # Transforms, helpers
 ```
 
-**Run tests:** `pytest` (903 tests)
+**Run tests:** `pytest` (911 tests)
 
 ## License
 

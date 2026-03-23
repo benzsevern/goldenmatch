@@ -16,6 +16,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - Automatic fallback to parallel scorer for small block counts (<= 4)
 - Ray auto-initializes locally using all CPU cores, no user configuration needed
 - Supports Ray clusters for 50M+ record workloads
+- `goldenmatch label` CLI command -- interactive pair labeling to build ground truth CSV for accuracy measurement (y/n/s keyboard input)
 
 ## [0.6.0] - 2026-03-23
 

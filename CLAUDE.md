@@ -12,7 +12,7 @@
 
 ## Testing
 - `pytest --tb=short` from project root — all tests must pass after every change
-- 909 tests (+ 6 skipped for optional deps), run in ~41s
+- 911 tests (+ 6 skipped for optional deps), run in ~41s
 - Fixtures in `tests/conftest.py`: `sample_csv`, `sample_csv_b`, `sample_parquet`
 - TUI tests use `pytest-asyncio` with `app.run_test()` pilot
 - Benchmark scripts in `tests/bench_1m.py`, `tests/analyze_results.py` (not part of test suite)
@@ -25,7 +25,7 @@
 - Pipeline: ingest → column_map → auto_fix → validate → standardize → matchkeys → block → score → cluster → golden → output
 - `goldenmatch/core/` — pipeline modules (no Textual dependency)
 - `goldenmatch/tui/` — Textual TUI + MatchEngine (engine.py has no Textual dependency)
-- `goldenmatch/cli/` — Typer CLI commands (19 commands, including `unmerge`, `evaluate`, `incremental`)
+- `goldenmatch/cli/` — Typer CLI commands (21 commands, including `unmerge`, `evaluate`, `incremental`, `pprl`, `label`)
 - `goldenmatch/db/` — Postgres integration (connector, sync, reconcile, clusters, ANN index)
 - `goldenmatch/api/` — REST API server (`goldenmatch serve`)
 - `goldenmatch/mcp/` — MCP server for Claude Desktop (`goldenmatch mcp-serve`)
@@ -136,7 +136,7 @@
 - GitHub Wiki needs `_Sidebar.md` and `_Footer.md` for custom nav/footer
 - Rich terminal recording: `Console(record=True)` then `console.export_svg(title='...')`
 - PyPI version must be bumped in both `pyproject.toml` and `goldenmatch/__init__.py`
-- v0.7.0 is live on PyPI — `pip install goldenmatch` works
+- v0.7.1 is live on PyPI — `pip install goldenmatch` works
 - Adding a TUI tab: update `test_tabs_exist` in `tests/test_tui.py` — asserts exact tab count (currently 6)
 - OpenAI API key: set `OPENAI_API_KEY` env var. Used by LLM scorer and LLM boost. Key stored in `.testing/.env`
 - Leipzig benchmark CSVs have invalid UTF-8 — use `pl.read_csv(encoding="utf8-lossy", ignore_errors=True)`, not `load_file()`

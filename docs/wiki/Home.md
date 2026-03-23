@@ -62,6 +62,7 @@ goldenmatch setup
 | `goldenmatch evaluate FILE --gt GT.csv` | Evaluate against ground truth (P/R/F1) |
 | `goldenmatch incremental BASE --new NEW` | Match new records against existing base |
 | `goldenmatch analyze-blocking FILE` | Analyze and suggest blocking strategies |
+| `goldenmatch label FILE --config --gt` | Interactively label pairs to build ground truth CSV |
 | `goldenmatch config save/load/list/show` | Manage config presets |
 
 ## Key Dedupe Flags

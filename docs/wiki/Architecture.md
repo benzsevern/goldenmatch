@@ -8,7 +8,8 @@ goldenmatch/
 │   ├── main.py             # App entry point, command registration
 │   ├── dedupe.py           # goldenmatch dedupe command
 │   ├── match.py            # goldenmatch match command
-│   └── sync.py             # goldenmatch sync command (database)
+│   ├── sync.py             # goldenmatch sync command (database)
+│   └── label.py            # goldenmatch label command (ground truth builder)
 │
 ├── config/                 # Configuration
 │   ├── schemas.py          # Pydantic models (MatchkeyConfig, BlockingConfig, etc.)
@@ -85,7 +86,8 @@ goldenmatch/
 │   └── salesforce.py       # Salesforce connector
 │
 ├── backends/               # Storage backends
-│   └── duckdb_backend.py   # DuckDB for out-of-core processing
+│   ├── duckdb_backend.py   # DuckDB for out-of-core processing
+│   └── ray_backend.py      # Ray distributed block scoring
 │
 ├── tui/                    # Interactive TUI (Textual)
 │   ├── app.py              # GoldenMatchApp (gold theme, bindings, routing)
@@ -250,7 +252,7 @@ Activated via `goldenmatch watch --daemon`.
 
 ## Test Structure
 
-855 tests across:
+911 tests across:
 - `tests/test_*.py` — unit tests for core modules
 - `tests/test_db.py` — Postgres integration tests
 - `tests/test_reconcile.py` — reconciliation + versioning tests
