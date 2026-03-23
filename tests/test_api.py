@@ -23,6 +23,47 @@ class TestImports:
         import goldenmatch as gm
         assert gm.__version__
 
+    def test_all_categories_importable(self):
+        """Verify all major feature areas are accessible from top-level."""
+        import goldenmatch as gm
+        # Config
+        assert gm.GoldenMatchConfig
+        assert gm.MatchkeyConfig
+        assert gm.BlockingConfig
+        assert gm.LLMScorerConfig
+        # Pipeline
+        assert gm.run_dedupe
+        assert gm.build_clusters
+        assert gm.build_blocks
+        assert gm.load_file
+        # Streaming
+        assert gm.match_one
+        assert gm.StreamProcessor
+        # Evaluation
+        assert gm.evaluate_pairs
+        assert gm.EvalResult
+        # Explain
+        assert gm.explain_pair
+        # Domain
+        assert gm.discover_rulebooks
+        assert gm.DomainRulebook
+        # Probabilistic
+        assert gm.train_em
+        # Learned blocking
+        assert gm.learn_blocking_rules
+        # LLM
+        assert gm.llm_score_pairs
+        assert gm.llm_cluster_pairs
+        assert gm.BudgetTracker
+        # PPRL
+        assert gm.run_pprl
+        assert gm.pprl_auto_config
+        assert gm.compute_bloom_filters
+        # Other
+        assert gm.profile_dataframe
+        assert gm.unmerge_record
+        assert gm.build_lineage
+
 
 class TestDedupeResult:
     def test_repr(self):

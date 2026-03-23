@@ -15,18 +15,176 @@ Quick start:
 
     # Evaluate accuracy
     metrics = gm.evaluate("data.csv", config="config.yaml", ground_truth="gt.csv")
+
+    # Streaming single-record matching
+    matches = gm.match_one(record, df, matchkey)
+
+    # Domain extraction
+    rulebooks = gm.discover_rulebooks()
+
+    # Explain a match
+    explanation = gm.explain_pair(record_a, record_b, matchkey)
+
+All features are accessible via `import goldenmatch as gm`.
 """
 __version__ = "0.7.1"
 
-from goldenmatch._api import dedupe, match, pprl_link, evaluate, load_config, DedupeResult, MatchResult
+# ── High-level API (convenience functions) ────────────────────────────────
+from goldenmatch._api import (
+    dedupe,
+    match,
+    pprl_link,
+    evaluate,
+    load_config,
+    DedupeResult,
+    MatchResult,
+)
+
+# ── Config schemas (for building configs programmatically) ────────────────
+from goldenmatch.config.schemas import (
+    GoldenMatchConfig,
+    MatchkeyConfig,
+    MatchkeyField,
+    BlockingConfig,
+    BlockingKeyConfig,
+    GoldenRulesConfig,
+    GoldenFieldRule,
+    LLMScorerConfig,
+    BudgetConfig,
+    DomainConfig,
+    StandardizationConfig,
+    ValidationConfig,
+    OutputConfig,
+)
+
+# ── Core pipeline functions ───────────────────────────────────────────────
+from goldenmatch.core.pipeline import run_dedupe, run_match
+from goldenmatch.core.scorer import (
+    find_exact_matches,
+    find_fuzzy_matches,
+    score_pair,
+    score_blocks_parallel,
+)
+from goldenmatch.core.cluster import (
+    build_clusters,
+    add_to_cluster,
+    unmerge_record,
+    unmerge_cluster,
+    compute_cluster_confidence,
+)
+from goldenmatch.core.blocker import build_blocks
+from goldenmatch.core.golden import build_golden_record
+from goldenmatch.core.ingest import load_file, load_files
+from goldenmatch.core.standardize import apply_standardization
+from goldenmatch.core.matchkey import compute_matchkeys
+
+# ── Streaming / incremental ──────────────────────────────────────────────
+from goldenmatch.core.match_one import match_one
+from goldenmatch.core.streaming import StreamProcessor, run_stream
+
+# ── Evaluation ───────────────────────────────────────────────────────────
+from goldenmatch.core.evaluate import (
+    evaluate_pairs,
+    evaluate_clusters,
+    load_ground_truth_csv,
+    EvalResult,
+)
+
+# ── Explainability ───────────────────────────────────────────────────────
+from goldenmatch.core.explain import explain_pair_nl, explain_cluster_nl
+
+# ── Domain extraction ────────────────────────────────────────────────────
+from goldenmatch.core.domain_registry import (
+    discover_rulebooks,
+    load_rulebook,
+    save_rulebook,
+    match_domain,
+    extract_with_rulebook,
+    DomainRulebook,
+)
+
+# ── Probabilistic (Fellegi-Sunter) ───────────────────────────────────────
+from goldenmatch.core.probabilistic import train_em, score_probabilistic
+
+# ── Learned blocking ─────────────────────────────────────────────────────
+from goldenmatch.core.learned_blocking import learn_blocking_rules, apply_learned_blocks
+
+# ── LLM scoring ──────────────────────────────────────────────────────────
+from goldenmatch.core.llm_scorer import llm_score_pairs
+from goldenmatch.core.llm_cluster import llm_cluster_pairs
+from goldenmatch.core.llm_budget import BudgetTracker
+
+# ── PPRL ─────────────────────────────────────────────────────────────────
+from goldenmatch.pprl.protocol import (
+    PPRLConfig,
+    run_pprl,
+    compute_bloom_filters,
+    link_trusted_third_party,
+    link_smc,
+    PartyData,
+    LinkageResult,
+)
+from goldenmatch.pprl.autoconfig import (
+    auto_configure_pprl,
+    auto_configure_pprl_llm,
+    profile_for_pprl,
+)
+
+# ── Profiling ────────────────────────────────────────────────────────────
+from goldenmatch.core.profiler import profile_dataframe
+
+# ── Lineage ──────────────────────────────────────────────────────────────
+from goldenmatch.core.lineage import build_lineage, save_lineage
+
+# ── Shortcuts ────────────────────────────────────────────────────────────
+# Aliases for common operations
+explain_pair = explain_pair_nl
+explain_cluster = explain_cluster_nl
+pprl_auto_config = auto_configure_pprl
 
 __all__ = [
+    # Version
     "__version__",
-    "dedupe",
-    "match",
-    "pprl_link",
-    "evaluate",
-    "load_config",
-    "DedupeResult",
-    "MatchResult",
+    # High-level API
+    "dedupe", "match", "pprl_link", "evaluate", "load_config",
+    "DedupeResult", "MatchResult",
+    # Config
+    "GoldenMatchConfig", "MatchkeyConfig", "MatchkeyField",
+    "BlockingConfig", "BlockingKeyConfig",
+    "GoldenRulesConfig", "GoldenFieldRule",
+    "LLMScorerConfig", "BudgetConfig",
+    "DomainConfig", "StandardizationConfig", "ValidationConfig", "OutputConfig",
+    # Pipeline
+    "run_dedupe", "run_match",
+    "find_exact_matches", "find_fuzzy_matches", "score_pair", "score_blocks_parallel",
+    "build_clusters", "add_to_cluster", "unmerge_record", "unmerge_cluster",
+    "compute_cluster_confidence",
+    "build_blocks", "build_golden_record",
+    "load_file", "load_files",
+    "apply_standardization", "compute_matchkeys",
+    # Streaming
+    "match_one", "StreamProcessor", "run_stream",
+    # Evaluation
+    "evaluate_pairs", "evaluate_clusters", "load_ground_truth_csv", "EvalResult",
+    # Explain
+    "explain_pair", "explain_pair_nl", "explain_cluster", "explain_cluster_nl",
+    # Domain
+    "discover_rulebooks", "load_rulebook", "save_rulebook",
+    "match_domain", "extract_with_rulebook", "DomainRulebook",
+    # Probabilistic
+    "train_em", "score_probabilistic",
+    # Learned blocking
+    "learn_blocking_rules", "apply_learned_blocks",
+    # LLM
+    "llm_score_pairs", "llm_cluster_pairs", "BudgetTracker",
+    # PPRL
+    "PPRLConfig", "run_pprl", "compute_bloom_filters",
+    "link_trusted_third_party", "link_smc",
+    "PartyData", "LinkageResult",
+    "auto_configure_pprl", "auto_configure_pprl_llm", "profile_for_pprl",
+    "pprl_auto_config",
+    # Profiling
+    "profile_dataframe",
+    # Lineage
+    "build_lineage", "save_lineage",
 ]
