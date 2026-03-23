@@ -6,6 +6,12 @@ import pytest
 
 from goldenmatch.config.schemas import GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig
 
+try:
+    import ray
+    HAS_RAY = True
+except ImportError:
+    HAS_RAY = False
+
 
 class TestBackendConfig:
     def test_default_backend_is_none(self):
@@ -31,6 +37,7 @@ class TestGetBlockScorer:
         from goldenmatch.core.scorer import score_blocks_parallel
         assert _get_block_scorer(config) is score_blocks_parallel
 
+    @pytest.mark.skipif(not HAS_RAY, reason="ray not installed")
     def test_ray_returns_ray_scorer(self):
         from goldenmatch.core.pipeline import _get_block_scorer
         config = GoldenMatchConfig(
@@ -42,6 +49,7 @@ class TestGetBlockScorer:
 
 
 class TestRayBackendSmallBlocks:
+    @pytest.mark.skipif(not HAS_RAY, reason="ray not installed")
     def test_small_blocks_fall_through_to_parallel(self):
         """Blocks <= 4 should use the regular parallel scorer, not Ray."""
         from goldenmatch.backends.ray_backend import score_blocks_ray
@@ -58,6 +66,7 @@ class TestRayBackendSmallBlocks:
 
 
 class TestRayBackendImport:
+    @pytest.mark.skipif(not HAS_RAY, reason="ray not installed")
     def test_import_error_message(self):
         """Verify helpful error message when ray is not installed."""
         import goldenmatch.backends.ray_backend as rb
