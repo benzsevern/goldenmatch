@@ -97,37 +97,44 @@ def link_trusted_third_party(
     """
     from goldenmatch.core.scorer import _hex_to_bits
 
-    # Compute pairwise similarity
+    # Compute pairwise similarity using vectorized matrix operations
     ids_a = sorted(party_a.bloom_filters.keys())
     ids_b = sorted(party_b.bloom_filters.keys())
+    total_comparisons = len(ids_a) * len(ids_b)
 
+    # Build bit matrices (N x filter_bits) as float32 for matrix multiply
+    mat_a = np.array(
+        [np.unpackbits(_hex_to_bits(party_a.bloom_filters[rid])) for rid in ids_a],
+        dtype=np.float32,
+    )
+    mat_b = np.array(
+        [np.unpackbits(_hex_to_bits(party_b.bloom_filters[rid])) for rid in ids_b],
+        dtype=np.float32,
+    )
+
+    # Intersection via matrix multiply: mat_a @ mat_b.T
+    intersection = mat_a @ mat_b.T  # (n_a, n_b)
+    pop_a = mat_a.sum(axis=1)  # (n_a,)
+    pop_b = mat_b.sum(axis=1)  # (n_b,)
+
+    if config.scorer == "dice":
+        denom = pop_a[:, None] + pop_b[None, :]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            scores = np.where(denom > 0, 2.0 * intersection / denom, 0.0)
+    else:  # jaccard
+        union = pop_a[:, None] + pop_b[None, :] - intersection
+        with np.errstate(divide="ignore", invalid="ignore"):
+            scores = np.where(union > 0, intersection / union, 0.0)
+
+    # Extract pairs above threshold
+    match_indices = np.argwhere(scores >= config.threshold)
     pairs = []
-    total_comparisons = 0
-
-    for rid_a in ids_a:
-        bf_a = party_a.bloom_filters[rid_a]
-        bits_a = np.unpackbits(_hex_to_bits(bf_a))
-        pop_a = bits_a.sum()
-
-        for rid_b in ids_b:
-            total_comparisons += 1
-            bf_b = party_b.bloom_filters[rid_b]
-            bits_b = np.unpackbits(_hex_to_bits(bf_b))
-
-            intersection = np.bitwise_and(bits_a, bits_b).sum()
-
-            if config.scorer == "dice":
-                total = pop_a + bits_b.sum()
-                score = float(2.0 * intersection / total) if total > 0 else 0.0
-            else:  # jaccard
-                union = np.bitwise_or(bits_a, bits_b).sum()
-                score = float(intersection / union) if union > 0 else 0.0
-
-            if score >= config.threshold:
-                # Use composite IDs for cross-party clustering
-                composite_a = rid_a * 1000000  # party A IDs in high range
-                composite_b = rid_b * 1000000 + 500000  # party B IDs in offset range
-                pairs.append((composite_a, composite_b, score))
+    for idx_a, idx_b in match_indices:
+        rid_a = ids_a[idx_a]
+        rid_b = ids_b[idx_b]
+        composite_a = rid_a * 1000000
+        composite_b = rid_b * 1000000 + 500000
+        pairs.append((composite_a, composite_b, float(scores[idx_a, idx_b])))
 
     # Cluster matches
     all_composite_ids = (
@@ -255,7 +262,7 @@ def _compute_match_bits(
     shares_b: dict[int, list[int]],
     config: PPRLConfig,
 ) -> list[bool]:
-    """Compute match bits via simulated arithmetic circuit.
+    """Compute match bits via simulated arithmetic circuit (vectorized).
 
     In a real SMC protocol, this would be a garbled circuit computing:
       intersection = sum(a_i AND b_i)
@@ -268,24 +275,24 @@ def _compute_match_bits(
     ids_a = sorted(shares_a.keys())
     ids_b = sorted(shares_b.keys())
 
-    match_bits = []
-    for rid_a in ids_a:
-        bits_a = np.array(shares_a[rid_a], dtype=np.uint8)
-        pop_a = bits_a.sum()
-        for rid_b in ids_b:
-            bits_b = np.array(shares_b[rid_b], dtype=np.uint8)
-            intersection = np.bitwise_and(bits_a, bits_b).sum()
+    mat_a = np.array([shares_a[rid] for rid in ids_a], dtype=np.float32)
+    mat_b = np.array([shares_b[rid] for rid in ids_b], dtype=np.float32)
 
-            if config.scorer == "dice":
-                total = pop_a + bits_b.sum()
-                score = float(2.0 * intersection / total) if total > 0 else 0.0
-            else:
-                union = np.bitwise_or(bits_a, bits_b).sum()
-                score = float(intersection / union) if union > 0 else 0.0
+    intersection = mat_a @ mat_b.T
+    pop_a = mat_a.sum(axis=1)
+    pop_b = mat_b.sum(axis=1)
 
-            match_bits.append(score >= config.threshold)
+    if config.scorer == "dice":
+        denom = pop_a[:, None] + pop_b[None, :]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            scores = np.where(denom > 0, 2.0 * intersection / denom, 0.0)
+    else:
+        union = pop_a[:, None] + pop_b[None, :] - intersection
+        with np.errstate(divide="ignore", invalid="ignore"):
+            scores = np.where(union > 0, intersection / union, 0.0)
 
-    return match_bits
+    # Flatten to match bits in row-major order
+    return (scores >= config.threshold).flatten().tolist()
 
 
 def run_pprl(
