@@ -22,3 +22,4 @@ service-account*.json
 .goldenmatch_cross_encoder/
 .goldenmatch_faiss/
 .superpowers/
+tests/benchmarks/datasets/NCVR/
