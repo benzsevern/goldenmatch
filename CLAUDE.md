@@ -132,7 +132,7 @@
 - GitHub Wiki needs `_Sidebar.md` and `_Footer.md` for custom nav/footer
 - Rich terminal recording: `Console(record=True)` then `console.export_svg(title='...')`
 - PyPI version must be bumped in both `pyproject.toml` and `goldenmatch/__init__.py`
-- v0.3.1 is live on PyPI — `pip install goldenmatch` works
+- v0.4.0 is live on PyPI — `pip install goldenmatch` works
 - Adding a TUI tab: update `test_tabs_exist` in `tests/test_tui.py` — asserts exact tab count (currently 6)
 - OpenAI API key: set `OPENAI_API_KEY` env var. Used by LLM scorer and LLM boost. Key stored in `.testing/.env`
 - Leipzig benchmark CSVs have invalid UTF-8 — use `pl.read_csv(encoding="utf8-lossy", ignore_errors=True)`, not `load_file()`
