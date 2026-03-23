@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-03-23
+
+### Added
+- Ray distributed backend for large-scale entity resolution (`pip install goldenmatch[ray]`)
+- `--backend ray` CLI flag for dedupe command
+- `backend: ray` config option in GoldenMatchConfig
+- `backends/ray_backend.py` with `score_blocks_ray()` -- drop-in replacement for ThreadPoolExecutor
+- Automatic fallback to parallel scorer for small block counts (<= 4)
+- Ray auto-initializes locally using all CPU cores, no user configuration needed
+- Supports Ray clusters for 50M+ record workloads
+
 ## [0.6.0] - 2026-03-23
 
 ### Added

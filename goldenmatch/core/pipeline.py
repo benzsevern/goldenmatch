@@ -17,6 +17,15 @@ from goldenmatch.core.matchkey import compute_matchkeys
 from goldenmatch.core.block_analyzer import analyze_blocking
 from goldenmatch.core.blocker import build_blocks
 from goldenmatch.core.scorer import find_exact_matches, find_fuzzy_matches, score_blocks_parallel, rerank_top_pairs
+
+
+def _get_block_scorer(config):
+    """Return the block scoring function based on configured backend."""
+    backend = getattr(config, "backend", None)
+    if backend == "ray":
+        from goldenmatch.backends.ray_backend import score_blocks_ray
+        return score_blocks_ray
+    return score_blocks_parallel
 from goldenmatch.core.cluster import build_clusters
 from goldenmatch.core.golden import build_golden_record
 from goldenmatch.output.writer import write_output
@@ -263,7 +272,8 @@ def run_dedupe(
             if config.blocking is None:
                 continue
             blocks = build_blocks(combined_lf, config.blocking)
-            pairs = score_blocks_parallel(
+            block_scorer = _get_block_scorer(config)
+            pairs = block_scorer(
                 blocks, mk, matched_pairs,
                 across_files_only=across_files_only,
                 source_lookup=source_lookup if across_files_only else None,
@@ -579,7 +589,8 @@ def run_match(
             if config.blocking is None:
                 continue
             blocks = build_blocks(combined_lf, config.blocking)
-            pairs = score_blocks_parallel(
+            block_scorer = _get_block_scorer(config)
+            pairs = block_scorer(
                 blocks, mk, matched_pairs,
                 target_ids=target_ids,
             )

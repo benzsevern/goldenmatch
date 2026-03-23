@@ -12,7 +12,7 @@
 
 ## Testing
 - `pytest --tb=short` from project root — all tests must pass after every change
-- 903 tests (+ 6 skipped for optional deps), run in ~31s
+- 909 tests (+ 6 skipped for optional deps), run in ~41s
 - Fixtures in `tests/conftest.py`: `sample_csv`, `sample_csv_b`, `sample_parquet`
 - TUI tests use `pytest-asyncio` with `app.run_test()` pilot
 - Benchmark scripts in `tests/bench_1m.py`, `tests/analyze_results.py` (not part of test suite)
@@ -108,6 +108,7 @@
 - REST review queue: `GET /reviews` returns borderline pairs for steward review, `POST /reviews/decide` records approve/reject decisions
 - Daemon mode: `watch_daemon()` in `db/watch.py` — adds health endpoint (HTTP /health), PID file, SIGTERM handling to watch mode
 - PPRL package: `pprl/protocol.py` — multi-party privacy-preserving record linkage. `PPRLConfig` dataclass, `run_pprl()` convenience function, `link_trusted_third_party()` and `link_smc()` protocol implementations. CLI: `goldenmatch pprl link`. Bloom filter security levels (standard/high/paranoid) with HMAC salting and balanced padding in `utils/transforms.py`.
+- Ray backend: `backends/ray_backend.py` -- distributed block scoring via Ray tasks. Drop-in replacement for ThreadPoolExecutor. `pip install goldenmatch[ray]`, config `backend: ray` or CLI `--backend ray`. Auto-initializes locally, falls back to parallel scorer for <= 4 blocks. Pipeline uses `_get_block_scorer(config)` to select scorer function.
 - PPRL auto-config: `auto_configure_pprl()` profiles data and picks optimal fields, bloom filter parameters, and threshold. Beats manual tuning -- 92.4% F1 on FEBRL4 (vs 89.8% manual), 76.1% F1 on NCVR. MCP tools: `pprl_auto_config`, `pprl_link`.
 - LLM clustering: `core/llm_cluster.py` — in-context block clustering as alternative to pairwise LLM scoring. Config `llm_scorer.mode: cluster`. Builds connected components from borderline pairs, sends blocks to LLM, synthesizes pair_scores from cluster confidence for compatibility with Union-Find/unmerge/lineage. Degrades: cluster → pairwise → stop.
 - Evaluation: `core/evaluate.py` — `EvalResult` dataclass, `evaluate_pairs()`, `evaluate_clusters()`, `load_ground_truth_csv()`. CLI: `goldenmatch evaluate --config X --ground-truth Y`
@@ -135,7 +136,7 @@
 - GitHub Wiki needs `_Sidebar.md` and `_Footer.md` for custom nav/footer
 - Rich terminal recording: `Console(record=True)` then `console.export_svg(title='...')`
 - PyPI version must be bumped in both `pyproject.toml` and `goldenmatch/__init__.py`
-- v0.6.0 is live on PyPI — `pip install goldenmatch` works
+- v0.7.0 is live on PyPI — `pip install goldenmatch` works
 - Adding a TUI tab: update `test_tabs_exist` in `tests/test_tui.py` — asserts exact tab count (currently 6)
 - OpenAI API key: set `OPENAI_API_KEY` env var. Used by LLM scorer and LLM boost. Key stored in `.testing/.env`
 - Leipzig benchmark CSVs have invalid UTF-8 — use `pl.read_csv(encoding="utf8-lossy", ignore_errors=True)`, not `load_file()`

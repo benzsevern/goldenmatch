@@ -98,6 +98,7 @@ def dedupe_cmd(
     llm_retrain: bool = typer.Option(False, "--llm-retrain", help="Force re-labeling (ignore saved model)"),
     llm_provider: Optional[str] = typer.Option(None, "--llm-provider", help="LLM provider: auto, anthropic, or openai"),
     llm_max_labels: int = typer.Option(500, "--llm-max-labels", help="Max pairs to label with LLM"),
+    backend: Optional[str] = typer.Option(None, "--backend", help="Processing backend: default, ray, duckdb"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress output"),
 ) -> None:
@@ -225,6 +226,10 @@ def dedupe_cmd(
     # Enable LLM boost from CLI flag
     if llm_boost or llm_retrain:
         cfg.llm_boost = True
+
+    # Set backend from CLI flag
+    if backend:
+        cfg.backend = backend
 
     # Resolve column maps from config input.files section
     file_specs = _resolve_column_maps(parsed_files, cfg)

@@ -369,6 +369,7 @@ class GoldenMatchConfig(BaseModel):
     llm_boost: bool = False
     llm_scorer: LLMScorerConfig | None = None
     domain: DomainConfig | None = None
+    backend: str | None = None  # None (default Polars), "ray", "duckdb"
 
     @model_validator(mode="after")
     def _validate_fuzzy_needs_blocking(self) -> "GoldenMatchConfig":
