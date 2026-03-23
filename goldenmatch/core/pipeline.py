@@ -167,6 +167,33 @@ def run_dedupe(
 
     combined_lf = pl.concat([f.collect() for f in frames]).lazy()
 
+    return _run_dedupe_pipeline(
+        combined_lf, config, matchkeys,
+        output_golden, output_clusters,
+        output_dupes, output_unique, output_report,
+        across_files_only, llm_retrain, llm_provider, llm_max_labels,
+    )
+
+
+def _run_dedupe_pipeline(
+    combined_lf: pl.LazyFrame,
+    config: GoldenMatchConfig,
+    matchkeys: list,
+    output_golden: bool = False,
+    output_clusters: bool = False,
+    output_dupes: bool = False,
+    output_unique: bool = False,
+    output_report: bool = False,
+    across_files_only: bool = False,
+    llm_retrain: bool = False,
+    llm_provider: str | None = None,
+    llm_max_labels: int = 500,
+) -> dict:
+    """Shared dedupe pipeline logic (post-ingest).
+
+    This function contains all pipeline steps from auto-fix/validation through
+    output. Both run_dedupe() and run_dedupe_df() delegate to this function.
+    """
     # ── Step 1.5a: AUTO-FIX + VALIDATION ──
     if config.validation and config.validation.auto_fix:
         combined_df_tmp = combined_lf.collect()
@@ -458,6 +485,29 @@ def run_dedupe(
     }
 
     return results
+
+
+def run_dedupe_df(
+    df: pl.DataFrame,
+    config: GoldenMatchConfig,
+    source_name: str = "dataframe",
+    output_golden: bool = False,
+    output_clusters: bool = False,
+    output_dupes: bool = False,
+    output_unique: bool = False,
+    output_report: bool = False,
+) -> dict:
+    """Run dedupe pipeline on a DataFrame directly (no file I/O)."""
+    matchkeys = config.get_matchkeys()
+    lf = df.lazy()
+    required = _get_required_columns(config)
+    validate_columns(lf, required)
+    lf = lf.with_columns(pl.lit(source_name).alias("__source__"))
+    lf = _add_row_ids(lf, offset=0)
+    combined_lf = lf.collect().lazy()
+    return _run_dedupe_pipeline(combined_lf, config, matchkeys,
+                                output_golden, output_clusters,
+                                output_dupes, output_unique, output_report)
 
 
 def run_match(

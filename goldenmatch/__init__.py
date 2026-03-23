@@ -32,6 +32,7 @@ __version__ = "1.0.0"
 # ── High-level API (convenience functions) ────────────────────────────────
 from goldenmatch._api import (
     dedupe,
+    dedupe_df,
     match,
     pprl_link,
     evaluate,
@@ -179,7 +180,7 @@ __all__ = [
     # Version
     "__version__",
     # High-level API
-    "dedupe", "match", "pprl_link", "evaluate", "load_config",
+    "dedupe", "dedupe_df", "match", "pprl_link", "evaluate", "load_config",
     "DedupeResult", "MatchResult",
     # Config
     "GoldenMatchConfig", "MatchkeyConfig", "MatchkeyField",

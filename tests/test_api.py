@@ -171,3 +171,66 @@ class TestLoadConfig:
         cfg = gm.load_config(str(p))
         assert cfg is not None
         assert len(cfg.get_matchkeys()) == 1
+
+
+class TestDedupeDf:
+    def test_dedupe_df_exact(self):
+        import goldenmatch as gm
+        df = pl.DataFrame({
+            "first_name": ["John", "john", "Jane", "JOHN", "Bob"],
+            "email": ["john@x.com", "john@x.com", "jane@y.com", "john@x.com", "bob@z.com"],
+        })
+        result = gm.dedupe_df(df, exact=["email"])
+        assert isinstance(result, gm.DedupeResult)
+        assert result.total_records > 0
+        assert result.total_clusters >= 1
+
+    def test_dedupe_df_fuzzy(self):
+        import goldenmatch as gm
+        df = pl.DataFrame({
+            "name": ["John Smith", "Jon Smith", "Jane Doe", "Bob Jones"],
+            "zip": ["10001", "10001", "20002", "30003"],
+        })
+        result = gm.dedupe_df(df, fuzzy={"name": 0.80}, blocking=["zip"])
+        assert isinstance(result, gm.DedupeResult)
+        assert result.total_records > 0
+
+    def test_dedupe_df_with_config_object(self):
+        import goldenmatch as gm
+        df = pl.DataFrame({
+            "email": ["a@x.com", "a@x.com", "b@y.com"],
+        })
+        cfg = gm.GoldenMatchConfig(
+            matchkeys=[gm.MatchkeyConfig(
+                name="email",
+                type="exact",
+                fields=[gm.MatchkeyField(field="email", transforms=["lowercase"])],
+            )],
+        )
+        result = gm.dedupe_df(df, config=cfg)
+        assert result.total_clusters >= 1
+
+    def test_dedupe_df_returns_scored_pairs(self):
+        import goldenmatch as gm
+        df = pl.DataFrame({
+            "email": ["a@x.com", "a@x.com", "b@y.com"],
+        })
+        result = gm.dedupe_df(df, exact=["email"])
+        assert isinstance(result.scored_pairs, list)
+
+    def test_dedupe_df_empty(self):
+        import goldenmatch as gm
+        df = pl.DataFrame({"email": []}).cast({"email": pl.Utf8})
+        result = gm.dedupe_df(df, exact=["email"])
+        assert isinstance(result, gm.DedupeResult)
+        assert result.total_records == 0
+
+    def test_dedupe_df_missing_column_raises(self):
+        import goldenmatch as gm
+        df = pl.DataFrame({"name": ["John"]})
+        with pytest.raises(Exception):
+            gm.dedupe_df(df, exact=["nonexistent_column"])
+
+    def test_dedupe_df_importable(self):
+        import goldenmatch as gm
+        assert hasattr(gm, "dedupe_df")

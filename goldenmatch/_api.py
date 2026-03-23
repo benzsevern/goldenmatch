@@ -250,6 +250,60 @@ def dedupe(
     )
 
 
+def dedupe_df(
+    df: pl.DataFrame,
+    *,
+    config: Any | None = None,
+    exact: list[str] | None = None,
+    fuzzy: dict[str, float] | None = None,
+    blocking: list[str] | None = None,
+    threshold: float | None = None,
+    llm_scorer: bool = False,
+    backend: str | None = None,
+    source_name: str = "dataframe",
+) -> DedupeResult:
+    """Deduplicate a Polars DataFrame directly (no file I/O).
+
+    Same as dedupe() but accepts a DataFrame instead of file paths.
+    Designed for programmatic use and as the entry point for SQL extensions.
+
+    Args:
+        df: Polars DataFrame to deduplicate.
+        config: GoldenMatchConfig object, or None for auto-config from kwargs.
+        exact: List of column names for exact matching.
+        fuzzy: Dict of column name -> threshold for fuzzy matching.
+        blocking: List of column names for blocking.
+        threshold: Override fuzzy match threshold for all fields.
+        llm_scorer: Enable LLM scoring for borderline pairs.
+        backend: Processing backend: None (default), "ray".
+        source_name: Source label for the DataFrame (default: "dataframe").
+
+    Returns:
+        DedupeResult with golden records, clusters, dupes, unique, and stats.
+    """
+    from goldenmatch.core.pipeline import run_dedupe_df
+
+    if isinstance(config, str):
+        config = load_config(config)
+    elif config is None:
+        config = _build_config(exact, fuzzy, blocking, threshold, llm_scorer, backend)
+
+    if backend and hasattr(config, "backend"):
+        config.backend = backend
+
+    result = run_dedupe_df(df, config, source_name=source_name)
+
+    return DedupeResult(
+        golden=result.get("golden"),
+        clusters=result.get("clusters", {}),
+        dupes=result.get("dupes"),
+        unique=result.get("unique"),
+        stats=_extract_stats(result),
+        scored_pairs=_extract_pairs(result),
+        config=config,
+    )
+
+
 def match(
     target: str,
     reference: str,
