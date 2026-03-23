@@ -113,6 +113,8 @@ from goldenmatch.core.learned_blocking import learn_blocking_rules, apply_learne
 from goldenmatch.core.llm_scorer import llm_score_pairs
 from goldenmatch.core.llm_cluster import llm_cluster_pairs
 from goldenmatch.core.llm_budget import BudgetTracker
+from goldenmatch.core.llm_labeler import label_pairs as llm_label_pairs
+from goldenmatch.core.llm_extract import llm_extract_features
 
 # ── PPRL ─────────────────────────────────────────────────────────────────
 from goldenmatch.pprl.protocol import (
@@ -136,8 +138,36 @@ from goldenmatch.core.profiler import profile_dataframe
 # ── Lineage ──────────────────────────────────────────────────────────────
 from goldenmatch.core.lineage import build_lineage, save_lineage
 
+# ── Active learning / boost ──────────────────────────────────────────────
+from goldenmatch.core.boost import boost_accuracy
+
+# ── Auto-configuration ──────────────────────────────────────────────────
+from goldenmatch.core.autoconfig import auto_configure
+from goldenmatch.core.threshold import suggest_threshold
+
+# ── Data quality ─────────────────────────────────────────────────────────
+from goldenmatch.core.autofix import auto_fix_dataframe
+from goldenmatch.core.validate import validate_dataframe
+from goldenmatch.core.anomaly import detect_anomalies
+
+# ── Schema matching ──────────────────────────────────────────────────────
+from goldenmatch.core.schema_match import auto_map_columns
+
+# ── Graph ER ─────────────────────────────────────────────────────────────
+from goldenmatch.core.graph_er import run_graph_er
+
+# ── Reranking ────────────────────────────────────────────────────────────
+from goldenmatch.core.scorer import rerank_top_pairs
+
+# ── Diff / Rollback ─────────────────────────────────────────────────────
+from goldenmatch.core.diff import generate_diff
+from goldenmatch.core.rollback import rollback_run
+
+# ── Output ───────────────────────────────────────────────────────────────
+from goldenmatch.output.writer import write_output
+from goldenmatch.output.report import generate_dedupe_report
+
 # ── Shortcuts ────────────────────────────────────────────────────────────
-# Aliases for common operations
 explain_pair = explain_pair_nl
 explain_cluster = explain_cluster_nl
 pprl_auto_config = auto_configure_pprl
@@ -177,6 +207,7 @@ __all__ = [
     "learn_blocking_rules", "apply_learned_blocks",
     # LLM
     "llm_score_pairs", "llm_cluster_pairs", "BudgetTracker",
+    "llm_label_pairs", "llm_extract_features",
     # PPRL
     "PPRLConfig", "run_pprl", "compute_bloom_filters",
     "link_trusted_third_party", "link_smc",
@@ -187,4 +218,20 @@ __all__ = [
     "profile_dataframe",
     # Lineage
     "build_lineage", "save_lineage",
+    # Active learning / boost
+    "boost_accuracy",
+    # Auto-configuration
+    "auto_configure", "suggest_threshold",
+    # Data quality
+    "auto_fix_dataframe", "validate_dataframe", "detect_anomalies",
+    # Schema matching
+    "auto_map_columns",
+    # Graph ER
+    "run_graph_er",
+    # Reranking
+    "rerank_top_pairs",
+    # Diff / Rollback
+    "generate_diff", "rollback_run",
+    # Output
+    "write_output", "generate_dedupe_report",
 ]
