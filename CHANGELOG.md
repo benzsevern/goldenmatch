@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-03-23
+
+### Added
+- Privacy-preserving record linkage (PPRL) package (`goldenmatch/pprl/`)
+- Trusted third party mode: parties send encrypted bloom filters, coordinator computes similarity
+- SMC mode: secret-shared dice similarity, only match bits revealed (simulated circuit)
+- `goldenmatch pprl link` CLI command for cross-party linkage
+- Bloom filter security levels: standard (512-bit), high (1024-bit + HMAC), paranoid (2048-bit + balanced padding)
+- Per-field HMAC salting prevents cross-field correlation attacks
+- Balanced bloom filter padding normalizes filter density for short strings
+- Custom HMAC key support via transform parameter (`bloom_filter:2:20:512:my_key`)
+- `pip install goldenmatch[pprl]` optional dependency group
+
 ## [0.5.0] - 2026-03-23
 
 ### Added

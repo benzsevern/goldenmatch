@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "goldenmatch"
-version = "0.5.0"
+version = "0.6.0"
 description = "Entity resolution toolkit — deduplicate records, match across sources, and maintain golden records"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -63,6 +63,9 @@ postgres = [
 ]
 mcp = [
     "mcp>=1.0",
+]
+pprl = [
+    "mp-spdz>=0.3",
 ]
 all = [
     "goldenmatch[embeddings,llm,postgres,mcp]",

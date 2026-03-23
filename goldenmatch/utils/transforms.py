@@ -74,15 +74,34 @@ def _bloom_filter_transform(value: str, transform: str) -> str:
     into a fixed-size bit array, returns the bit array as a hex string.
 
     Parameterized: bloom_filter or bloom_filter:ngram:k:size
+    Security levels: bloom_filter:standard, bloom_filter:high, bloom_filter:paranoid
     """
+    # Security level presets
+    _SECURITY_LEVELS = {
+        "standard": (2, 20, 512),    # bigram, 20 hashes, 512 bits
+        "high": (2, 30, 1024),       # bigram, 30 hashes, 1024 bits, per-field HMAC
+        "paranoid": (3, 40, 2048),   # trigram, 40 hashes, 2048 bits, balanced padding
+    }
+
     # Parse parameters
+    hmac_key = None
+    balanced = False
     if transform == "bloom_filter":
         ngram_size, num_hashes, filter_size = 2, 20, 1024
+    elif transform.count(":") == 1 and transform.split(":")[1] in _SECURITY_LEVELS:
+        level = transform.split(":")[1]
+        ngram_size, num_hashes, filter_size = _SECURITY_LEVELS[level]
+        if level in ("high", "paranoid"):
+            hmac_key = "default_field_key"
+        if level == "paranoid":
+            balanced = True
     else:
         parts = transform.split(":")
         ngram_size = int(parts[1])
         num_hashes = int(parts[2])
         filter_size = int(parts[3])
+        if len(parts) > 4:
+            hmac_key = parts[4]
 
     filter_bytes = filter_size // 8
     bits = bytearray(filter_bytes)
@@ -91,12 +110,25 @@ def _bloom_filter_transform(value: str, transform: str) -> str:
     padded = value.lower().strip()
     if len(padded) < ngram_size:
         padded = padded.ljust(ngram_size, "_")
+
+    # Balanced padding: pad short strings with deterministic salt to normalize filter density
+    if balanced and len(padded) < 8:
+        salt = hashlib.sha256(padded.encode()).hexdigest()[:8]
+        padded = padded + salt
+
     ngrams = [padded[i:i + ngram_size] for i in range(len(padded) - ngram_size + 1)]
 
     # Hash each n-gram with k different hash functions
     for ngram in ngrams:
         for k in range(num_hashes):
-            h = hashlib.sha256(f"{k}:{ngram}".encode()).hexdigest()
+            if hmac_key:
+                # Per-field HMAC salting: prevents cross-field correlation attacks
+                import hmac as hmac_mod
+                h = hmac_mod.new(
+                    f"{hmac_key}:{k}".encode(), ngram.encode(), hashlib.sha256
+                ).hexdigest()
+            else:
+                h = hashlib.sha256(f"{k}:{ngram}".encode()).hexdigest()
             bit_pos = int(h, 16) % filter_size
             byte_idx = bit_pos // 8
             bit_idx = bit_pos % 8
