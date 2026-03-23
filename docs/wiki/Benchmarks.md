@@ -132,3 +132,34 @@ Simulated with ground truth labels (5% noise to approximate LLM accuracy):
 | Abt-Buy | 44.5% | 59.5% | +15pts | ~$0.30 |
 
 The optimal configuration: MiniLM base model, 300 labels, 3 epochs, train on multi-pass pairs, score on ANN pairs.
+
+## PPRL Benchmarks
+
+Privacy-Preserving Record Linkage benchmarked on FEBRL4 (5K vs 5K synthetic person records, industry-standard dataset for record linkage evaluation).
+
+### Results by Strategy
+
+| Strategy | Precision | Recall | F1 | Privacy |
+|----------|-----------|--------|-----|---------|
+| Normal fuzzy (baseline) | 56.5% | 74.6% | 64.3% | None |
+| **PPRL high (t=0.80)** | **90.5%** | **89.1%** | **89.8%** | Per-field HMAC |
+| PPRL paranoid (t=0.80) | 98.9% | 76.0% | 86.0% | HMAC + balanced padding |
+| PPRL standard (t=0.80) | 22.2% | 93.2% | 35.8% | Basic CLK |
+
+### Threshold Sweep (PPRL High)
+
+| Threshold | Precision | Recall | F1 |
+|-----------|-----------|--------|-----|
+| 0.70 | 78.2% | 93.4% | 85.1% |
+| 0.75 | 85.1% | 91.2% | 88.0% |
+| **0.80** | **90.5%** | **89.1%** | **89.8%** |
+| 0.85 | 94.3% | 84.7% | 89.2% |
+| 0.90 | 97.1% | 78.3% | 86.7% |
+
+### Key Findings
+
+- **PPRL high (per-field HMAC) at t=0.80 is the best overall strategy** -- 89.8% F1, outperforming normal fuzzy by 25 points. Per-field HMAC preserves field-level similarity while protecting PII.
+- **PPRL paranoid (HMAC + balanced padding) trades recall for precision** -- 98.9% precision but 76.0% recall. Best when false positives are costly.
+- **PPRL standard (basic CLK) has low precision** -- the single bloom filter concatenates all fields, losing field-level granularity. High recall (93.2%) but too many false positives (22.2% precision).
+- **Normal fuzzy underperforms on FEBRL4 person data** -- Jaro-Winkler on short names and postcodes is less effective than bloom filter bigram comparison, which captures character-level similarity better on structured fields.
+- **Optimal threshold is 0.80** -- balances precision and recall. Lower thresholds increase recall at the cost of precision; higher thresholds do the opposite.

@@ -42,6 +42,7 @@ goldenmatch demo
 - **Cluster confidence scoring** — weakly-connected clusters flagged with bottleneck pair identification
 - **Single-record matching** — `match_one` primitive for streaming: embed, query ANN, score, return matches
 - **Privacy-preserving matching** — bloom filter transforms + Dice/Jaccard scoring for fuzzy matching on encrypted PII
+- **PPRL multi-party linkage** -- match records across organizations without sharing raw data. Trusted third party and SMC modes. 89.8% F1 on FEBRL4 person data
 - **Before/after dashboard** — shareable HTML showing data transformation with charts
 - **Schema-free matching** — auto-maps columns between different schemas (full_name -> first_name + last_name)
 - **Cloud storage** — read directly from S3, GCS, or Azure Blob
@@ -95,7 +96,7 @@ Guides you through GPU mode selection, Vertex AI / Colab / local GPU configurati
 
 ![GPU Selection](docs/screenshots/setup-gpu.svg)
 
-## Benchmarks (v0.3.1)
+## Benchmarks (v0.6.0)
 
 Tested on [Leipzig benchmark datasets](https://dbs.uni-leipzig.de/research/projects/object-matching/benchmark-datasets-for-entity-resolution) (DBLP-ACM, Abt-Buy).
 
@@ -110,6 +111,19 @@ Tested on [Leipzig benchmark datasets](https://dbs.uni-leipzig.de/research/proje
 | Abt-Buy | Model extraction + emb | 39.3% | 71.0% | 50.6% | $0 |
 | Abt-Buy | **Domain + emb + LLM** | **94.8%** | **58.3%** | **72.2%** | **$0.04** |
 | Amazon-Google (software) | emb+ANN + LLM | 63.3% | 35.2% | **45.3%** | $0.02 |
+
+### PPRL (Privacy-Preserving Record Linkage)
+
+Benchmarked on FEBRL4 (5K vs 5K synthetic person records, industry-standard dataset):
+
+| Strategy | Precision | Recall | F1 | Privacy |
+|----------|-----------|--------|-----|---------|
+| Normal fuzzy (baseline) | 56.5% | 74.6% | 64.3% | None |
+| **PPRL high (t=0.80)** | **90.5%** | **89.1%** | **89.8%** | Per-field HMAC |
+| PPRL paranoid (t=0.80) | 98.9% | 76.0% | 86.0% | HMAC + balanced padding |
+| PPRL standard (t=0.80) | 22.2% | 93.2% | 35.8% | Basic CLK |
+
+PPRL outperforms normal fuzzy on structured person data (names, postcodes) by 25 points F1. Bloom filter bigram comparison captures character-level similarity better than Jaro-Winkler on short structured fields.
 
 ### Speed
 
