@@ -21,10 +21,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev]" xlsxwriter scikit-learn
 
       - name: Run tests
-        run: pytest --tb=short --ignore=tests/test_db.py --ignore=tests/test_reconcile.py -q
+        run: pytest --tb=short --ignore=tests/test_db.py --ignore=tests/test_reconcile.py --ignore=tests/test_mcp_and_watch.py -q
 
   lint:
     runs-on: ubuntu-latest

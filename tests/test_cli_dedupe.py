@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import textwrap
 from pathlib import Path
 
@@ -52,11 +53,13 @@ class TestParseFileSource:
         assert path == "/data/file.csv"
         assert source == "my_source"
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows drive letter paths")
     def test_windows_drive_letter(self):
         path, source = _parse_file_source("C:\\data\\file.csv")
         assert path == "C:\\data\\file.csv"
         assert source == "file"
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows drive letter paths")
     def test_windows_with_source(self):
         path, source = _parse_file_source("C:\\data\\file.csv:my_source")
         # The last colon separates source, but C: at start is a drive

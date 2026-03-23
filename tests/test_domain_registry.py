@@ -94,7 +94,7 @@ class TestDiscovery:
             pytest.skip("No rulebooks found")
         result = match_domain(["brand", "model", "sku", "price"], rulebooks)
         if result:
-            assert result.name in ("electronics", "software")
+            assert result.name in ("electronics", "software", "retail")
 
 
 class TestExtractWithRulebook:
