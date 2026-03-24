@@ -36,10 +36,7 @@
 
 ## Architecture
 - Pipeline: ingest → column_map → auto_fix → validate → standardize → matchkeys → block → score → cluster → golden → output
-- `goldenmatch-extensions` repo (`D:\show_case\goldenmatch-extensions`) -- Rust workspace + standalone pgrx crate for Postgres/DuckDB SQL extensions
-- `goldenmatch-extensions/bridge/` -- shared Rust crate, embeds Python via pyo3, calls goldenmatch Python API
-- `goldenmatch-extensions/postgres/` -- pgrx Postgres extension (standalone crate, excluded from workspace due to pgrx 0.12.9 bug)
-- `goldenmatch-extensions/duckdb/` -- Python UDF package (`pip install goldenmatch-duckdb`), registers 7 DuckDB functions
+- SQL extensions: see `D:\show_case\goldenmatch-extensions\CLAUDE.md` for Postgres/DuckDB architecture
 - `_api.py` has DataFrame entry points: `dedupe_df()`, `match_df()`, `score_strings()`, `score_pair_df()`, `explain_pair_df()` -- used by SQL extensions
 - `pipeline.py` refactored: `_run_dedupe_pipeline()` and `_run_match_pipeline()` extracted as shared internal functions, called by both file-based and DataFrame-based entry points
 - `goldenmatch/core/` — pipeline modules (no Textual dependency)
@@ -135,7 +132,7 @@
 - Domain packs: 7 built-in YAML rulebooks in `goldenmatch/domains/` — electronics, software, healthcare, financial, real_estate, people, retail. Auto-discovered by `discover_rulebooks()`
 - GitHub infrastructure: `.github/workflows/try-it.yml` (workflow_dispatch demo), `.devcontainer/` (Codespaces)
 - dbt integration: `dbt-goldenmatch/` separate package with `run_goldenmatch_dedupe()` for DuckDB tables
-- Python API: `_api.py` provides `dedupe()`, `match()`, `pprl_link()`, `evaluate()` convenience functions. `__init__.py` re-exports 96 symbols. `DedupeResult`/`MatchResult` have `_repr_html_()` for Jupyter.
+- Python API: `_api.py` provides `dedupe()`, `match()`, `dedupe_df()`, `match_df()`, `pprl_link()`, `evaluate()`, `score_strings()`, `score_pair_df()`, `explain_pair_df()` convenience functions. `__init__.py` re-exports ~101 symbols. `DedupeResult`/`MatchResult` have `_repr_html_()` for Jupyter.
 - REST client: `client.py` — `Client(base_url)` with `.match()`, `.list_clusters()`, `.explain()`, `.reviews()`. Uses stdlib `urllib` only.
 - CI/CD quality gates: `goldenmatch evaluate --min-f1 0.90 --min-precision 0.80` exits code 1 if thresholds not met
 - Pipeline backend selection: `_get_block_scorer(config)` in pipeline.py returns `score_blocks_parallel` or `score_blocks_ray` based on `config.backend`
