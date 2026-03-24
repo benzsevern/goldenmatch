@@ -194,6 +194,15 @@ def _run_dedupe_pipeline(
     This function contains all pipeline steps from auto-fix/validation through
     output. Both run_dedupe() and run_dedupe_df() delegate to this function.
     """
+    # ── Step 1.4: GOLDENCHECK QUALITY SCAN (if available) ──
+    if config.quality is None or config.quality.mode != "disabled":
+        from goldenmatch.core.quality import run_quality_check
+        combined_df_tmp = combined_lf.collect()
+        combined_df_tmp, gc_fixes = run_quality_check(combined_df_tmp, config.quality)
+        if gc_fixes:
+            logger.info("GoldenCheck: %d fixes applied", len(gc_fixes))
+        combined_lf = combined_df_tmp.lazy()
+
     # ── Step 1.5a: AUTO-FIX + VALIDATION ──
     if config.validation and config.validation.auto_fix:
         combined_df_tmp = combined_lf.collect()

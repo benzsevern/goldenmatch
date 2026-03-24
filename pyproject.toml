@@ -70,8 +70,11 @@ pprl = [
 ray = [
     "ray>=2.0",
 ]
+quality = [
+    "goldencheck>=0.5.0",
+]
 all = [
-    "goldenmatch[embeddings,llm,postgres,mcp]",
+    "goldenmatch[embeddings,llm,postgres,mcp,quality]",
 ]
 
 [project.scripts]

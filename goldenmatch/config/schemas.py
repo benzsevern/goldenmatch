@@ -261,6 +261,14 @@ class ValidationConfig(BaseModel):
     auto_fix: bool = True  # whether to run auto-fix before validation
 
 
+class QualityConfig(BaseModel):
+    """GoldenCheck integration config for enhanced data quality."""
+    enabled: bool = True       # auto-detected: True if goldencheck installed
+    mode: str = "announced"    # "silent" | "announced" | "disabled"
+    fix_mode: str = "safe"     # "safe" | "moderate" | "none"
+    domain: str | None = None  # "healthcare" | "finance" | "ecommerce"
+
+
 class StandardizationConfig(BaseModel):
     rules: dict[str, list[str]] = Field(default_factory=dict)
 
@@ -366,6 +374,7 @@ class GoldenMatchConfig(BaseModel):
     golden_rules: GoldenRulesConfig | None = None
     standardization: StandardizationConfig | None = None
     validation: ValidationConfig | None = None
+    quality: QualityConfig | None = None
     llm_boost: bool = False
     llm_scorer: LLMScorerConfig | None = None
     domain: DomainConfig | None = None
