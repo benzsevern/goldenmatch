@@ -37,6 +37,7 @@ goldenmatch demo
 - **Lineage tracking** — every merge decision saved to a JSON sidecar with per-field score breakdown
 - **Daemon mode** — `goldenmatch watch --daemon` runs as a service with health endpoint and PID file
 - **Anomaly detection** — flag fake emails, placeholder data, suspicious records
+- **GoldenCheck integration** — `pip install goldenmatch[quality]` adds enhanced data quality scanning before matching (encoding, Unicode, format validation, domain-aware types)
 - **Merge preview + undo** — see what will change before writing, rollback any run or unmerge individual records
 - **Active learning boost** — label 10 borderline pairs in the TUI, instantly retrain a classifier for 99% accuracy
 - **Cluster confidence scoring** — weakly-connected clusters flagged with bottleneck pair identification
@@ -84,6 +85,7 @@ pip install goldenmatch[bigquery]         # + BigQuery connector
 pip install goldenmatch[databricks]       # + Databricks connector
 pip install goldenmatch[salesforce]       # + Salesforce connector
 pip install goldenmatch[duckdb]           # + DuckDB backend
+pip install goldenmatch[quality]          # + GoldenCheck data quality scanning
 
 # Run the setup wizard to configure GPU, API keys, and database:
 goldenmatch setup
