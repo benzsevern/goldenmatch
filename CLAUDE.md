@@ -1,5 +1,10 @@
 # GoldenMatch
 
+## Related Projects
+- **SQL Extensions repo:** `D:\show_case\goldenmatch-extensions` -- Postgres extension + DuckDB UDFs. Has its own CLAUDE.md.
+- **PyPI:** `goldenmatch` (Python toolkit), `goldenmatch-duckdb` (DuckDB UDFs)
+- **GitHub:** `benzsevern/goldenmatch`, `benzsevern/goldenmatch-extensions`
+
 ## Environment
 - Windows 11, bash shell (Git Bash) -- use Unix paths in scripts
 - GCP project: `gen-lang-client-0692108803` (Vertex AI embeddings)
