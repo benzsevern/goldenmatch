@@ -16,6 +16,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - `gm.explain_pair_df()` -- explain a pair match from record dicts
 - Internal: `run_dedupe_df()` and `run_match_df()` pipeline entry points
 - These functions are the prerequisite for native SQL extensions (Postgres/DuckDB)
+- New companion repo: [goldenmatch-extensions](https://github.com/benzsevern/goldenmatch-extensions) -- PostgreSQL extension (`goldenmatch_pg`) and DuckDB extension (`goldenmatch-duckdb`) for in-database entity resolution via SQL
 
 ## [1.0.0] - 2026-03-23
 

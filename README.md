@@ -446,6 +446,31 @@ goldenmatch sync \
 | `gm_embeddings` | Cached embeddings for ANN |
 | `gm_match_log` | Audit trail of all match decisions |
 
+## SQL Extensions
+
+Use GoldenMatch directly from PostgreSQL or DuckDB:
+
+```sql
+-- PostgreSQL
+CREATE EXTENSION goldenmatch_pg;
+SELECT goldenmatch.goldenmatch_dedupe_table('customers', '{"exact": ["email"]}');
+SELECT goldenmatch.goldenmatch_score('John Smith', 'Jon Smyth', 'jaro_winkler');
+```
+
+```bash
+# DuckDB
+pip install goldenmatch-duckdb
+```
+
+```python
+import duckdb, goldenmatch_duckdb
+con = duckdb.connect()
+goldenmatch_duckdb.register(con)
+con.sql("SELECT goldenmatch_score('John Smith', 'Jon Smyth', 'jaro_winkler')")
+```
+
+See [goldenmatch-extensions](https://github.com/benzsevern/goldenmatch-extensions) for installation and full documentation.
+
 ## LLM Boost (Optional)
 
 For harder datasets where zero-shot scoring isn't enough:
