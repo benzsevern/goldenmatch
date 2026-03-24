@@ -9,10 +9,14 @@
 - MUST `gh auth switch --user benzsevern` before push, switch back to `benzsevern-mjh` after
 - Polars `scan_csv` uses `encoding="utf8"` not `"utf-8"`
 - Polars `read_excel` needs explicit `engine="openpyxl"`
+- Rust 1.94.0 installed at `C:\Users\bsevern\.cargo\bin` -- must set `RUSTUP_HOME="C:/Users/bsevern/.rustup"` and `CARGO_HOME="C:/Users/bsevern/.cargo"` in every bash command, plus add to PATH
+- No admin privileges -- cannot install system packages (LLVM, WSL2, Developer Mode). Workarounds: `RUSTUP_WINDOWS_PATH_TYPE=hardlink` for Rust, user-dir installs for everything else
+- pgrx (Postgres extension framework) cannot build locally -- needs libclang/LLVM. Use CI (Linux) for pgrx builds/tests
+- PostgreSQL 16 portable at `C:\Users\bsevern\tools\pg16portable\pgsql`
 
 ## Testing
 - `pytest --tb=short` from project root — all tests must pass after every change
-- 935 tests (+ 6 skipped for optional deps), run in ~48s
+- 944 tests (+ 6 skipped for optional deps), run in ~40s
 - Fixtures in `tests/conftest.py`: `sample_csv`, `sample_csv_b`, `sample_parquet`
 - TUI tests use `pytest-asyncio` with `app.run_test()` pilot
 - Benchmark scripts in `tests/bench_1m.py`, `tests/analyze_results.py` (not part of test suite)
@@ -27,6 +31,12 @@
 
 ## Architecture
 - Pipeline: ingest → column_map → auto_fix → validate → standardize → matchkeys → block → score → cluster → golden → output
+- `goldenmatch-extensions` repo (`D:\show_case\goldenmatch-extensions`) -- Rust workspace + standalone pgrx crate for Postgres/DuckDB SQL extensions
+- `goldenmatch-extensions/bridge/` -- shared Rust crate, embeds Python via pyo3, calls goldenmatch Python API
+- `goldenmatch-extensions/postgres/` -- pgrx Postgres extension (standalone crate, excluded from workspace due to pgrx 0.12.9 bug)
+- `goldenmatch-extensions/duckdb/` -- Python UDF package (`pip install goldenmatch-duckdb`), registers 7 DuckDB functions
+- `_api.py` has DataFrame entry points: `dedupe_df()`, `match_df()`, `score_strings()`, `score_pair_df()`, `explain_pair_df()` -- used by SQL extensions
+- `pipeline.py` refactored: `_run_dedupe_pipeline()` and `_run_match_pipeline()` extracted as shared internal functions, called by both file-based and DataFrame-based entry points
 - `goldenmatch/core/` — pipeline modules (no Textual dependency)
 - `goldenmatch/tui/` — Textual TUI + MatchEngine (engine.py has no Textual dependency)
 - `goldenmatch/cli/` — Typer CLI commands (21 commands, including `unmerge`, `evaluate`, `incremental`, `pprl`, `label`)
@@ -166,3 +176,12 @@
 - Unicode box drawing chars (pipe/dash) crash on Windows cp1252 terminal -- use ASCII in benchmark scripts
 - GitHub release triggers publish workflow -- `twine upload --skip-existing` avoids double-publish errors
 - `discover_rulebooks()` returns all 7 packs -- domain match tests must accept retail alongside electronics (overlapping signals like "brand", "sku")
+- pgrx 0.12.9 does NOT auto-generate SQL files -- must provide handwritten `sql/goldenmatch_pg--0.1.0.sql` manually
+- pgrx in workspace mode is broken -- postgres crate must be excluded from workspace (`exclude = ["postgres"]` in root Cargo.toml)
+- pgrx extension functions live in `goldenmatch` schema (per .control file) -- must use `goldenmatch.function_name()` or explicit `::TEXT` casts in psql
+- DuckDB UDFs cannot query the same connection they're called on (deadlock) -- use `con.cursor()` for table reads inside UDFs
+- DuckDB `.pl()` (Polars conversion) requires `pyarrow` as a dependency
+- Rust `cargo` defaults `CARGO_HOME` to the drive root on Windows when CWD is D: -- always set `CARGO_HOME="C:/Users/bsevern/.cargo"` explicitly
+- `winget install Rustlang.Rustup` fails silently on Windows without Developer Mode -- use `rustup-init.exe -y` with `RUSTUP_WINDOWS_PATH_TYPE=hardlink`
+- goldenmatch-extensions CI: 4 jobs (lint, bridge tests, postgres extension, duckdb tests). Release workflow builds binaries + Docker image on GitHub Release tag
+- goldenmatch-extensions uses `benzsevern` GitHub account (same auth switch requirement as main repo)
