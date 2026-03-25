@@ -86,3 +86,29 @@ line-length = 100
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["goldenmatch"]
+omit = [
+    # Requires Postgres -- tested via test_db.py/test_reconcile.py (ignored in CI)
+    "goldenmatch/db/*",
+    # Requires MCP runtime
+    "goldenmatch/mcp/*",
+    # Requires GCP credentials
+    "goldenmatch/core/vertex_embedder.py",
+    # Requires Textual TUI runtime -- tested via test_tui.py
+    "goldenmatch/tui/screens/*",
+    "goldenmatch/tui/widgets/*",
+    # REST API server -- tested separately
+    "goldenmatch/api/*",
+    # Cloud connectors -- require external credentials
+    "goldenmatch/connectors/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+]
+show_missing = true

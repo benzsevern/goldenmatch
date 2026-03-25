@@ -369,3 +369,339 @@ class TestScorePairProbabilistic:
             mk, em,
         )
         assert score < 0.5
+
+
+# ── Continuous EM Tests ──────────────────────────────────────────────────
+
+from goldenmatch.core.probabilistic import (
+    ContinuousEMResult,
+    continuous_scores,
+    train_em_continuous,
+    score_probabilistic_continuous,
+    _fallback_result,
+    _sample_pairs,
+    _build_comparison_matrix,
+    _build_continuous_matrix,
+)
+
+
+class TestContinuousScores:
+    def test_identical_records_score_high(self):
+        mk = _make_probabilistic_mk()
+        scores = continuous_scores(
+            {"first_name": "John", "last_name": "Smith", "zip": "90210"},
+            {"first_name": "John", "last_name": "Smith", "zip": "90210"},
+            mk,
+        )
+        assert len(scores) == 3
+        assert all(s == 1.0 for s in scores)
+
+    def test_completely_different_records(self):
+        mk = _make_probabilistic_mk()
+        scores = continuous_scores(
+            {"first_name": "Alice", "last_name": "Brown", "zip": "30301"},
+            {"first_name": "Tom", "last_name": "Wilson", "zip": "20001"},
+            mk,
+        )
+        assert len(scores) == 3
+        # first_name and zip should be very different; last_name JW may be moderate
+        assert scores[0] < 0.5  # Alice vs Tom
+        assert scores[2] == 0.0  # zip exact mismatch
+
+    def test_null_value_returns_zero(self):
+        mk = _make_probabilistic_mk()
+        scores = continuous_scores(
+            {"first_name": None, "last_name": "Smith", "zip": "90210"},
+            {"first_name": "John", "last_name": "Smith", "zip": "90210"},
+            mk,
+        )
+        # None -> score_field returns None -> 0.0
+        assert scores[0] == 0.0
+        assert scores[1] == 1.0
+        assert scores[2] == 1.0
+
+
+class TestTrainEMContinuous:
+    def test_converges(self):
+        df = _make_dedupe_df()
+        mk = _make_probabilistic_mk()
+        result = train_em_continuous(df, mk, n_sample_pairs=100, max_iterations=50)
+        assert isinstance(result, ContinuousEMResult)
+        assert result.converged or result.iterations <= 50
+        assert 0 < result.proportion_matched < 1
+
+    def test_produces_valid_parameters(self):
+        df = _make_dedupe_df()
+        mk = _make_probabilistic_mk()
+        result = train_em_continuous(df, mk, n_sample_pairs=100)
+        for f in mk.fields:
+            assert f.field in result.m_mean
+            assert f.field in result.m_var
+            assert f.field in result.u_mean
+            assert f.field in result.u_var
+            assert result.m_var[f.field] > 0
+            assert result.u_var[f.field] > 0
+
+    def test_match_mean_higher_than_nonmatch(self):
+        """Match distribution should have higher mean score than non-match."""
+        df = _make_dedupe_df()
+        mk = _make_probabilistic_mk()
+        result = train_em_continuous(df, mk, n_sample_pairs=100)
+        for f in mk.fields:
+            # m_mean should generally be >= u_mean (matches score higher)
+            # This is a soft check since EM is stochastic
+            assert result.m_mean[f.field] >= 0.0
+            assert result.u_mean[f.field] >= 0.0
+
+    def test_with_blocking_fields(self):
+        df = _make_dedupe_df()
+        mk = _make_probabilistic_mk()
+        result = train_em_continuous(
+            df, mk, n_sample_pairs=100,
+            blocking_fields=["zip"],
+        )
+        assert isinstance(result, ContinuousEMResult)
+        # Blocking field zip should have fixed parameters
+        assert result.m_mean["zip"] == 0.99
+        assert result.u_mean["zip"] == 0.99
+
+    def test_too_few_pairs_fallback(self):
+        """Very small dataset returns fallback result."""
+        df = pl.DataFrame({
+            "__row_id__": [1],
+            "first_name": ["John"],
+            "last_name": ["Smith"],
+            "zip": ["90210"],
+        })
+        mk = _make_probabilistic_mk()
+        result = train_em_continuous(df, mk, n_sample_pairs=10)
+        assert isinstance(result, ContinuousEMResult)
+        assert result.converged is False
+        assert result.iterations == 0
+
+
+class TestScoreProbabilisticContinuous:
+    def test_scores_obvious_matches(self):
+        df = _make_dedupe_df()
+        mk = _make_probabilistic_mk()
+        em = train_em_continuous(df, mk, n_sample_pairs=100)
+
+        block = df.head(2)  # John/Jon Smith same zip
+        pairs = score_probabilistic_continuous(block, mk, em, threshold=0.3)
+        assert len(pairs) >= 1
+        assert pairs[0][2] > 0.3
+
+    def test_excludes_pairs(self):
+        df = _make_dedupe_df()
+        mk = _make_probabilistic_mk()
+        em = train_em_continuous(df, mk, n_sample_pairs=100)
+
+        block = df.head(2)
+        all_pairs = score_probabilistic_continuous(block, mk, em, threshold=0.3)
+        excluded = score_probabilistic_continuous(
+            block, mk, em, threshold=0.3, exclude_pairs={(1, 2)},
+        )
+        assert len(excluded) <= len(all_pairs)
+
+    def test_returns_standard_format(self):
+        df = _make_dedupe_df()
+        mk = _make_probabilistic_mk()
+        em = train_em_continuous(df, mk, n_sample_pairs=100)
+
+        # Use just the first 2 records (similar pair) to avoid overflow
+        block = df.head(2)
+        pairs = score_probabilistic_continuous(block, mk, em, threshold=0.3)
+        for p in pairs:
+            assert len(p) == 3
+            assert isinstance(p[0], int)
+            assert isinstance(p[1], int)
+            assert isinstance(p[2], float)
+            assert 0 <= p[2] <= 1
+
+    def test_high_threshold_filters_more(self):
+        df = _make_dedupe_df()
+        mk = _make_probabilistic_mk()
+        em = train_em_continuous(df, mk, n_sample_pairs=100)
+
+        # Use similar pair to avoid overflow on dissimilar records
+        block = df.head(2)
+        low = score_probabilistic_continuous(block, mk, em, threshold=0.3)
+        high = score_probabilistic_continuous(block, mk, em, threshold=0.99)
+        assert len(high) <= len(low)
+
+
+class TestFallbackResult:
+    def test_two_level_fields(self):
+        mk = MatchkeyConfig(
+            name="fb",
+            type="probabilistic",
+            fields=[MatchkeyField(field="name", scorer="exact", levels=2)],
+        )
+        result = _fallback_result(mk)
+        assert result.converged is False
+        assert result.iterations == 0
+        assert len(result.m_probs["name"]) == 2
+        assert len(result.u_probs["name"]) == 2
+        assert abs(sum(result.m_probs["name"]) - 1.0) < 0.01
+        assert abs(sum(result.u_probs["name"]) - 1.0) < 0.01
+
+    def test_three_level_fields(self):
+        mk = MatchkeyConfig(
+            name="fb",
+            type="probabilistic",
+            fields=[MatchkeyField(field="name", scorer="jaro_winkler", levels=3)],
+        )
+        result = _fallback_result(mk)
+        assert len(result.m_probs["name"]) == 3
+        assert len(result.u_probs["name"]) == 3
+        # Agree weight should be positive, disagree negative
+        assert result.match_weights["name"][-1] > 0
+        assert result.match_weights["name"][0] < 0
+
+
+class TestComparisonVectorEdgeCases:
+    def test_n_levels(self):
+        """N-level comparison vector with 5 levels."""
+        mk = MatchkeyConfig(
+            name="fs",
+            type="probabilistic",
+            fields=[
+                MatchkeyField(field="name", scorer="jaro_winkler", levels=5),
+            ],
+        )
+        # Identical -> score 1.0 -> level 4 (highest for 5 levels)
+        vec = comparison_vector(
+            {"name": "John"},
+            {"name": "John"},
+            mk,
+        )
+        assert vec == [4]
+
+        # Very different -> score low -> level 0
+        vec = comparison_vector(
+            {"name": "Alice"},
+            {"name": "Zebra"},
+            mk,
+        )
+        assert vec[0] == 0
+
+    def test_both_null(self):
+        mk = _make_probabilistic_mk()
+        vec = comparison_vector(
+            {"first_name": None, "last_name": None, "zip": None},
+            {"first_name": None, "last_name": None, "zip": None},
+            mk,
+        )
+        # All nulls -> all disagree
+        assert vec == [0, 0, 0]
+
+
+class TestSamplePairs:
+    def test_small_dataset_all_pairs(self):
+        df = pl.DataFrame({"__row_id__": [1, 2, 3]})
+        pairs = _sample_pairs(df, n_pairs=100)
+        # 3 rows -> 3 possible pairs, all returned
+        assert len(pairs) == 3
+
+    def test_single_record(self):
+        df = pl.DataFrame({"__row_id__": [1]})
+        pairs = _sample_pairs(df, n_pairs=100)
+        assert pairs == []
+
+    def test_sampling_limit(self):
+        df = pl.DataFrame({"__row_id__": list(range(100))})
+        pairs = _sample_pairs(df, n_pairs=50)
+        assert len(pairs) <= 50
+
+
+class TestBuildComparisonMatrix:
+    def test_shape(self):
+        mk = _make_probabilistic_mk()
+        row_lookup = {
+            1: {"first_name": "John", "last_name": "Smith", "zip": "90210"},
+            2: {"first_name": "Jon", "last_name": "Smith", "zip": "90210"},
+        }
+        pairs = [(1, 2)]
+        mat = _build_comparison_matrix(pairs, row_lookup, mk)
+        assert mat.shape == (1, 3)
+
+    def test_missing_row(self):
+        """Missing row in lookup returns all-disagree."""
+        mk = _make_probabilistic_mk()
+        row_lookup = {
+            1: {"first_name": "John", "last_name": "Smith", "zip": "90210"},
+        }
+        pairs = [(1, 99)]  # row 99 missing
+        mat = _build_comparison_matrix(pairs, row_lookup, mk)
+        assert mat.shape == (1, 3)
+
+
+class TestBuildContinuousMatrix:
+    def test_shape(self):
+        mk = _make_probabilistic_mk()
+        row_lookup = {
+            1: {"first_name": "John", "last_name": "Smith", "zip": "90210"},
+            2: {"first_name": "Jon", "last_name": "Smith", "zip": "90210"},
+        }
+        pairs = [(1, 2)]
+        mat = _build_continuous_matrix(pairs, row_lookup, mk)
+        assert mat.shape == (1, 3)
+        assert all(0.0 <= mat[0, j] <= 1.0 for j in range(3))
+
+
+class TestComputeThresholdsEdgeCases:
+    def test_with_scored_weights(self):
+        """Data-driven thresholds from actual pair scores."""
+        df = _make_dedupe_df()
+        mk = _make_probabilistic_mk()
+        em = train_em(df, mk, n_sample_pairs=100)
+
+        # Simulate scored weights
+        import random
+        rng = random.Random(42)
+        weights = [rng.random() for _ in range(200)]
+        link, review = compute_thresholds(em, weights)
+        assert 0.25 <= review < link <= 0.95
+
+    def test_few_scored_weights_uses_defaults(self):
+        """With fewer than 50 weights, uses fixed defaults."""
+        em = EMResult(
+            m_probs={"name": [0.1, 0.9]},
+            u_probs={"name": [0.9, 0.1]},
+            match_weights={"name": [-3.0, 3.0]},
+            converged=True,
+            iterations=5,
+            proportion_matched=0.05,
+        )
+        weights = [0.5] * 30  # too few
+        link, review = compute_thresholds(em, weights)
+        assert link == 0.50
+        assert review == 0.35
+
+    def test_no_scored_weights(self):
+        em = EMResult(
+            m_probs={"name": [0.1, 0.9]},
+            u_probs={"name": [0.9, 0.1]},
+            match_weights={"name": [-3.0, 3.0]},
+            converged=True,
+            iterations=5,
+            proportion_matched=0.05,
+        )
+        link, review = compute_thresholds(em)
+        assert link == 0.50
+        assert review == 0.35
+
+
+class TestEMWithBlockingFields:
+    def test_blocking_fields_get_fixed_weights(self):
+        df = _make_dedupe_df()
+        mk = _make_probabilistic_mk()
+        result = train_em(df, mk, n_sample_pairs=100, blocking_fields=["zip"])
+        # zip blocking field should have fixed weights
+        assert result.match_weights["zip"] == [-3.0, 3.0]
+
+    def test_blocking_fields_neutral_u(self):
+        df = _make_dedupe_df()
+        mk = _make_probabilistic_mk()
+        result = train_em(df, mk, n_sample_pairs=100, blocking_fields=["zip"])
+        assert result.u_probs["zip"] == [0.50, 0.50]

@@ -95,3 +95,184 @@ class TestAutoConfigurePPRL:
         result = auto_configure_pprl(df)
         # Should still work, just with lower usefulness scores
         assert len(result.recommended_fields) >= 1
+
+    def test_no_string_columns_raises(self):
+        """DataFrame with no string columns raises ValueError."""
+        df = pl.DataFrame({"age": [25, 30, 35], "score": [1.0, 2.0, 3.0]})
+        with pytest.raises(ValueError, match="No string columns"):
+            auto_configure_pprl(df)
+
+    def test_all_low_usefulness_falls_back(self):
+        """When all fields have very low usefulness, falls back to top 3."""
+        df = pl.DataFrame({
+            "rec_id": [f"id_{i}" for i in range(50)],
+            "code_id": [f"code_{i}" for i in range(50)],
+        })
+        result = auto_configure_pprl(df)
+        # Should still produce fields even with low-usefulness columns
+        assert len(result.recommended_fields) >= 1
+
+    def test_long_fields_get_larger_bloom_filter(self):
+        """Fields with long average length get larger BF parameters."""
+        df = pl.DataFrame({
+            "address": [f"{'x' * 30} Street {i}" for i in range(20)],
+            "description": [f"Long description text {'y' * 30} number {i}" for i in range(20)],
+        })
+        result = auto_configure_pprl(df, security_level="standard")
+        # Long fields should push toward larger BF
+        assert result.recommended_config.bloom_filter_size >= 512
+
+
+class TestProfileForPPRLEdgeCases:
+    def test_all_null_column(self):
+        """Column with all nulls is skipped."""
+        df = pl.DataFrame({
+            "name": ["John", "Jane", "Bob"],
+            "empty": [None, None, None],
+        }).cast({"empty": pl.Utf8})
+        profiles = profile_for_pprl(df)
+        cols = [p.column for p in profiles]
+        assert "empty" not in cols
+        assert "name" in cols
+
+    def test_near_unique_column_penalized(self):
+        """Near-unique columns (like IDs) get low usefulness."""
+        n = 100
+        df = pl.DataFrame({
+            "person_id": [f"id_{i}" for i in range(n)],
+            "first_name": [f"Name_{i % 20}" for i in range(n)],
+        })
+        profiles = profile_for_pprl(df)
+        scores = {p.column: p.usefulness_score for p in profiles}
+        # person_id is near-unique AND has _id penalty
+        assert scores["person_id"] < scores["first_name"]
+
+    def test_high_null_rate_penalized(self):
+        """Fields with >50% nulls are penalized."""
+        df = pl.DataFrame({
+            "name": ["John", "Jane", "Bob", None, None, None, None, None, None, None],
+            "zip": ["10001", "20002", "30003", "40004", "50005",
+                     "60006", "70007", "80008", "90009", "00000"],
+        })
+        profiles = profile_for_pprl(df)
+        scores = {p.column: p.usefulness_score for p in profiles}
+        assert scores["name"] < scores["zip"]
+
+    def test_id_suffix_penalty(self):
+        """Columns with _id, reg_num, ncid, rec_id get penalized."""
+        df = pl.DataFrame({
+            "customer_id": ["a", "b", "c", "d", "e"],
+            "name": ["John", "Jane", "Bob", "Alice", "Charlie"],
+        })
+        profiles = profile_for_pprl(df)
+        scores = {p.column: p.usefulness_score for p in profiles}
+        assert scores["customer_id"] < scores["name"]
+
+    def test_skips_non_string_columns(self):
+        """Non-Utf8 columns are skipped."""
+        df = pl.DataFrame({
+            "name": ["John", "Jane"],
+            "age": [25, 30],
+        })
+        profiles = profile_for_pprl(df)
+        cols = [p.column for p in profiles]
+        assert "name" in cols
+        assert "age" not in cols
+
+    def test_email_field_detection(self, person_df):
+        profiles = profile_for_pprl(person_df)
+        types = {p.column: p.field_type for p in profiles}
+        assert types["email"] == "email"
+
+    def test_address_field_detection(self, person_df):
+        profiles = profile_for_pprl(person_df)
+        types = {p.column: p.field_type for p in profiles}
+        assert types["res_street_address"] == "address"
+
+
+class TestEstimateThreshold:
+    def test_basic_threshold_in_range(self, person_df):
+        from goldenmatch.pprl.autoconfig import _estimate_threshold
+        t = _estimate_threshold(person_df, ["first_name", "last_name"], 2, 30, 1024)
+        assert 0.85 <= t <= 0.95
+
+    def test_threshold_with_small_sample(self):
+        """Works with very small datasets."""
+        from goldenmatch.pprl.autoconfig import _estimate_threshold
+        df = pl.DataFrame({
+            "name": ["John", "Jane"],
+        })
+        t = _estimate_threshold(df, ["name"], 2, 20, 512, sample_size=2)
+        assert 0.85 <= t <= 0.95
+
+
+class TestAutoConfigurePPRLLlm:
+    def test_no_api_key_falls_back_to_baseline(self, person_df):
+        """Without API key, returns baseline result."""
+        from goldenmatch.pprl.autoconfig import auto_configure_pprl_llm
+        import os
+        # Ensure no key is in env
+        old_key = os.environ.pop("OPENAI_API_KEY", None)
+        try:
+            result = auto_configure_pprl_llm(person_df, api_key=None)
+            assert isinstance(result, PPRLAutoConfigResult)
+            assert len(result.recommended_fields) >= 1
+        finally:
+            if old_key:
+                os.environ["OPENAI_API_KEY"] = old_key
+
+    def test_llm_call_mocked(self, person_df):
+        """Mock the LLM call and verify JSON parsing."""
+        from goldenmatch.pprl.autoconfig import auto_configure_pprl_llm
+        from unittest.mock import patch
+
+        mock_response = (
+            '{"fields": ["first_name", "last_name", "zip_code"], '
+            '"threshold": 0.88, "reasoning": "Name fields are best for linkage"}',
+            100, 50,
+        )
+        with patch("goldenmatch.core.llm_scorer._call_openai", return_value=mock_response):
+            result = auto_configure_pprl_llm(person_df, api_key="fake-key")
+        assert result.recommended_fields == ["first_name", "last_name", "zip_code"]
+        assert result.recommended_config.threshold == 0.88
+        assert "LLM" in result.explanation
+
+    def test_llm_call_returns_json_in_markdown(self, person_df):
+        """LLM response wrapped in markdown code block."""
+        from goldenmatch.pprl.autoconfig import auto_configure_pprl_llm
+        from unittest.mock import patch
+
+        mock_response = (
+            '```json\n{"fields": ["first_name", "last_name"], '
+            '"threshold": 0.90, "reasoning": "test"}\n```',
+            80, 40,
+        )
+        with patch("goldenmatch.core.llm_scorer._call_openai", return_value=mock_response):
+            result = auto_configure_pprl_llm(person_df, api_key="fake-key")
+        assert result.recommended_fields == ["first_name", "last_name"]
+
+    def test_llm_call_fails_gracefully(self, person_df):
+        """LLM failure falls back to baseline."""
+        from goldenmatch.pprl.autoconfig import auto_configure_pprl_llm
+        from unittest.mock import patch
+
+        with patch("goldenmatch.core.llm_scorer._call_openai", side_effect=Exception("API error")):
+            result = auto_configure_pprl_llm(person_df, api_key="fake-key")
+        assert isinstance(result, PPRLAutoConfigResult)
+        assert len(result.recommended_fields) >= 1
+
+    def test_llm_returns_invalid_fields(self, person_df):
+        """LLM returns field names that don't exist in the DataFrame."""
+        from goldenmatch.pprl.autoconfig import auto_configure_pprl_llm
+        from unittest.mock import patch
+
+        mock_response = (
+            '{"fields": ["nonexistent_field_1", "nonexistent_field_2"], '
+            '"threshold": 0.88, "reasoning": "bad fields"}',
+            100, 50,
+        )
+        with patch("goldenmatch.core.llm_scorer._call_openai", return_value=mock_response):
+            result = auto_configure_pprl_llm(person_df, api_key="fake-key")
+        # Invalid fields filtered out -> falls back to baseline
+        assert isinstance(result, PPRLAutoConfigResult)
+        assert len(result.recommended_fields) >= 1
