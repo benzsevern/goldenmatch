@@ -6,6 +6,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-03-25
+
+### Added
+- **Autonomous ER Agent** -- GoldenMatch as a discoverable AI agent via A2A and MCP protocols
+- `AgentSession` class -- profiles data, selects strategy, runs pipeline, explains reasoning
+- `ReviewQueue` with confidence gating (auto-merge >0.95, review 0.75-0.95, reject <0.75)
+- Three storage backends for review queue: memory (default), SQLite, Postgres
+- `gate_pairs()` -- split scored pairs by confidence thresholds
+- A2A server (`goldenmatch agent-serve`) with agent card, task lifecycle, SSE streaming
+- 8 A2A skills: analyze_data, configure, deduplicate, match, explain, review, compare_strategies, pprl
+- 10 MCP agent-level tools (additive to existing tools)
+- `goldenmatch agent-serve --port 8200` CLI command
+- Demo script: `python examples/agent_demo.py`
+- Branch & Merge SOP added to CLAUDE.md
+
 ## [1.1.0] - 2026-03-23
 
 ### Added
