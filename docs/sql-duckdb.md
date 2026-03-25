@@ -186,10 +186,12 @@ The `dbt-goldenmatch` package provides macros for DuckDB-based entity resolution
 pip install dbt-goldenmatch
 ```
 
+{% raw %}
 ```sql
 -- In a dbt model
 {{ run_goldenmatch_dedupe('customers', '{"exact": ["email"]}') }}
 ```
+{% endraw %}
 
 ---
 
