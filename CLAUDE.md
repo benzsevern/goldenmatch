@@ -30,7 +30,9 @@
 
 ## Testing
 - `pytest --tb=short` from project root — all tests must pass after every change
-- 944 tests (+ 6 skipped for optional deps), run in ~40s
+- 1133 tests (+ 6 skipped for optional deps), run in ~45s
+- Coverage: 72% (with db/mcp/connectors excluded via pyproject.toml [tool.coverage.run] omit)
+- Key module coverage: scorer 87%, probabilistic 96%, pprl/autoconfig 95%, _api 85%, pipeline 82%
 - Fixtures in `tests/conftest.py`: `sample_csv`, `sample_csv_b`, `sample_parquet`
 - TUI tests use `pytest-asyncio` with `app.run_test()` pilot
 - Benchmark scripts in `tests/bench_1m.py`, `tests/analyze_results.py` (not part of test suite)
@@ -46,6 +48,10 @@
 ## Architecture
 - Pipeline: ingest → column_map → auto_fix → validate → standardize → matchkeys → block → score → cluster → golden → output
 - SQL extensions: see `D:\show_case\goldenmatch-extensions\CLAUDE.md` for Postgres/DuckDB architecture
+- `goldenmatch/core/agent.py` -- AgentSession, profile_for_agent, select_strategy, build_alternatives. Autonomous ER: profiles data -> detects domain -> selects strategy -> runs pipeline -> returns reasoning
+- `goldenmatch/core/review_queue.py` -- ReviewQueue (memory/SQLite/Postgres backends), ReviewItem, gate_pairs(). Confidence gating: >0.95 auto-merge, 0.75-0.95 review, <0.75 reject
+- `goldenmatch/a2a/` -- A2A protocol server (aiohttp). Agent card at `/.well-known/agent.json`, 8 skills, task lifecycle, SSE streaming. CLI: `goldenmatch agent-serve --port 8200`
+- `goldenmatch/mcp/agent_tools.py` -- 10 agent-level MCP tools (additive to existing). Each creates own AgentSession (no shared global state)
 - `_api.py` has DataFrame entry points: `dedupe_df()`, `match_df()`, `score_strings()`, `score_pair_df()`, `explain_pair_df()` -- used by SQL extensions
 - `pipeline.py` refactored: `_run_dedupe_pipeline()` and `_run_match_pipeline()` extracted as shared internal functions, called by both file-based and DataFrame-based entry points
 - `goldenmatch/core/` — pipeline modules (no Textual dependency)
@@ -148,6 +154,11 @@
 - PPRL vectorized similarity: use numpy matrix multiply (`mat_a @ mat_b.T`) for bloom filter dice, NOT per-pair Python loops. 13x speedup.
 - PPRL auto-config: penalize near-unique fields (IDs), long fields (>15 chars), high-null fields. Min threshold 0.85. max_fields=4 beats 6.
 - NCVR voter data: tab-delimited, 488MB zip at `tests/benchmarks/datasets/NCVR/`. Gitignored. `birth_year` only (no full DOB). `ssn` is Y/N flag not actual SSN.
+- AgentSession creates own state (data, config, result, review_queue) -- not shared with MCP global state
+- `select_strategy(profile)` returns StrategyDecision with auto_execute=False for PPRL (requires caller confirmation)
+- A2A agent card must include `inputModes`/`outputModes` on every skill and `provider` field at top level
+- A2A server runs on separate port (8200) from REST API (8000) -- aiohttp for async/SSE, existing REST stays synchronous
+- `aiohttp` is optional dep: `pip install goldenmatch[agent]`
 
 ## Gotchas
 - .docx files can't be read by Read tool — use `python-docx` or zipfile+XML
@@ -196,3 +207,13 @@
 - `winget install Rustlang.Rustup` fails silently on Windows without Developer Mode -- use `rustup-init.exe -y` with `RUSTUP_WINDOWS_PATH_TYPE=hardlink`
 - goldenmatch-extensions CI: 4 jobs (lint, bridge tests, postgres extension, duckdb tests). Release workflow builds binaries + Docker image on GitHub Release tag
 - goldenmatch-extensions uses `benzsevern` GitHub account (same auth switch requirement as main repo)
+- Trunk (pgt.dev) shut down July 2025 -- do not reference it for Postgres extension distribution
+- dbdev (database.dev) only supports SQL/PL/pgSQL extensions (TLE) -- compiled C extensions not eligible
+- Jekyll docs: `{{` in code blocks triggers Liquid template errors -- wrap with `{% raw %}` / `{% endraw %}`
+- `typing_extensions` on Ubuntu CI: system package at `/usr/lib/python3/dist-packages/` overrides pip install -- must `sudo rm -f` the system file first
+- pyo3 embeds Python linked at compile time -- CI must install goldenmatch into the same Python that Postgres uses
+- DuckDB UDF `con.sql()` without `.fetchone()` may not execute the UDF -- always fetch results
+- `json.dumps(clusters)` fails when cluster dict has tuple keys (pair_scores) -- use str() fallback
+- Coverage config in pyproject.toml: omit db/*, mcp/*, vertex_embedder, connectors/* (require external services)
+- GitHub Pages: docs workflow uses `actions/jekyll-build-pages` with source `./docs`, Just the Docs theme
+- GitHub Release triggers publish.yml workflow which auto-publishes to PyPI via trusted publishing
