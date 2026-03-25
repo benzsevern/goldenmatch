@@ -27,6 +27,7 @@ from goldenmatch.cli.evaluate import evaluate_cmd
 from goldenmatch.cli.incremental import incremental_cmd
 from goldenmatch.cli.pprl import pprl_app
 from goldenmatch.cli.label import label_cmd
+from goldenmatch.cli.agent_serve import agent_serve_cmd
 from goldenmatch.prefs.store import PresetStore
 
 LOGO = r"""[bold bright_yellow]
@@ -105,6 +106,7 @@ app.command("schedule", help="Run deduplication on a schedule.")(schedule_cmd)
 app.command("evaluate", help="Evaluate matching quality against ground truth pairs.")(evaluate_cmd)
 app.add_typer(pprl_app, name="pprl")
 app.command("label", help="Build ground truth by labeling record pairs interactively.")(label_cmd)
+app.command("agent-serve", help="Start the A2A agent server for AI-to-AI discovery.")(agent_serve_cmd)
 app.command("incremental", help="Match new records against an existing base dataset.")(incremental_cmd)
 
 

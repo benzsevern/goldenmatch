@@ -66,7 +66,7 @@ Scale: 7,823 records/sec on a laptop (fuzzy + exact + golden).
 
 ---
 
-## 6 Ways to Use It
+## 7 Ways to Use It
 
 | Interface | Install | Best For |
 |-----------|---------|----------|
@@ -76,6 +76,7 @@ Scale: 7,823 records/sec on a laptop (fuzzy + exact + golden).
 | [PostgreSQL](sql-postgres) | [Pre-built .deb/.rpm](https://github.com/benzsevern/goldenmatch-extensions/releases) | Production databases |
 | [DuckDB](sql-duckdb) | `pip install goldenmatch-duckdb` | Analytics |
 | [REST API / MCP](rest-api) | `goldenmatch serve` / `mcp-serve` | Microservices, AI assistants |
+| [ER Agent (A2A)](agent) | `goldenmatch agent-serve` | AI-to-AI discovery, autonomous ER |
 
 ---
 
@@ -101,6 +102,7 @@ Scale: 7,823 records/sec on a laptop (fuzzy + exact + golden).
 | [REST API](rest-api) | HTTP endpoints, review queue |
 | [MCP Server](mcp) | Claude Desktop integration |
 | [Evaluation](evaluation) | Benchmarks, CI/CD quality gates |
+| [ER Agent](agent) | A2A + MCP autonomous agent, confidence gating |
 | [Architecture](architecture) | Module map, code patterns |
 | [Benchmarks](benchmarks) | Performance and accuracy numbers |
 

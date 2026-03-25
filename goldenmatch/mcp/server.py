@@ -24,7 +24,11 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
+from goldenmatch.mcp.agent_tools import AGENT_TOOLS, handle_agent_tool
+
 logger = logging.getLogger(__name__)
+
+_AGENT_TOOL_NAMES = frozenset(t.name for t in AGENT_TOOLS)
 
 # Global state
 _engine = None
@@ -70,7 +74,7 @@ def create_server(file_paths: list[str], config_path: str | None = None) -> Serv
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
-        return [
+        return AGENT_TOOLS + [
             Tool(
                 name="get_stats",
                 description="Get dataset statistics: record count, cluster count, match rate, cluster sizes.",
@@ -406,6 +410,9 @@ def create_server(file_paths: list[str], config_path: str | None = None) -> Serv
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+        # Delegate agent-level tools to the agent handler
+        if name in _AGENT_TOOL_NAMES:
+            return handle_agent_tool(name, arguments)
         try:
             result = _handle_tool(name, arguments)
             return [TextContent(type="text", text=json.dumps(result, default=str, indent=2))]

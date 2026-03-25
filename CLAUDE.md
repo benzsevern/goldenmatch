@@ -5,6 +5,15 @@
 - **PyPI:** `goldenmatch` (Python toolkit), `goldenmatch-duckdb` (DuckDB UDFs)
 - **GitHub:** `benzsevern/goldenmatch`, `benzsevern/goldenmatch-extensions`
 
+## Branch & Merge SOP (all Golden Suite repos)
+- Feature work goes on `feature/<name>` branches, never directly to main
+- Merge via **squash merge PR** (watchers see PR activity, history stays clean)
+- PR title format: `feat: <description>` or `fix: <description>`
+- PR body: summary bullets + test plan
+- Merge when: tests pass, docs updated. Days not weeks.
+- After merge: delete remote branch
+- Commands: `gh pr create --title "..." --body "..."` then squash merge via GitHub UI or `gh pr merge --squash`
+
 ## Environment
 - Windows 11, bash shell (Git Bash) -- use Unix paths in scripts
 - GCP project: `gen-lang-client-0692108803` (Vertex AI embeddings)
