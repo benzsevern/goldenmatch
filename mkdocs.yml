@@ -1,0 +1,68 @@
+site_name: GoldenMatch
+site_url: https://benzsevern.github.io/goldenmatch
+site_description: Entity resolution toolkit -- deduplicate records, match across sources, maintain golden records
+repo_url: https://github.com/benzsevern/goldenmatch
+repo_name: benzsevern/goldenmatch
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: amber
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - scheme: default
+      primary: amber
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+    - search.highlight
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - toc:
+      permalink: true
+  - attr_list
+  - tables
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: false
+            show_root_heading: true
+            heading_level: 3
+            members_order: source
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - SQL Extensions: getting-started/sql-extensions.md
+  - Guides:
+    - Pipeline Overview: guides/pipeline.md
+    - Blocking Strategies: guides/blocking.md
+    - Benchmarks: guides/benchmarks.md
+  - API Reference:
+    - Python API: api/python.md
+    - CLI: api/cli.md
+    - SQL Functions: api/sql.md
