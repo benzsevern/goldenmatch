@@ -1,34 +1,46 @@
+---
+layout: default
+title: Home
+nav_order: 1
+---
+
 # GoldenMatch
 
-**Entity resolution toolkit** -- deduplicate records, match across sources, and maintain golden records.
+**Entity resolution that finds duplicates in your data so you don't have to define the rules yourself.**
 
-<div class="grid cards" markdown>
+[![PyPI](https://img.shields.io/pypi/v/goldenmatch?color=d4a017)](https://pypi.org/project/goldenmatch/)
+[![Downloads](https://static.pepy.tech/badge/goldenmatch/month)](https://pepy.tech/projects/goldenmatch)
+[![Tests](https://github.com/benzsevern/goldenmatch/actions/workflows/ci.yml/badge.svg)](https://github.com/benzsevern/goldenmatch/actions)
+[![Python](https://img.shields.io/pypi/pyversions/goldenmatch)](https://pypi.org/project/goldenmatch/)
+[![Coverage](https://img.shields.io/badge/coverage-72%25-yellow)](https://github.com/benzsevern/goldenmatch)
+[![Tests](https://img.shields.io/badge/tests-1070%20passing-brightgreen)](https://github.com/benzsevern/goldenmatch)
 
-- :material-lightning-bolt: **Fast**
+---
 
-    7,800 records/sec fuzzy matching on a laptop. Exact dedup of 1M records in 8 seconds.
+## What It Does
 
-- :material-target: **Accurate**
+GoldenMatch takes messy records and figures out which ones refer to the same entity — without requiring you to hand-write matching rules.
 
-    97.2% F1 on structured data. 72.2% F1 on product matching with LLM boost.
+```
+INGEST → STANDARDIZE → BLOCK → SCORE → CLUSTER → GOLDEN RECORD
+```
 
-- :material-lock: **Private**
+| Step | What Happens |
+|------|-------------|
+| **Ingest** | Load CSV, Excel, Parquet, or a DataFrame |
+| **Standardize** | Normalize casing, whitespace, phonetic encoding |
+| **Block** | Group candidates to avoid N^2 comparisons |
+| **Score** | Fuzzy match (jaro-winkler, levenshtein, token sort) |
+| **Cluster** | Union-Find with confidence scoring |
+| **Golden** | Merge clusters into canonical records |
 
-    PPRL (Privacy-Preserving Record Linkage) with bloom filters and multi-party protocols.
+---
 
-- :material-database: **SQL Native**
-
-    Use from PostgreSQL (`CREATE EXTENSION`) or DuckDB (`pip install goldenmatch-duckdb`).
-
-</div>
-
-## Install
+## Quick Install
 
 ```bash
 pip install goldenmatch
 ```
-
-## 30-Second Demo
 
 ```python
 import goldenmatch as gm
@@ -38,40 +50,67 @@ print(f"{result.total_clusters} clusters, {result.match_rate:.0%} match rate")
 result.golden.write_csv("golden_records.csv")
 ```
 
-## Use From SQL
+---
 
-=== "PostgreSQL"
+## Benchmarks
 
-    ```sql
-    CREATE EXTENSION goldenmatch_pg;
-    SELECT * FROM goldenmatch.goldenmatch_dedupe_pairs(
-        'customers', '{"exact": ["email"]}'
-    );
-    ```
+| Dataset | Records | Method | F1 | Time |
+|---------|---------|--------|-----|------|
+| DBLP-ACM (academic) | 4,910 | Fuzzy matching | **97.2%** | 2.1s |
+| Abt-Buy (electronics) | 2,162 | Domain + LLM | **72.2%** | 4.2s |
+| FEBRL4 (PPRL) | 10,000 | Auto-config bloom filters | **92.4%** | 14s |
+| Synthetic | 100K | Fuzzy (name+zip) | -- | 12.8s |
+| Synthetic | 1M | Exact dedupe | -- | 7.8s |
 
-=== "DuckDB"
+Scale: 7,823 records/sec on a laptop (fuzzy + exact + golden).
 
-    ```python
-    import duckdb, goldenmatch_duckdb
-    con = duckdb.connect()
-    goldenmatch_duckdb.register(con)
-    con.sql("SELECT goldenmatch_score('John Smith', 'Jon Smyth', 'jaro_winkler')")
-    ```
+---
 
-## Interfaces
+## 6 Ways to Use It
 
 | Interface | Install | Best For |
 |-----------|---------|----------|
-| **Python API** | `pip install goldenmatch` | Notebooks, scripts, AI agents |
-| **CLI** | Same package, 21 commands | Terminal workflows |
-| **TUI** | `goldenmatch tui` | Interactive exploration |
-| **REST API** | `goldenmatch serve` | Microservices |
-| **PostgreSQL** | [Pre-built binaries](https://github.com/benzsevern/goldenmatch-extensions/releases) | Production databases |
-| **DuckDB** | `pip install goldenmatch-duckdb` | Analytics |
-| **MCP** | `goldenmatch mcp-serve` | AI assistants |
+| [Python API](python-api) | `pip install goldenmatch` | Notebooks, scripts, AI agents |
+| [CLI](cli) | Same package, 21 commands | Terminal workflows |
+| [Interactive TUI](tui) | `goldenmatch tui` | Visual exploration |
+| [PostgreSQL](sql-postgres) | [Pre-built .deb/.rpm](https://github.com/benzsevern/goldenmatch-extensions/releases) | Production databases |
+| [DuckDB](sql-duckdb) | `pip install goldenmatch-duckdb` | Analytics |
+| [REST API / MCP](rest-api) | `goldenmatch serve` / `mcp-serve` | Microservices, AI assistants |
 
-## Links
+---
 
-- [PyPI](https://pypi.org/project/goldenmatch/) -- `pip install goldenmatch`
-- [GitHub](https://github.com/benzsevern/goldenmatch) -- Source code
-- [SQL Extensions](https://github.com/benzsevern/goldenmatch-extensions) -- PostgreSQL + DuckDB
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [Installation](installation) | pip, apt, rpm, Docker, build from source |
+| [Quick Start](quick-start) | First dedupe in 30 seconds |
+| [Python API](python-api) | 101 exports: dedupe, match, score, explain, PPRL |
+| [CLI Reference](cli) | 21 commands with examples |
+| [Interactive TUI](tui) | 6-tab visual interface |
+| [Configuration](configuration) | YAML config with matchkeys, blocking, golden rules |
+| [Pipeline](pipeline) | 10-step pipeline architecture |
+| [Blocking Strategies](blocking) | Static, learned, ANN blocking |
+| [Scoring](scoring) | Fuzzy, exact, probabilistic, LLM scoring |
+| [Domain Packs](domain-packs) | 7 built-in YAML rulebooks |
+| [PPRL](pprl) | Privacy-preserving record linkage |
+| [LLM Integration](llm) | LLM scorer, LLM clustering, budget tracking |
+| [Streaming & Incremental](streaming) | Real-time matching, append-only mode |
+| [PostgreSQL Extension](sql-postgres) | 18 SQL functions, pipeline schema |
+| [DuckDB Extension](sql-duckdb) | 12 Python UDFs |
+| [REST API](rest-api) | HTTP endpoints, review queue |
+| [MCP Server](mcp) | Claude Desktop integration |
+| [Evaluation](evaluation) | Benchmarks, CI/CD quality gates |
+| [Architecture](architecture) | Module map, code patterns |
+| [Benchmarks](benchmarks) | Performance and accuracy numbers |
+
+---
+
+## Part of the Golden Suite
+
+| Package | What It Does |
+|---------|-------------|
+| **[GoldenMatch](https://github.com/benzsevern/goldenmatch)** | Entity resolution (this project) |
+| **[GoldenCheck](https://github.com/benzsevern/goldencheck)** | Data validation that discovers rules |
+| **[goldenmatch-extensions](https://github.com/benzsevern/goldenmatch-extensions)** | SQL extensions for Postgres + DuckDB |
+| **[goldenmatch-duckdb](https://pypi.org/project/goldenmatch-duckdb/)** | DuckDB UDFs for entity resolution |

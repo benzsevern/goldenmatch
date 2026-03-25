@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
-      - 'mkdocs.yml'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -23,17 +22,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/configure-pages@v5
+      - uses: actions/jekyll-build-pages@v1
         with:
-          python-version: "3.12"
-      - name: Install dependencies
-        run: pip install mkdocs mkdocs-material mkdocstrings mkdocstrings-python goldenmatch>=1.1.0
-      - name: Build docs
-        run: mkdocs build
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
+          source: ./docs
+          destination: ./_site
+      - uses: actions/upload-pages-artifact@v3
 
   deploy:
     needs: build

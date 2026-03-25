@@ -1,0 +1,34 @@
+title: GoldenMatch
+description: Entity resolution toolkit — deduplicate records, match across sources, and maintain golden records
+baseurl: /goldenmatch
+url: https://benzsevern.github.io
+
+remote_theme: just-the-docs/just-the-docs@v0.10.0
+
+color_scheme: dark
+
+search_enabled: true
+
+back_to_top: true
+back_to_top_text: "Back to Top"
+
+nav_sort: case_insensitive
+
+aux_links:
+  "PyPI":
+    - "https://pypi.org/project/goldenmatch/"
+  "GitHub":
+    - "https://github.com/benzsevern/goldenmatch"
+
+aux_links_new_tab: true
+
+footer_content: "GoldenMatch — MIT License"
+
+exclude:
+  - wiki/
+  - superpowers/
+  - api-stability.md
+  - medium_cover.html
+  - medium_post_plain.md
+  - platform_posts.md
+  - reddit_posts.md
