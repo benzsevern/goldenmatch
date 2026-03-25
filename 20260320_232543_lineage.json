@@ -1,0 +1,21 @@
+{
+  "generated_at": "2026-03-20T23:25:43.127276",
+  "run_name": "20260320_232543",
+  "total_pairs": 2,
+  "pairs": [
+    {
+      "row_id_a": 0,
+      "row_id_b": 1,
+      "score": 1.0,
+      "cluster_id": 1,
+      "fields": []
+    },
+    {
+      "row_id_a": 2,
+      "row_id_b": 3,
+      "score": 1.0,
+      "cluster_id": 2,
+      "fields": []
+    }
+  ]
+}

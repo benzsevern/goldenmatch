@@ -1,0 +1,77 @@
+{
+  "generated_at": "2026-03-23T12:00:59.370867",
+  "run_name": "20260323_120059",
+  "total_pairs": 2,
+  "pairs": [
+    {
+      "row_id_a": 2,
+      "row_id_b": 3,
+      "score": 1.0,
+      "cluster_id": 2,
+      "fields": [
+        {
+          "field": "first_name",
+          "scorer": "jaro_winkler",
+          "value_a": "Jane",
+          "value_b": "Janet",
+          "score": 0.96,
+          "weight": 1.0,
+          "diff_type": "similar"
+        },
+        {
+          "field": "last_name",
+          "scorer": "jaro_winkler",
+          "value_a": "Doe",
+          "value_b": "Doe",
+          "score": 1.0,
+          "weight": 1.0,
+          "diff_type": "identical"
+        },
+        {
+          "field": "zip",
+          "scorer": "exact",
+          "value_a": "10001",
+          "value_b": "10001",
+          "score": 1.0,
+          "weight": 1.0,
+          "diff_type": "identical"
+        }
+      ]
+    },
+    {
+      "row_id_a": 0,
+      "row_id_b": 1,
+      "score": 0.8066,
+      "cluster_id": 1,
+      "fields": [
+        {
+          "field": "first_name",
+          "scorer": "jaro_winkler",
+          "value_a": "John",
+          "value_b": "Jon",
+          "score": 0.9333,
+          "weight": 1.0,
+          "diff_type": "similar"
+        },
+        {
+          "field": "last_name",
+          "scorer": "jaro_winkler",
+          "value_a": "Smith",
+          "value_b": "Smith",
+          "score": 1.0,
+          "weight": 1.0,
+          "diff_type": "identical"
+        },
+        {
+          "field": "zip",
+          "scorer": "exact",
+          "value_a": "90210",
+          "value_b": "90210",
+          "score": 1.0,
+          "weight": 1.0,
+          "diff_type": "identical"
+        }
+      ]
+    }
+  ]
+}

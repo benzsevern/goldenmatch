@@ -1,0 +1,31 @@
+matchkeys:
+  - name: email_exact
+    fields:
+      - column: email
+        transforms: [lowercase, strip]
+    comparison: exact
+
+blocking:
+  max_block_size: 5000
+  skip_oversized: true
+  keys:
+    - fields: [last_name]
+      transforms: [lowercase, "substring:0:3"]
+
+standardization:
+  email: [email]
+  phone: [phone]
+  first_name: [strip, name_proper]
+  last_name: [strip, name_proper]
+  zip: [zip5]
+
+validation:
+  auto_fix: true
+
+golden_rules:
+  default_strategy: most_complete
+
+output:
+  format: csv
+  directory: D:/show_case/goldenmatch/tests/fixtures/bench_output
+  run_name: bench_1m

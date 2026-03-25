@@ -39,7 +39,6 @@ import goldenmatch as gm
 
 ## Scoring
 
-::: goldenmatch.score_field
 ::: goldenmatch.score_pair
 
 ## PPRL

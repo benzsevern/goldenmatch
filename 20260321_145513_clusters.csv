@@ -1,0 +1,6 @@
+__cluster_id__,__row_id__,__cluster_size__,__oversized__
+1,0,1,false
+2,1,1,false
+3,2,2,false
+3,3,2,false
+4,4,1,false

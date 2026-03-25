@@ -51,6 +51,8 @@ plugins:
             show_root_heading: true
             heading_level: 3
             members_order: source
+            allow_inspection: true
+            show_if_no_docstring: false
 
 nav:
   - Home: index.md
