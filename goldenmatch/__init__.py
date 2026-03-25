@@ -175,6 +175,10 @@ from goldenmatch.output.report import generate_dedupe_report
 # ── REST API Client ──────────────────────────────────────────────────────
 from goldenmatch.client import Client
 
+# ── Agent ────────────────────────────────────────────────────────────────
+from goldenmatch.core.agent import AgentSession
+from goldenmatch.core.review_queue import ReviewQueue, gate_pairs
+
 # ── Shortcuts ────────────────────────────────────────────────────────────
 explain_pair = explain_pair_nl
 explain_cluster = explain_cluster_nl
@@ -188,6 +192,8 @@ __all__ = [
     "score_strings", "score_pair_df", "explain_pair_df",
     "pprl_link", "evaluate", "load_config",
     "DedupeResult", "MatchResult",
+    # Agent
+    "AgentSession", "ReviewQueue", "gate_pairs",
     # Config
     "GoldenMatchConfig", "MatchkeyConfig", "MatchkeyField",
     "BlockingConfig", "BlockingKeyConfig",
