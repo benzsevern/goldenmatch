@@ -5,6 +5,7 @@
 Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode auto-detects your data; optional LLM boost for harder datasets.
 
 [![PyPI](https://img.shields.io/pypi/v/goldenmatch?color=d4a017)](https://pypi.org/project/goldenmatch/)
+[![Docs](https://img.shields.io/badge/docs-benzsevern.github.io%2Fgoldenmatch-d4a017)](https://benzsevern.github.io/goldenmatch/)
 [![CI](https://github.com/benzsevern/goldenmatch/actions/workflows/ci.yml/badge.svg)](https://github.com/benzsevern/goldenmatch/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/benzsevern/goldenmatch/graph/badge.svg)](https://codecov.io/gh/benzsevern/goldenmatch)
 [![Downloads](https://static.pepy.tech/badge/goldenmatch/month)](https://pepy.tech/project/goldenmatch)
