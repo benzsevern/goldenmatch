@@ -6,6 +6,15 @@ dist/
 build/
 .pytest_cache/
 .ruff_cache/
+.coverage
+
+# Pipeline output files (timestamped)
+*_clusters.csv
+*_lineage.json
+
+# Large test fixtures
+tests/fixtures/synthetic_1m.csv
+tests/benchmarks/datasets/
 
 # Credentials and secrets — NEVER commit
 .testing/
