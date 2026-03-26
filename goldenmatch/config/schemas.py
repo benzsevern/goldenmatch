@@ -355,6 +355,25 @@ class DomainConfig(BaseModel):
     budget: BudgetConfig | None = None  # reuses budget config
 
 
+# ── Learning Memory Config ─────────────────────────────────────────────────
+
+
+class LearningConfig(BaseModel):
+    """Learning Memory learning parameters."""
+    threshold_min_corrections: int = 10
+    weights_min_corrections: int = 50
+
+
+class MemoryConfig(BaseModel):
+    """Learning Memory configuration."""
+    enabled: bool = True
+    backend: str = "sqlite"
+    path: str = ".goldenmatch/memory.db"
+    connection: str | None = None
+    trust: dict[str, float] = Field(default_factory=lambda: {"human": 1.0, "agent": 0.5})
+    learning: LearningConfig = Field(default_factory=LearningConfig)
+
+
 # ── MatchSettingsConfig ─────────────────────────────────────────────────────
 
 
@@ -379,6 +398,7 @@ class GoldenMatchConfig(BaseModel):
     llm_scorer: LLMScorerConfig | None = None
     domain: DomainConfig | None = None
     backend: str | None = None  # None (default Polars), "ray", "duckdb"
+    memory: MemoryConfig | None = None
 
     @model_validator(mode="after")
     def _validate_fuzzy_needs_blocking(self) -> "GoldenMatchConfig":
