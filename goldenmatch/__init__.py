@@ -179,6 +179,12 @@ from goldenmatch.client import Client
 from goldenmatch.core.agent import AgentSession
 from goldenmatch.core.review_queue import ReviewQueue, gate_pairs
 
+# ── Learning Memory ──────────────────────────────────────────────────────
+from goldenmatch.core.memory import (
+    MemoryStore, Correction, LearnedAdjustment, CorrectionStats,
+    MemoryLearner, apply_corrections,
+)
+
 # ── Shortcuts ────────────────────────────────────────────────────────────
 explain_pair = explain_pair_nl
 explain_cluster = explain_cluster_nl
@@ -252,4 +258,7 @@ __all__ = [
     "write_output", "generate_dedupe_report",
     # REST API Client
     "Client",
+    # Learning Memory
+    "MemoryStore", "Correction", "LearnedAdjustment", "CorrectionStats",
+    "MemoryLearner", "apply_corrections",
 ]
