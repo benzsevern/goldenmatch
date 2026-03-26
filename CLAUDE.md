@@ -44,7 +44,7 @@
 - Ray tests require `ray` optional dep -- use `pytest.mark.skipif(not HAS_RAY)` pattern
 - Windows drive letter tests must use `@pytest.mark.skipif(sys.platform != "win32")` -- Path.stem behaves differently on Linux
 - sdist includes benchmark datasets (can bloat to 500MB+) -- add large data dirs to `.gitignore` before building
-- Memory tests use `tmp_path` fixture for isolated SQLite: `MemoryStore(backend="sqlite", path=str(tmp_path / "test.db"))`. 40 tests in test_memory_store.py, test_corrections.py, test_learner.py, test_memory_integration.py
+- Memory tests use `tmp_path` fixture for isolated SQLite: `MemoryStore(backend="sqlite", path=str(tmp_path / "test.db"))`. 48 tests in test_memory_store.py, test_corrections.py, test_learner.py, test_memory_integration.py
 
 ## Architecture
 - Pipeline: ingest → column_map → auto_fix → validate → standardize → matchkeys → block → score → cluster → golden → output
@@ -220,4 +220,5 @@
 - Coverage config in pyproject.toml: omit db/*, mcp/*, vertex_embedder, connectors/* (require external services)
 - GitHub Pages: docs workflow uses `actions/jekyll-build-pages` with source `./docs`, Just the Docs theme
 - GitHub Release triggers publish.yml workflow which auto-publishes to PyPI via trusted publishing
-- v2.0 Learning Memory: PR #9 has core modules (store, corrections, learner). Remaining: pipeline integration (hook after scoring), collection point wiring (review_queue, boost_tab, unmerge, llm_scorer, agent_tools, REST), CLI subcommands (memory stats/learn/export/import), MCP tools. Spec: `docs/superpowers/specs/2026-03-26-learning-memory-design.md`. Plan: `docs/superpowers/plans/2026-03-26-learning-memory-implementation.md`
+- Scored pairs are canonicalized as `(min(id_a, id_b), max(id_a, id_b))` throughout cluster.py, graph.py, chunked.py, ann_blocker.py -- any new code storing/looking up pairs must canonicalize too
+- v2.0 Learning Memory: PR #9 merged. Core modules shipped (store, corrections, learner). Remaining: pipeline integration (hook after scoring), collection point wiring (review_queue, boost_tab, unmerge, llm_scorer, agent_tools, REST), CLI subcommands (memory stats/learn/export/import), MCP tools. Spec: `docs/superpowers/specs/2026-03-26-learning-memory-design.md`. Plan: `docs/superpowers/plans/2026-03-26-learning-memory-implementation.md`
