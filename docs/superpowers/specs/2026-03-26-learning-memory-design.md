@@ -39,6 +39,7 @@ class Correction:
     source: str                  # "steward" | "boost" | "unmerge" | "agent" | "llm"
     trust: float                 # 1.0 (human) or 0.5 (agent)
     field_hash: str              # hash of matched fields for staleness detection
+    record_hash: str             # hash of ALL fields for entity identity check
     original_score: float        # score at time of correction
     reason: str | None = None    # optional explanation
     dataset: str | None = None   # dataset identifier for scoping
@@ -46,6 +47,10 @@ class Correction:
 ```
 
 **`field_hash`:** SHA-256 (truncated to 16 chars) of the concatenated matched field values for both records. For matchkey fields `[name, zip]`: `sha256(f"{name_a}|{zip_a}|{name_b}|{zip_b}")[:16]`. If either record's matched fields change, the hash won't match and the correction is stale.
+
+**`record_hash`:** SHA-256 (truncated to 16 chars) of ALL field values for both records. Catches the case where row IDs shift (rows added/removed/reordered) and a different entity coincidentally has the same matched-field hash. Staleness check requires BOTH hashes to match — if either differs, the correction is stale.
+
+**Row ID stability:** Row IDs (`__row_id__`) are assigned during ingest and are only stable for immutable input files. The dual-hash staleness check (field_hash + record_hash) makes corrections safe even when row IDs shift, because a different entity at the same row ID will have a different record_hash.
 
 ### LearnedAdjustment
 
@@ -76,8 +81,9 @@ class MemoryStore:
     def add_correction(self, correction: Correction) -> None
     def get_corrections(self, dataset: str | None = None) -> list[Correction]
     def get_pair_correction(self, id_a: int, id_b: int, dataset: str | None = None) -> Correction | None
+    def get_pair_corrections_bulk(self, pairs: list[tuple[int, int]], dataset: str | None = None) -> dict[tuple[int, int], Correction]
     def count_corrections(self, dataset: str | None = None) -> int
-    def corrections_since(self, since: datetime) -> list[Correction]
+    def corrections_since(self, since: datetime) -> list[Correction]  # used by has_new_corrections()
 
     # Learned adjustments
     def save_adjustment(self, adj: LearnedAdjustment) -> None
@@ -98,9 +104,11 @@ CREATE TABLE corrections (
     id TEXT PRIMARY KEY,
     id_a INTEGER, id_b INTEGER,
     decision TEXT, source TEXT, trust REAL,
-    field_hash TEXT, original_score REAL,
+    field_hash TEXT, record_hash TEXT,
+    original_score REAL,
     reason TEXT, dataset TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(id_a, id_b, dataset)
 );
 CREATE INDEX idx_corrections_pair ON corrections(id_a, id_b, dataset);
 
@@ -127,11 +135,14 @@ def apply_corrections(
 ) -> tuple[list[tuple[int, int, float]], CorrectionStats]
 ```
 
-**Logic per scored pair:**
-1. Look up `store.get_pair_correction(id_a, id_b, dataset)`
-2. No correction exists: keep original score
-3. Correction exists, hash matches (data unchanged): hard override (approved=1.0, rejected=0.0)
-4. Correction exists, hash differs (data changed): stale, keep original score, flag for re-review
+**Logic:**
+1. Build a row-ID-to-row lookup dict from `df` once (avoids O(N) filter per pair)
+2. Bulk-fetch corrections via `store.get_pair_corrections_bulk(pairs, dataset)`
+3. For each pair with a correction:
+   - Compute field_hash and record_hash from the lookup dict (not per-pair DataFrame filters)
+   - Both hashes match: hard override (approved=1.0, rejected=0.0)
+   - Either hash differs: stale, keep original score, flag for re-review
+4. Pairs without corrections: keep original score
 
 **CorrectionStats:**
 ```python
@@ -143,14 +154,26 @@ class CorrectionStats:
     stale_pairs: list[tuple[int, int]]  # pairs with stale corrections
 ```
 
-**Hash computation:**
+**Hash computation (vectorized):**
 ```python
-def compute_field_hash(df: pl.DataFrame, id_a: int, id_b: int, fields: list[str]) -> str:
-    row_a = df.filter(pl.col("__row_id__") == id_a).select(fields).row(0)
-    row_b = df.filter(pl.col("__row_id__") == id_b).select(fields).row(0)
-    combined = "|".join(str(v) for v in row_a + row_b)
+def build_row_lookup(df: pl.DataFrame, fields: list[str]) -> dict[int, tuple]:
+    """Build row ID to field values lookup once for all pairs."""
+    rows = df.select(["__row_id__"] + fields).to_dicts()
+    return {r["__row_id__"]: tuple(r[f] for f in fields) for r in rows}
+
+def compute_field_hash(row_a_vals: tuple, row_b_vals: tuple) -> str:
+    combined = "|".join(str(v) for v in row_a_vals + row_b_vals)
     return hashlib.sha256(combined.encode()).hexdigest()[:16]
+
+def compute_record_hash(df: pl.DataFrame, row_id: int) -> str:
+    """Hash ALL fields for entity identity check."""
+    row = df.filter(pl.col("__row_id__") == row_id).row(0)
+    return hashlib.sha256("|".join(str(v) for v in row).encode()).hexdigest()[:16]
 ```
+
+The `build_row_lookup` is called once per `apply_corrections` invocation. Individual hash computations are O(1) dict lookups, not O(N) DataFrame filters.
+
+**Trust conflict resolution:** Only one correction per `(id_a, id_b, dataset)` triple is active at a time. `add_correction()` upserts: if a correction exists for the same pair, it is replaced only if the new correction's trust >= the existing trust. Human (1.0) always overrides agent (0.5). Within the same trust tier, latest wins. The `corrections` table has a UNIQUE constraint on `(id_a, id_b, dataset)`.
 
 **Hook point:** Called in `pipeline.py` after scoring, before clustering. Stale pairs auto-added to review queue.
 
@@ -186,7 +209,8 @@ All collection points are additive -- they call `store.add_correction()` alongsi
 |---------|--------|-------|---------|
 | Review Queue | `"steward"` | 1.0 | `ReviewQueue.approve()` / `.reject()` |
 | Boost Tab | `"boost"` | 1.0 | User presses y/n during labeling |
-| Unmerge | `"unmerge"` | 1.0 | `unmerge_record()` / `unmerge_cluster()` |
+| Unmerge record | `"unmerge"` | 1.0 | `unmerge_record(record_id)`: reject correction for every pair `(record_id, other)` in the cluster's `pair_scores`, using stored pair_score as `original_score` |
+| Unmerge cluster | `"unmerge"` | 1.0 | `unmerge_cluster(cluster_id)`: reject correction for every pair in the cluster's `pair_scores` |
 | LLM Scorer | `"llm"` | 0.5 | LLM returns match/non-match decision |
 | Agent Tools | `"agent"` | 0.5 | `agent_approve_reject` MCP tool |
 | REST API | `"steward"` | 1.0 | `POST /reviews/decide` |
@@ -210,6 +234,25 @@ memory:
     threshold_min_corrections: 10
     weights_min_corrections: 50
 ```
+
+**Pydantic model** (added to `config/schemas.py`):
+```python
+class LearningConfig(BaseModel):
+    threshold_min_corrections: int = 10
+    weights_min_corrections: int = 50
+
+class MemoryConfig(BaseModel):
+    enabled: bool = True
+    backend: str = "sqlite"
+    path: str = ".goldenmatch/memory.db"
+    connection: str | None = None
+    trust: dict[str, float] = Field(default_factory=lambda: {"human": 1.0, "agent": 0.5})
+    learning: LearningConfig = Field(default_factory=LearningConfig)
+```
+
+Add `memory: MemoryConfig | None = None` to `GoldenMatchConfig`.
+
+**`dataset` scoping:** Defaults to the input file path (or `"<DataFrame>"` for df entry points). Can be overridden via config `dataset: "my-project"`. Used to scope corrections so corrections from one project don't affect another.
 
 ## Interface Additions
 
