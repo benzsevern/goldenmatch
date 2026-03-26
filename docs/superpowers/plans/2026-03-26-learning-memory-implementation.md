@@ -299,6 +299,7 @@ class Correction:
     field_hash: str
     record_hash: str
     original_score: float
+    matchkey_name: str | None = None  # which matchkey produced this pair
     reason: str | None = None
     dataset: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
@@ -321,6 +322,7 @@ CREATE TABLE IF NOT EXISTS corrections (
     decision TEXT, source TEXT, trust REAL,
     field_hash TEXT, record_hash TEXT,
     original_score REAL,
+    matchkey_name TEXT,
     reason TEXT, dataset TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(id_a, id_b, dataset)
@@ -370,14 +372,15 @@ class MemoryStore:
         self._conn.execute(
             "INSERT OR REPLACE INTO corrections "
             "(id, id_a, id_b, decision, source, trust, field_hash, record_hash, "
-            "original_score, reason, dataset, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "original_score, matchkey_name, reason, dataset, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 correction.id, correction.id_a, correction.id_b,
                 correction.decision, correction.source, correction.trust,
                 correction.field_hash, correction.record_hash,
-                correction.original_score, correction.reason,
-                correction.dataset, correction.created_at.isoformat(),
+                correction.original_score, correction.matchkey_name,
+                correction.reason, correction.dataset,
+                correction.created_at.isoformat(),
             ),
         )
         self._conn.commit()
@@ -472,6 +475,7 @@ class MemoryStore:
             trust=row["trust"], field_hash=row["field_hash"],
             record_hash=row["record_hash"],
             original_score=row["original_score"],
+            matchkey_name=row["matchkey_name"],
             reason=row["reason"], dataset=row["dataset"],
             created_at=datetime.fromisoformat(row["created_at"]),
         )
@@ -737,9 +741,15 @@ def apply_corrections(
             f"{record_hashes.get(id_a, '')}:{record_hashes.get(id_b, '')}"
         )
 
-        if (current_field_hash == correction.field_hash
-                and current_record_hash == correction.record_hash):
-            # Fresh correction: apply hard override
+        # Empty hashes = collected without DataFrame access, skip staleness check
+        hashes_empty = (not correction.field_hash and not correction.record_hash)
+        hashes_match = (
+            current_field_hash == correction.field_hash
+            and current_record_hash == correction.record_hash
+        )
+
+        if hashes_empty or hashes_match:
+            # Fresh correction (or no staleness data): apply hard override
             new_score = 1.0 if correction.decision == "approve" else 0.0
             adjusted.append((id_a, id_b, new_score))
             stats.applied += 1
@@ -942,10 +952,10 @@ class MemoryLearner:
         if not all_corrections:
             return []
 
-        # Group corrections by dataset (used as matchkey proxy)
+        # Group corrections by matchkey_name (fall back to dataset if not set)
         by_matchkey: dict[str, list[Correction]] = {}
         for c in all_corrections:
-            key = c.dataset or "_default"
+            key = c.matchkey_name or c.dataset or "_default"
             if matchkey_name and key != matchkey_name:
                 continue
             by_matchkey.setdefault(key, []).append(c)
@@ -1083,12 +1093,17 @@ At the beginning of `_run_dedupe_pipeline()` (after config is available, around 
                 adjustments = learner.learn()
                 for adj in adjustments:
                     if adj.threshold is not None:
-                        # Overlay threshold on matchkeys
+                        # Only overlay on fuzzy matchkeys with matching name
                         for mk in matchkeys:
-                            if mk.threshold is not None:
+                            if mk.threshold is not None and (
+                                not adj.matchkey_name
+                                or adj.matchkey_name == "_default"
+                                or adj.matchkey_name == getattr(mk, "name", None)
+                            ):
                                 mk.threshold = adj.threshold
-        except Exception:
-            pass  # Memory is optional, don't break pipeline
+        except Exception as e:
+            import logging
+            logging.getLogger("goldenmatch.memory").warning("Learning Memory skipped: %s", e)
 ```
 
 - [ ] **Step 3: Add apply_corrections after scoring**
@@ -1668,7 +1683,7 @@ git commit -m "feat(memory): integration tests — correct+rerun, correct+learn,
 | 8 | Integration tests | All | 5 |
 | **Total** | | | **~42** |
 
-Tasks 1-4 are independent and can run in parallel.
+Task 1 is independent. Tasks 3 and 4 depend on Task 2 (import from store.py).
 Tasks 5-6 depend on Tasks 2-4.
 Task 7 depends on Tasks 2-4.
 Task 8 depends on all.
