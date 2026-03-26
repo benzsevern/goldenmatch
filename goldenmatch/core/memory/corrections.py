@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -9,6 +10,8 @@ import polars as pl
 
 if TYPE_CHECKING:
     from goldenmatch.core.memory.store import MemoryStore
+
+log = logging.getLogger("goldenmatch.memory")
 
 
 @dataclass
@@ -22,8 +25,15 @@ class CorrectionStats:
 
 def build_row_lookup(df: pl.DataFrame, fields: list[str]) -> dict[int, tuple]:
     """Build row ID to field values lookup once for all pairs."""
-    rows = df.select(["__row_id__"] + fields).to_dicts()
-    return {r["__row_id__"]: tuple(r[f] for f in fields) for r in rows}
+    available = [f for f in fields if f in df.columns]
+    if "__row_id__" not in df.columns:
+        log.warning("DataFrame missing __row_id__ column, corrections cannot be applied")
+        return {}
+    if not available:
+        log.warning("No matchkey fields found in DataFrame: %s", fields)
+        return {}
+    rows = df.select(["__row_id__"] + available).to_dicts()
+    return {r["__row_id__"]: tuple(r[f] for f in available) for r in rows}
 
 
 def compute_field_hash(row_a_vals: tuple, row_b_vals: tuple) -> str:
@@ -33,8 +43,12 @@ def compute_field_hash(row_a_vals: tuple, row_b_vals: tuple) -> str:
 
 
 def compute_record_hash(df: pl.DataFrame, row_id: int) -> str:
-    """Hash ALL fields for entity identity check."""
-    row = df.filter(pl.col("__row_id__") == row_id).row(0)
+    """Hash ALL fields (sorted by name) for entity identity check."""
+    filtered = df.filter(pl.col("__row_id__") == row_id)
+    if filtered.is_empty():
+        log.warning("Row ID %d not found in DataFrame, returning empty hash", row_id)
+        return ""
+    row = filtered.select(sorted(df.columns)).row(0)
     return hashlib.sha256("|".join(str(v) for v in row).encode()).hexdigest()[:16]
 
 
@@ -74,8 +88,16 @@ def apply_corrections(
             adjusted.append((id_a, id_b, score))
             continue
 
+        # Check if row IDs are in lookup
+        if id_a not in field_lookup or id_b not in field_lookup:
+            log.warning("Row ID(s) not in lookup for correction (%d, %d), marking stale", id_a, id_b)
+            adjusted.append((id_a, id_b, score))
+            stats.stale += 1
+            stats.stale_pairs.append((id_a, id_b))
+            continue
+
         current_field_hash = compute_field_hash(
-            field_lookup.get(id_a, ()), field_lookup.get(id_b, ()),
+            field_lookup[id_a], field_lookup[id_b],
         )
         current_record_hash = (
             f"{record_hashes.get(id_a, '')}:{record_hashes.get(id_b, '')}"
@@ -97,4 +119,6 @@ def apply_corrections(
             stats.stale += 1
             stats.stale_pairs.append((id_a, id_b))
 
+    log.info("Corrections: %d applied, %d stale, %d total pairs",
+             stats.applied, stats.stale, stats.total_pairs)
     return adjusted, stats

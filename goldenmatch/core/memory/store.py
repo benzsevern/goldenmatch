@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+
+log = logging.getLogger("goldenmatch.memory")
 
 
 @dataclass
@@ -34,6 +37,11 @@ class LearnedAdjustment:
     field_weights: dict[str, float] | None = None
     sample_size: int = 0
     learned_at: datetime = field(default_factory=datetime.now)
+
+
+def _canon_pair(id_a: int, id_b: int) -> tuple[int, int]:
+    """Canonicalize pair ordering to (min, max)."""
+    return (min(id_a, id_b), max(id_a, id_b))
 
 
 _SCHEMA = """
@@ -75,50 +83,69 @@ class MemoryStore:
             self._conn = sqlite3.connect(path)
             self._conn.row_factory = sqlite3.Row
             self._conn.executescript(_SCHEMA)
+            log.debug("MemoryStore opened: %s", path)
         else:
             raise NotImplementedError(f"Backend '{backend}' not yet implemented")
 
+    def close(self) -> None:
+        """Close the database connection."""
+        self._conn.close()
+
+    def __enter__(self) -> MemoryStore:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
     def add_correction(self, correction: Correction) -> None:
-        """Upsert a correction. Higher trust wins; same trust = latest wins."""
-        existing = self.get_pair_correction(
-            correction.id_a, correction.id_b, correction.dataset,
-        )
+        """Upsert a correction. Higher trust wins; same trust = latest wins.
+
+        Pairs are canonicalized to (min, max) ordering before storage.
+        """
+        ca, cb = _canon_pair(correction.id_a, correction.id_b)
+        existing = self.get_pair_correction(ca, cb, correction.dataset)
+
         if existing is not None:
             if correction.trust < existing.trust:
+                log.debug("Correction ignored (lower trust): (%d, %d)", ca, cb)
                 return
+
+        # Atomic upsert: DELETE + INSERT in one transaction
+        with self._conn:
             self._conn.execute(
                 "DELETE FROM corrections WHERE id_a = ? AND id_b = ? AND dataset IS ?",
-                (correction.id_a, correction.id_b, correction.dataset),
+                (ca, cb, correction.dataset),
             )
-
-        self._conn.execute(
-            "INSERT OR REPLACE INTO corrections "
-            "(id, id_a, id_b, decision, source, trust, field_hash, record_hash, "
-            "original_score, matchkey_name, reason, dataset, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                correction.id, correction.id_a, correction.id_b,
-                correction.decision, correction.source, correction.trust,
-                correction.field_hash, correction.record_hash,
-                correction.original_score, correction.matchkey_name,
-                correction.reason, correction.dataset,
-                correction.created_at.isoformat(),
-            ),
-        )
-        self._conn.commit()
+            self._conn.execute(
+                "INSERT INTO corrections "
+                "(id, id_a, id_b, decision, source, trust, field_hash, record_hash, "
+                "original_score, matchkey_name, reason, dataset, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    correction.id, ca, cb,
+                    correction.decision, correction.source, correction.trust,
+                    correction.field_hash, correction.record_hash,
+                    correction.original_score, correction.matchkey_name,
+                    correction.reason, correction.dataset,
+                    correction.created_at.isoformat(),
+                ),
+            )
+        log.debug("Correction stored: (%d, %d) %s [%s]", ca, cb,
+                   correction.decision, correction.source)
 
     def get_pair_correction(
         self, id_a: int, id_b: int, dataset: str | None = None,
     ) -> Correction | None:
+        ca, cb = _canon_pair(id_a, id_b)
         if dataset is not None:
             row = self._conn.execute(
                 "SELECT * FROM corrections WHERE id_a = ? AND id_b = ? AND dataset = ?",
-                (id_a, id_b, dataset),
+                (ca, cb, dataset),
             ).fetchone()
         else:
             row = self._conn.execute(
                 "SELECT * FROM corrections WHERE id_a = ? AND id_b = ? AND dataset IS NULL",
-                (id_a, id_b),
+                (ca, cb),
             ).fetchone()
         return self._row_to_correction(row) if row else None
 
@@ -127,7 +154,13 @@ class MemoryStore:
     ) -> dict[tuple[int, int], Correction]:
         all_corrections = self.get_corrections(dataset=dataset)
         lookup = {(c.id_a, c.id_b): c for c in all_corrections}
-        return {p: lookup[p] for p in pairs if p in lookup}
+        # Canonicalize lookup keys from input pairs
+        result = {}
+        for a, b in pairs:
+            ca, cb = _canon_pair(a, b)
+            if (ca, cb) in lookup:
+                result[(a, b)] = lookup[(ca, cb)]
+        return result
 
     def get_corrections(self, dataset: str | None = None) -> list[Correction]:
         if dataset is not None:
@@ -148,7 +181,7 @@ class MemoryStore:
             ).fetchone()
         else:
             row = self._conn.execute("SELECT COUNT(*) FROM corrections").fetchone()
-        return row[0]
+        return row[0] if row else 0
 
     def corrections_since(self, since: datetime) -> list[Correction]:
         rows = self._conn.execute(
@@ -159,14 +192,16 @@ class MemoryStore:
 
     def save_adjustment(self, adj: LearnedAdjustment) -> None:
         weights_json = json.dumps(adj.field_weights) if adj.field_weights else None
-        self._conn.execute(
-            "INSERT OR REPLACE INTO adjustments "
-            "(matchkey_name, threshold, field_weights, sample_size, learned_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (adj.matchkey_name, adj.threshold, weights_json,
-             adj.sample_size, adj.learned_at.isoformat()),
-        )
-        self._conn.commit()
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO adjustments "
+                "(matchkey_name, threshold, field_weights, sample_size, learned_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (adj.matchkey_name, adj.threshold, weights_json,
+                 adj.sample_size, adj.learned_at.isoformat()),
+            )
+        log.debug("Adjustment saved: %s threshold=%.3f samples=%d",
+                   adj.matchkey_name, adj.threshold or 0, adj.sample_size)
 
     def get_adjustment(self, matchkey_name: str) -> LearnedAdjustment | None:
         row = self._conn.execute(

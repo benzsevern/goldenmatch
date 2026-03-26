@@ -90,6 +90,28 @@ class TestWeightAdjustment:
         assert result[0].threshold is not None
 
 
+class TestEdgeCases:
+    def test_all_approved_no_learning(self, store):
+        _add_corrections(store, "mk1", [0.9] * 15, [])
+        learner = MemoryLearner(store, threshold_min=10)
+        result = learner.learn()
+        assert len(result) == 0
+
+    def test_all_rejected_no_learning(self, store):
+        _add_corrections(store, "mk1", [], [0.3] * 15)
+        learner = MemoryLearner(store, threshold_min=10)
+        result = learner.learn()
+        assert len(result) == 0
+
+    def test_learn_filters_by_matchkey(self, store):
+        _add_corrections(store, "mk1", [0.9] * 6, [0.3] * 5)
+        _add_corrections(store, "mk2", [0.8] * 7, [0.4] * 4)
+        learner = MemoryLearner(store, threshold_min=10)
+        result = learner.learn(matchkey_name="mk1")
+        assert len(result) == 1
+        assert result[0].matchkey_name == "mk1"
+
+
 class TestMultipleMatchkeys:
     def test_learns_per_matchkey(self, store):
         _add_corrections(store, "mk1", [0.9] * 6, [0.3] * 5)

@@ -130,6 +130,43 @@ class TestCorrectionsSince:
         assert result[0].id_a == 3
 
 
+class TestPairCanonicalization:
+    def test_reversed_pair_finds_correction(self, store):
+        """Correction stored as (2,1) should be found when looking up (1,2)."""
+        store.add_correction(_make_correction(id="c1", id_a=2, id_b=1))
+        result = store.get_pair_correction(1, 2, dataset="test")
+        assert result is not None
+        assert result.decision == "approve"
+
+    def test_reversed_pair_upsert(self, store):
+        """Storing (1,2) then (2,1) should upsert the same logical pair."""
+        store.add_correction(_make_correction(id="c1", id_a=1, id_b=2, decision="approve"))
+        store.add_correction(_make_correction(id="c2", id_a=2, id_b=1, decision="reject"))
+        result = store.get_pair_correction(1, 2, dataset="test")
+        assert result.decision == "reject"
+        assert store.count_corrections(dataset="test") == 1
+
+    def test_bulk_lookup_reversed(self, store):
+        store.add_correction(_make_correction(id="c1", id_a=2, id_b=1))
+        result = store.get_pair_corrections_bulk([(1, 2)], dataset="test")
+        assert (1, 2) in result
+
+
+class TestUnsupportedBackend:
+    def test_raises_not_implemented(self, tmp_path):
+        import pytest
+        with pytest.raises(NotImplementedError, match="postgres"):
+            MemoryStore(backend="postgres", path=str(tmp_path / "x.db"))
+
+
+class TestContextManager:
+    def test_context_manager(self, tmp_path):
+        with MemoryStore(backend="sqlite", path=str(tmp_path / "ctx.db")) as store:
+            store.add_correction(_make_correction())
+            assert store.count_corrections(dataset="test") == 1
+        # Connection closed after with block
+
+
 class TestLastLearnTime:
     def test_no_adjustments(self, store):
         assert store.last_learn_time() is None
