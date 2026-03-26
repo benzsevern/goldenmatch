@@ -30,7 +30,7 @@
 
 ## Testing
 - `pytest --tb=short` from project root — all tests must pass after every change
-- 1133 tests (+ 6 skipped for optional deps), run in ~45s
+- 1173 tests (+ 6 skipped for optional deps), run in ~50s
 - Coverage: 72% (with db/mcp/connectors excluded via pyproject.toml [tool.coverage.run] omit)
 - Key module coverage: scorer 87%, probabilistic 96%, pprl/autoconfig 95%, _api 85%, pipeline 82%
 - Fixtures in `tests/conftest.py`: `sample_csv`, `sample_csv_b`, `sample_parquet`
@@ -44,12 +44,14 @@
 - Ray tests require `ray` optional dep -- use `pytest.mark.skipif(not HAS_RAY)` pattern
 - Windows drive letter tests must use `@pytest.mark.skipif(sys.platform != "win32")` -- Path.stem behaves differently on Linux
 - sdist includes benchmark datasets (can bloat to 500MB+) -- add large data dirs to `.gitignore` before building
+- Memory tests use `tmp_path` fixture for isolated SQLite: `MemoryStore(backend="sqlite", path=str(tmp_path / "test.db"))`. 40 tests in test_memory_store.py, test_corrections.py, test_learner.py, test_memory_integration.py
 
 ## Architecture
 - Pipeline: ingest → column_map → auto_fix → validate → standardize → matchkeys → block → score → cluster → golden → output
 - SQL extensions: see `D:\show_case\goldenmatch-extensions\CLAUDE.md` for Postgres/DuckDB architecture
 - `goldenmatch/core/agent.py` -- AgentSession, profile_for_agent, select_strategy, build_alternatives. Autonomous ER: profiles data -> detects domain -> selects strategy -> runs pipeline -> returns reasoning
 - `goldenmatch/core/review_queue.py` -- ReviewQueue (memory/SQLite/Postgres backends), ReviewItem, gate_pairs(). Confidence gating: >0.95 auto-merge, 0.75-0.95 review, <0.75 reject
+- `goldenmatch/core/memory/` -- Learning Memory: persistent corrections + rule learning. `store.py` (MemoryStore, SQLite/Postgres CRUD, trust-based upsert), `corrections.py` (apply_corrections with dual-hash staleness detection), `learner.py` (MemoryLearner, threshold tuning from 10+ corrections). Config: `MemoryConfig` in schemas.py, optional `memory:` YAML section
 - `goldenmatch/a2a/` -- A2A protocol server (aiohttp). Agent card at `/.well-known/agent.json`, 8 skills, task lifecycle, SSE streaming. CLI: `goldenmatch agent-serve --port 8200`
 - `goldenmatch/mcp/agent_tools.py` -- 10 agent-level MCP tools (additive to existing). Each creates own AgentSession (no shared global state)
 - `_api.py` has DataFrame entry points: `dedupe_df()`, `match_df()`, `score_strings()`, `score_pair_df()`, `explain_pair_df()` -- used by SQL extensions
@@ -67,6 +69,7 @@
 - `dbt-goldenmatch/` — Separate package for dbt integration via DuckDB
 - Core modules: explainer, explain, evaluate, report, dashboard, graph, anomaly, diff, rollback, schema_match, chunked, cloud_ingest, api_connector, scheduler, gpu, vertex_embedder, llm_scorer, llm_budget, lineage, match_one, probabilistic, learned_blocking, streaming, graph_er
 - Config: Pydantic models in `config/schemas.py`, YAML loading in `config/loader.py`
+- `config/schemas.py` has `MemoryConfig` (enabled, backend, path, trust, learning) and `LearningConfig` (threshold_min_corrections, weights_min_corrections). `GoldenMatchConfig.memory` is optional
 - `config/loader.py` normalizes golden_rules and standardization sections from flat YAML
 
 ## Performance
@@ -217,3 +220,4 @@
 - Coverage config in pyproject.toml: omit db/*, mcp/*, vertex_embedder, connectors/* (require external services)
 - GitHub Pages: docs workflow uses `actions/jekyll-build-pages` with source `./docs`, Just the Docs theme
 - GitHub Release triggers publish.yml workflow which auto-publishes to PyPI via trusted publishing
+- v2.0 Learning Memory: PR #9 has core modules (store, corrections, learner). Remaining: pipeline integration (hook after scoring), collection point wiring (review_queue, boost_tab, unmerge, llm_scorer, agent_tools, REST), CLI subcommands (memory stats/learn/export/import), MCP tools. Spec: `docs/superpowers/specs/2026-03-26-learning-memory-design.md`. Plan: `docs/superpowers/plans/2026-03-26-learning-memory-implementation.md`
