@@ -65,10 +65,11 @@ def _initialize(file_paths: list[str], config_path: str | None = None) -> None:
     )
 
 
-def create_server(file_paths: list[str], config_path: str | None = None) -> Server:
+def create_server(file_paths: list[str] | None = None, config_path: str | None = None) -> Server:
     """Create and configure the MCP server."""
 
-    _initialize(file_paths, config_path)
+    if file_paths:
+        _initialize(file_paths, config_path)
 
     server = Server("goldenmatch")
 
