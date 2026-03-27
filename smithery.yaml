@@ -1,0 +1,63 @@
+name: goldenmatch
+description: Stop wrestling with duplicate records -- deduplicate, match, and merge entities across messy datasets.
+icon: "\U0001F517"
+startCommand: goldenmatch mcp-serve
+tools:
+  # Core tools (12)
+  - name: get_stats
+    description: Get dataset statistics -- record count, cluster count, match rate, cluster sizes.
+  - name: find_duplicates
+    description: Find duplicate matches for a record by searching against the loaded dataset.
+  - name: explain_match
+    description: Explain why two records match or don't match with per-field score breakdown.
+  - name: list_clusters
+    description: List duplicate clusters found in the dataset with sizes and member counts.
+  - name: get_cluster
+    description: Get all member records and field values for a specific cluster.
+  - name: get_golden_record
+    description: Get the merged golden (canonical) record for a cluster.
+  - name: match_record
+    description: Match a single record against the loaded dataset in real-time using configured matchkeys.
+  - name: unmerge_record
+    description: Remove a record from its cluster to fix bad merges -- record becomes a singleton.
+  - name: shatter_cluster
+    description: Break an entire cluster into individual singleton records.
+  - name: suggest_config
+    description: Analyze bad merges and suggest config changes -- identifies guilty fields and thresholds.
+  - name: profile_data
+    description: Get data quality profile -- column types, null rates, unique counts, sample values.
+  - name: export_results
+    description: Export matching results to CSV or JSON.
+  # Domain tools (3)
+  - name: list_domains
+    description: List available domain extraction rulebooks (built-in and user-defined).
+  - name: create_domain
+    description: Create a custom domain extraction rulebook for a specific data domain.
+  - name: test_domain
+    description: Test a domain rulebook against sample records to preview feature extraction.
+  # PPRL tools (2)
+  - name: pprl_auto_config
+    description: Analyze data and recommend optimal privacy-preserving record linkage configuration.
+  - name: pprl_link
+    description: Run privacy-preserving record linkage between two parties without sharing raw data.
+  # Agent tools (10)
+  - name: analyze_data
+    description: Profile data, detect domain, and recommend an entity resolution strategy.
+  - name: auto_configure
+    description: Generate optimal matching config from data analysis.
+  - name: agent_deduplicate
+    description: Run full ER pipeline with confidence gating and reasoning.
+  - name: agent_match_sources
+    description: Match two files with intelligent strategy selection.
+  - name: agent_explain_pair
+    description: Natural language explanation for why a record pair matches or doesn't.
+  - name: agent_explain_cluster
+    description: Explain why records ended up in the same cluster.
+  - name: agent_review_queue
+    description: Get borderline pairs awaiting human approval.
+  - name: agent_approve_reject
+    description: Approve or reject a review queue pair.
+  - name: agent_compare_strategies
+    description: Compare ER strategies on your data with optional ground truth.
+  - name: suggest_pprl
+    description: Check if data needs privacy-preserving matching.

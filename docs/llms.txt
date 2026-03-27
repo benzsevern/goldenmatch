@@ -1,0 +1,19 @@
+# GoldenMatch
+
+> Entity resolution toolkit — deduplicate records and match across datasets using fuzzy, probabilistic, and LLM-powered scoring.
+
+## Interfaces
+- MCP Server: `goldenmatch mcp-serve` (10 tools: analyze, configure, deduplicate, match, explain, review, compare strategies, PPRL)
+- A2A Server: `goldenmatch agent-serve --port 8200` (8 skills)
+- CLI: `goldenmatch dedupe`, `goldenmatch match`, + 18 more commands
+- Python API: `import goldenmatch` — `dedupe_df()`, `match_df()`, `score_strings()`, `evaluate()`, ~101 exports
+- REST API: `goldenmatch serve` on port 8000
+
+## Install
+- `pip install goldenmatch`
+
+## Docs
+- [Architecture](CLAUDE.md): Full codebase guide with patterns, gotchas, and performance notes
+- [PyPI](https://pypi.org/project/goldenmatch/): Package page
+- [GitHub](https://github.com/benzsevern/goldenmatch): Source
+- [Full API Reference](llms-full.txt): Extended documentation with all function signatures and usage patterns
