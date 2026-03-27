@@ -277,6 +277,24 @@ PPRL with auto-configuration beats manual tuning on both datasets. Zero-config: 
 
 Measured on a laptop (Windows 11, Python 3.12, 16GB RAM) with fuzzy + exact + golden record pipeline.
 
+---
+
+## Why GoldenMatch?
+
+| | GoldenMatch | [dedupe](https://github.com/dedupeio/dedupe) | [recordlinkage](https://github.com/J535D165/recordlinkage) | [Zingg](https://github.com/zinggAI/zingg) | [Splink](https://github.com/moj-analytical-services/splink) |
+|---|---|---|---|---|---|
+| Zero-config mode | Yes | No (requires training) | No (manual config) | No (Spark required) | No (SQL config) |
+| Fuzzy + probabilistic + LLM | All three | Probabilistic only | Probabilistic only | ML-based | Probabilistic only |
+| Privacy-preserving (PPRL) | Built-in (92.4% F1) | No | No | No | No |
+| Interactive TUI | Yes | No | No | No | No |
+| Golden record synthesis | 5 strategies | No | No | No | No |
+| MCP server (AI integration) | Yes (12 tools) | No | No | No | No |
+| Database sync | Postgres + DuckDB | No | No | No | Spark/DuckDB |
+| Single `pip install` | Yes | Yes | Yes | No (Java/Spark) | Yes |
+| Polars-native | Yes | No (pandas) | No (pandas) | No (Spark) | Yes (DuckDB) |
+
+GoldenMatch is the only tool that combines zero-config operation, probabilistic matching, LLM scoring, privacy-preserving linkage, and golden record synthesis in a single Python package.
+
 ## Quick Start
 
 ### Zero-Config (no YAML needed)

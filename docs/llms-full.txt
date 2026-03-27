@@ -1,0 +1,391 @@
+# GoldenMatch — Full API Reference
+
+> Entity resolution toolkit — deduplicate records and match across datasets using fuzzy, probabilistic, and LLM-powered scoring.
+> See also: [llms.txt](llms.txt) for a concise overview.
+
+## Install
+
+```bash
+pip install goldenmatch
+```
+
+## Quick Start
+
+```python
+import goldenmatch as gm
+
+# Deduplicate a CSV
+result = gm.dedupe("customers.csv", exact=["email"], fuzzy={"name": 0.85})
+result.golden.write_csv("deduped.csv")
+
+# Match across files
+result = gm.match("targets.csv", "reference.csv", fuzzy={"name": 0.85})
+
+# Privacy-preserving linkage
+result = gm.pprl_link("hospital_a.csv", "hospital_b.csv", fields=["name", "dob", "zip"])
+
+# Evaluate accuracy
+metrics = gm.evaluate("data.csv", config="config.yaml", ground_truth="gt.csv")
+
+# Streaming single-record matching
+matches = gm.match_one(record, df, matchkey)
+
+# Explain a match
+explanation = gm.explain_pair(record_a, record_b, matchkey)
+```
+
+## High-Level API (convenience functions)
+
+```python
+from goldenmatch import (
+    dedupe,          # dedupe(path, *, exact=None, fuzzy=None, config=None) -> DedupeResult
+    dedupe_df,       # dedupe_df(df, *, exact=None, fuzzy=None, config=None) -> DedupeResult
+    match,           # match(path_a, path_b, *, exact=None, fuzzy=None, config=None) -> MatchResult
+    match_df,        # match_df(df_a, df_b, *, exact=None, fuzzy=None, config=None) -> MatchResult
+    score_strings,   # score_strings(a, b, method="jaro_winkler") -> float
+    score_pair_df,   # score_pair_df(df_a, df_b, matchkey) -> pl.DataFrame
+    explain_pair_df, # explain_pair_df(df_a, df_b, matchkey) -> str
+    pprl_link,       # pprl_link(path_a, path_b, *, fields, config=None) -> LinkageResult
+    evaluate,        # evaluate(path, *, config, ground_truth) -> EvalResult
+    load_config,     # load_config(path) -> GoldenMatchConfig
+    DedupeResult,    # Result with .golden, .dupes, .unique, .clusters DataFrames
+    MatchResult,     # Result with .matched, .unmatched DataFrames
+)
+```
+
+## Config Schemas (for building configs programmatically)
+
+```python
+from goldenmatch import (
+    GoldenMatchConfig,       # Root config model
+    MatchkeyConfig,          # Matchkey definition (fields, threshold, type)
+    MatchkeyField,           # Single field in a matchkey (name, method, weight)
+    BlockingConfig,          # Blocking strategy config
+    BlockingKeyConfig,       # Single blocking key
+    GoldenRulesConfig,       # Golden record merge rules
+    GoldenFieldRule,         # Per-field merge rule
+    LLMScorerConfig,         # LLM scoring config (model, budget, mode)
+    BudgetConfig,            # LLM budget limits (max_cost_usd, max_calls)
+    DomainConfig,            # Domain extraction config
+    StandardizationConfig,   # Standardization pipeline config
+    ValidationConfig,        # Input validation config
+    OutputConfig,            # Output format/path config
+)
+```
+
+## Core Pipeline Functions
+
+```python
+from goldenmatch import (
+    run_dedupe,              # run_dedupe(config) -> dict  (full pipeline)
+    run_match,               # run_match(config) -> dict  (full pipeline)
+    find_exact_matches,      # find_exact_matches(df, fields) -> list[tuple[int,int,float]]
+    find_fuzzy_matches,      # find_fuzzy_matches(df, matchkey, block) -> list[tuple[int,int,float]]
+    score_pair,              # score_pair(row_a, row_b, matchkey) -> float
+    score_blocks_parallel,   # score_blocks_parallel(df, matchkey, blocks, matched_pairs) -> list
+    build_clusters,          # build_clusters(pairs) -> dict[int, dict]
+    add_to_cluster,          # add_to_cluster(record_id, matches, clusters) -> clusters
+    unmerge_record,          # unmerge_record(record_id, clusters) -> clusters
+    unmerge_cluster,         # unmerge_cluster(cluster_id, clusters) -> clusters
+    compute_cluster_confidence,  # compute_cluster_confidence(cluster) -> float
+    build_blocks,            # build_blocks(df, blocking_config) -> list[pl.DataFrame]
+    build_golden_record,     # build_golden_record(cluster, df, rules) -> dict
+    load_file,               # load_file(path) -> pl.DataFrame
+    load_files,              # load_files(*specs) -> pl.DataFrame
+    apply_standardization,   # apply_standardization(df, config) -> pl.DataFrame
+    compute_matchkeys,       # compute_matchkeys(df, matchkeys) -> pl.DataFrame
+)
+```
+
+## Streaming / Incremental
+
+```python
+from goldenmatch import (
+    match_one,        # match_one(record, df, matchkey) -> list[tuple[int, float]]
+    StreamProcessor,  # StreamProcessor(config) -- .process_record(record), .process_batch(df)
+    run_stream,       # run_stream(config, source) -> StreamResult
+)
+```
+
+## Evaluation
+
+```python
+from goldenmatch import (
+    evaluate_pairs,        # evaluate_pairs(predicted, ground_truth) -> EvalResult
+    evaluate_clusters,     # evaluate_clusters(clusters, ground_truth) -> EvalResult
+    load_ground_truth_csv, # load_ground_truth_csv(path) -> list[tuple[int,int]]
+    EvalResult,            # Dataclass: precision, recall, f1, tp, fp, fn
+)
+```
+
+## Explainability
+
+```python
+from goldenmatch import (
+    explain_pair,       # explain_pair(record_a, record_b, matchkey) -> str  (NL explanation)
+    explain_pair_nl,    # Same as explain_pair (alias)
+    explain_cluster,    # explain_cluster(cluster, df) -> str
+    explain_cluster_nl, # Same as explain_cluster (alias)
+)
+```
+
+## Domain Extraction
+
+```python
+from goldenmatch import (
+    discover_rulebooks,     # discover_rulebooks() -> list[DomainRulebook]
+    load_rulebook,          # load_rulebook(name) -> DomainRulebook
+    save_rulebook,          # save_rulebook(rulebook, path) -> None
+    match_domain,           # match_domain(df) -> str | None  (auto-detect domain)
+    extract_with_rulebook,  # extract_with_rulebook(df, rulebook) -> pl.DataFrame
+    DomainRulebook,         # Domain rulebook model
+)
+# Built-in domains: electronics, software, healthcare, financial, real_estate, people, retail
+```
+
+## Probabilistic (Fellegi-Sunter)
+
+```python
+from goldenmatch import (
+    train_em,             # train_em(df, matchkey, blocking_fields=None) -> EMResult
+    score_probabilistic,  # score_probabilistic(pairs, em_result) -> list[tuple[int,int,float]]
+)
+```
+
+## Learned Blocking
+
+```python
+from goldenmatch import (
+    learn_blocking_rules,  # learn_blocking_rules(df, matchkey) -> list[BlockingKeyConfig]
+    apply_learned_blocks,  # apply_learned_blocks(df, rules) -> list[pl.DataFrame]
+)
+```
+
+## LLM Scoring
+
+```python
+from goldenmatch import (
+    llm_score_pairs,       # llm_score_pairs(pairs, config) -> list[tuple[int,int,float]]
+    llm_cluster_pairs,     # llm_cluster_pairs(pairs, config) -> dict  (in-context clustering)
+    BudgetTracker,         # BudgetTracker(config) -- .track(tokens, cost), .exceeded -> bool
+    llm_label_pairs,       # llm_label_pairs(pairs, config) -> list[tuple[int,int,str]]
+    llm_extract_features,  # llm_extract_features(df, config) -> pl.DataFrame
+)
+```
+
+## PPRL (Privacy-Preserving Record Linkage)
+
+```python
+from goldenmatch import (
+    PPRLConfig,              # Config: fields, bloom_size, hash_count, threshold, security_level
+    run_pprl,                # run_pprl(config) -> LinkageResult
+    compute_bloom_filters,   # compute_bloom_filters(df, fields, config) -> np.ndarray
+    link_trusted_third_party,# link_trusted_third_party(party_a, party_b, config) -> LinkageResult
+    link_smc,                # link_smc(party_a, party_b, config) -> LinkageResult
+    PartyData,               # Party data container
+    LinkageResult,           # Result with matched pairs
+    auto_configure_pprl,     # auto_configure_pprl(df_a, df_b, fields) -> PPRLConfig
+    auto_configure_pprl_llm, # auto_configure_pprl_llm(df_a, df_b) -> PPRLConfig
+    profile_for_pprl,        # profile_for_pprl(df, fields) -> dict
+)
+```
+
+## Profiling, Lineage, and Data Quality
+
+```python
+from goldenmatch import (
+    profile_dataframe,     # profile_dataframe(df) -> dict
+    build_lineage,         # build_lineage(clusters, df) -> dict
+    save_lineage,          # save_lineage(lineage, path) -> None
+    boost_accuracy,        # boost_accuracy(clusters, df, config) -> clusters
+    auto_configure,        # auto_configure(df) -> GoldenMatchConfig
+    suggest_threshold,     # suggest_threshold(scores) -> float
+    auto_fix_dataframe,    # auto_fix_dataframe(df) -> pl.DataFrame
+    validate_dataframe,    # validate_dataframe(df, config) -> list[str]
+    detect_anomalies,      # detect_anomalies(df) -> list[dict]
+    auto_map_columns,      # auto_map_columns(df_a, df_b) -> dict[str, str]
+)
+```
+
+## Graph ER and Reranking
+
+```python
+from goldenmatch import (
+    run_graph_er,      # run_graph_er(tables, relationships) -> dict  (multi-table ER)
+    rerank_top_pairs,  # rerank_top_pairs(pairs, df, matchkey) -> list
+)
+```
+
+## Diff and Rollback
+
+```python
+from goldenmatch import (
+    generate_diff,  # generate_diff(run_a, run_b) -> dict
+    rollback_run,   # rollback_run(run_id) -> None
+)
+```
+
+## Output
+
+```python
+from goldenmatch import (
+    write_output,            # write_output(result, config) -> None
+    generate_dedupe_report,  # generate_dedupe_report(result) -> str
+)
+```
+
+## REST API Client
+
+```python
+from goldenmatch import Client
+
+client = Client(base_url="http://localhost:8000")
+client.match(data)
+client.list_clusters()
+client.explain(cluster_id)
+client.reviews()
+```
+
+## Agent and Review Queue
+
+```python
+from goldenmatch import (
+    AgentSession,  # AgentSession() -- autonomous ER agent
+    ReviewQueue,   # ReviewQueue(backend="memory"|"sqlite"|"postgres")
+    gate_pairs,    # gate_pairs(pairs, thresholds) -> (auto, review, reject)
+)
+```
+
+## Learning Memory
+
+```python
+from goldenmatch import (
+    MemoryStore,         # MemoryStore(backend="sqlite", path="memory.db")
+    Correction,          # Correction(pair, decision, reason)
+    LearnedAdjustment,   # Learned threshold/weight adjustment
+    CorrectionStats,     # Stats on stored corrections
+    MemoryLearner,       # MemoryLearner(store) -- .learn() -> list[LearnedAdjustment]
+    apply_corrections,   # apply_corrections(pairs, store) -> pairs
+)
+```
+
+## Common Usage Patterns
+
+### Zero-config deduplication
+```python
+import goldenmatch as gm
+result = gm.dedupe("customers.csv", fuzzy={"name": 0.85, "address": 0.80})
+print(f"Found {len(result.dupes)} duplicates in {len(result.golden)} clusters")
+result.golden.write_csv("golden_records.csv")
+```
+
+### Auto-configured pipeline
+```python
+import goldenmatch as gm
+df = gm.load_file("data.csv")
+config = gm.auto_configure(df)
+result = gm.run_dedupe(config)
+```
+
+### LLM-boosted matching with budget
+```python
+import goldenmatch as gm
+result = gm.dedupe("products.csv",
+    fuzzy={"title": 0.75},
+    config={"llm_scorer": {"enabled": True, "budget": {"max_cost_usd": 0.10}}}
+)
+```
+
+### Streaming / incremental matching
+```python
+import goldenmatch as gm
+processor = gm.StreamProcessor(config)
+for record in new_records:
+    matches = processor.process_record(record)
+```
+
+### PPRL across organizations
+```python
+import goldenmatch as gm
+config = gm.auto_configure_pprl(df_a, df_b, fields=["name", "dob", "zip"])
+result = gm.run_pprl(config)
+```
+
+### Evaluation with CI quality gate
+```bash
+goldenmatch evaluate --config config.yaml --ground-truth gt.csv --min-f1 0.90 --min-precision 0.80
+```
+
+## Configuration Example (YAML)
+
+```yaml
+files:
+  - path: customers.csv
+    source: customers
+
+matchkeys:
+  - fields:
+      - name: email
+        type: exact
+  - fields:
+      - name: full_name
+        method: jaro_winkler
+        weight: 0.6
+      - name: zip_code
+        method: exact
+        weight: 0.4
+    threshold: 0.85
+
+blocking:
+  keys:
+    - fields: [zip_code]
+    - fields: [last_name_soundex]
+
+golden_rules:
+  fields:
+    - name: email
+      strategy: most_complete
+    - name: phone
+      strategy: most_recent
+
+llm_scorer:
+  enabled: true
+  model: gpt-4o-mini
+  budget:
+    max_cost_usd: 0.05
+    max_calls: 100
+
+output:
+  format: csv
+  path: output/
+```
+
+## CLI Commands
+
+```bash
+goldenmatch dedupe data.csv --config config.yaml    # Deduplicate
+goldenmatch match a.csv b.csv --fuzzy name:0.85     # Cross-file match
+goldenmatch evaluate --config X --ground-truth Y    # Evaluate accuracy
+goldenmatch pprl link a.csv b.csv --fields name,dob # Privacy-preserving linkage
+goldenmatch serve                                    # Start REST API
+goldenmatch mcp-serve                               # Start MCP server
+goldenmatch agent-serve --port 8200                  # Start A2A server
+goldenmatch incremental new.csv --base existing.csv  # Incremental matching
+goldenmatch explain cluster-42                       # Explain a cluster
+goldenmatch unmerge record-123                       # Unmerge a record
+goldenmatch label pairs.csv                          # Label training pairs
+```
+
+## Interfaces
+
+- **MCP Server**: `goldenmatch mcp-serve` — 10 tools for Claude Desktop integration
+- **A2A Server**: `goldenmatch agent-serve --port 8200` — 8 skills via Agent-to-Agent protocol
+- **REST API**: `goldenmatch serve` on port 8000 — match, clusters, explain, reviews endpoints
+- **CLI**: 20+ Typer commands
+- **Python API**: `import goldenmatch` — ~101 exports
+
+## Links
+
+- [GitHub](https://github.com/benzsevern/goldenmatch)
+- [PyPI](https://pypi.org/project/goldenmatch/)
+- [Concise overview](llms.txt)
