@@ -651,6 +651,29 @@ Settings tuned in the TUI can be saved to the project file. Next run picks them 
 | `--daemon` | Run watch mode as a background service with health endpoint |
 | `s3://` / `gs://` / `az://` | Read directly from cloud storage |
 
+## Remote MCP Server
+
+GoldenMatch is available as a hosted MCP server on [Smithery](https://smithery.ai/servers/benzsevern/goldenmatch) — connect from any MCP client without installing anything.
+
+**Claude Desktop / Claude Code:**
+```json
+{
+  "mcpServers": {
+    "goldenmatch": {
+      "url": "https://goldenmatch-mcp-production.up.railway.app/mcp/"
+    }
+  }
+}
+```
+
+**Local server** (if you prefer to run locally):
+```bash
+pip install goldenmatch[mcp]
+goldenmatch mcp-serve data.csv
+```
+
+27 tools available: deduplicate files, match records, explain decisions, review borderline pairs, privacy-preserving linkage, configure rules, and synthesize golden records.
+
 ## Architecture
 
 ```

@@ -4,6 +4,7 @@
 
 ## Interfaces
 - MCP Server: `goldenmatch mcp-serve` (10 tools: analyze, configure, deduplicate, match, explain, review, compare strategies, PPRL)
+- Remote MCP: https://goldenmatch-mcp-production.up.railway.app/mcp/ (27 tools, Smithery: https://smithery.ai/servers/benzsevern/goldenmatch)
 - A2A Server: `goldenmatch agent-serve --port 8200` (8 skills)
 - CLI: `goldenmatch dedupe`, `goldenmatch match`, + 18 more commands
 - Python API: `import goldenmatch` — `dedupe_df()`, `match_df()`, `score_strings()`, `evaluate()`, ~101 exports

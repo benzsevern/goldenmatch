@@ -379,6 +379,7 @@ goldenmatch label pairs.csv                          # Label training pairs
 ## Interfaces
 
 - **MCP Server**: `goldenmatch mcp-serve` — 10 tools for Claude Desktop integration
+- **Remote MCP**: https://goldenmatch-mcp-production.up.railway.app/mcp/ (27 tools, Smithery: https://smithery.ai/servers/benzsevern/goldenmatch)
 - **A2A Server**: `goldenmatch agent-serve --port 8200` — 8 skills via Agent-to-Agent protocol
 - **REST API**: `goldenmatch serve` on port 8000 — match, clusters, explain, reviews endpoints
 - **CLI**: 20+ Typer commands

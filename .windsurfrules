@@ -94,3 +94,10 @@ GoldenMatch is a Python entity resolution / record linkage toolkit. It deduplica
 - Fellegi-Sunter EM: blocking fields must be excluded from training. u-probabilities estimated from random pairs and FIXED during EM.
 - PyPI version must be bumped in both `pyproject.toml` and `goldenmatch/__init__.py`.
 - `.testing/` folder is gitignored -- store credentials/API keys there.
+
+## Remote MCP Server
+- Endpoint: https://goldenmatch-mcp-production.up.railway.app/mcp/
+- Smithery: https://smithery.ai/servers/benzsevern/goldenmatch
+- 27 tools, Streamable HTTP transport
+- Dockerfile: Dockerfile.mcp
+- Local HTTP: goldenmatch mcp-serve --transport http --port 8200

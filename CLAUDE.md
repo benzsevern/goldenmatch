@@ -163,6 +163,17 @@
 - A2A server runs on separate port (8200) from REST API (8000) -- aiohttp for async/SSE, existing REST stays synchronous
 - `aiohttp` is optional dep: `pip install goldenmatch[agent]`
 
+## Remote MCP Server
+
+Hosted on Railway, registered on Smithery:
+- **Endpoint:** `https://goldenmatch-mcp-production.up.railway.app/mcp/`
+- **Smithery:** `https://smithery.ai/servers/benzsevern/goldenmatch`
+- **Server card:** `https://goldenmatch-mcp-production.up.railway.app/.well-known/mcp/server-card.json`
+- **Transport:** Streamable HTTP (via `StreamableHTTPSessionManager`)
+- **Dockerfile:** `Dockerfile.mcp` (Python 3.12-slim, installs `.[mcp]`)
+- **Railway project:** `golden-suite-mcp` (service: `goldenmatch-mcp`, port 8200)
+- **Local HTTP:** `goldenmatch mcp-serve --transport http --port 8200`
+
 ## Gotchas
 - .docx files can't be read by Read tool — use `python-docx` or zipfile+XML
 - Windows drive letter paths (C:\) break `file:source_name` CLI parsing — handle in `_parse_file_source`

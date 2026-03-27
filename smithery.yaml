@@ -1,3 +1,4 @@
+url: https://goldenmatch-mcp-production.up.railway.app/mcp/
 name: goldenmatch
 description: Stop wrestling with duplicate records -- deduplicate, match, and merge entities across messy datasets.
 icon: "\U0001F517"
