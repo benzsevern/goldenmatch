@@ -71,7 +71,7 @@ def create_server(file_paths: list[str] | None = None, config_path: str | None =
     if file_paths:
         _initialize(file_paths, config_path)
 
-    server = Server("goldenmatch")
+    server = Server("GoldenMatch")
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
@@ -981,7 +981,8 @@ async def run_server_http(
 
     import uvicorn
     from starlette.applications import Starlette
-    from starlette.routing import Mount
+    from starlette.responses import JSONResponse
+    from starlette.routing import Mount, Route
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
     server = create_server(file_paths or [], config_path)
@@ -995,8 +996,19 @@ async def run_server_http(
         async with session_manager.run():
             yield
 
+    async def server_card(request):
+        return JSONResponse({
+            "name": "GoldenMatch",
+            "description": "Entity resolution toolkit — deduplicate records, match across datasets, and create golden records using fuzzy, probabilistic, and LLM-powered scoring. Zero-config mode auto-detects your data. 27 MCP tools for matching, explaining, reviewing, and privacy-preserving linkage. Built on Polars. 97.2% F1 on DBLP-ACM.",
+            "homepage": "https://github.com/benzsevern/goldenmatch",
+            "iconUrl": "https://avatars.githubusercontent.com/u/192581748"
+        })
+
     app = Starlette(
-        routes=[Mount("/mcp", app=session_manager.handle_request)],
+        routes=[
+            Route("/.well-known/mcp/server-card.json", server_card),
+            Mount("/mcp", app=session_manager.handle_request),
+        ],
         lifespan=lifespan,
     )
 
