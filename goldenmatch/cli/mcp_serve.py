@@ -10,9 +10,18 @@ import typer
 def mcp_serve_cmd(
     files: list[str] = typer.Argument(..., help="Data files to load"),
     config: Optional[str] = typer.Option(None, "--config", "-c", help="Config YAML file"),
+    transport: str = typer.Option("stdio", "--transport", "-t", help="Transport: stdio or http"),
+    host: str = typer.Option("0.0.0.0", "--host", help="HTTP host (only for http transport)"),
+    port: int = typer.Option(8200, "--port", "-p", help="HTTP port (only for http transport)"),
 ) -> None:
-    """Start the GoldenMatch MCP server (for Claude Desktop integration)."""
+    """Start the GoldenMatch MCP server (for Claude Desktop or hosted deployment)."""
     import asyncio
-    from goldenmatch.mcp.server import run_server
 
-    asyncio.run(run_server(files, config))
+    if transport == "http":
+        from goldenmatch.mcp.server import run_server_http
+
+        asyncio.run(run_server_http(host=host, port=port, file_paths=files, config_path=config))
+    else:
+        from goldenmatch.mcp.server import run_server
+
+        asyncio.run(run_server(files, config))

@@ -966,3 +966,39 @@ async def run_server(file_paths: list[str], config_path: str | None = None) -> N
 
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
+
+
+async def run_server_http(
+    host: str = "0.0.0.0",
+    port: int = 8200,
+    file_paths: list[str] | None = None,
+    config_path: str | None = None,
+) -> None:
+    """Run the MCP server over Streamable HTTP (for hosted deployments)."""
+    import contextlib
+    from collections.abc import AsyncIterator
+
+    import uvicorn
+    from starlette.applications import Starlette
+    from starlette.routing import Mount
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
+    server = create_server(file_paths or [], config_path)
+    session_manager = StreamableHTTPSessionManager(
+        app=server,
+        stateless=True,
+    )
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app: Starlette) -> AsyncIterator[None]:
+        async with session_manager.run():
+            yield
+
+    app = Starlette(
+        routes=[Mount("/mcp", app=session_manager.handle_request)],
+        lifespan=lifespan,
+    )
+
+    config = uvicorn.Config(app, host=host, port=port)
+    uv_server = uvicorn.Server(config)
+    await uv_server.serve()
