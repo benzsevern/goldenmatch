@@ -1,3 +1,4 @@
+<!-- mcp-name: io.github.benzsevern/goldenmatch -->
 # GoldenMatch
 
 **Entity resolution toolkit — deduplicate records, match across sources, and maintain golden records. Works on files or live databases.**
