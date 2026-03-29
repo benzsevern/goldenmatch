@@ -657,6 +657,15 @@ goldenmatch/
 
 **Run tests:** `pytest` (924 tests)
 
+## Part of the Golden Suite
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| [GoldenCheck](https://github.com/benzsevern/goldencheck) | Validate & profile data quality | `pip install goldencheck` |
+| [GoldenFlow](https://github.com/benzsevern/goldenflow) | Transform & standardize data | `pip install goldenflow` |
+| [GoldenMatch](https://github.com/benzsevern/goldenmatch) | Deduplicate & match records | `pip install goldenmatch` |
+| [GoldenPipe](https://github.com/benzsevern/goldenpipe) | Orchestrate the full pipeline | `pip install goldenpipe` |
+
 ## License
 
 MIT
