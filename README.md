@@ -12,7 +12,7 @@ Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode
 [![Downloads](https://static.pepy.tech/badge/goldenmatch/month)](https://pepy.tech/project/goldenmatch)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-924%20passing-brightgreen)
+![Tests](https://github.com/benzsevern/goldenmatch/actions/workflows/test.yml/badge.svg)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/benzsevern/goldenmatch/blob/main/scripts/gpu_colab_notebook.ipynb)
 
 ### See it in action
@@ -35,7 +35,7 @@ goldenmatch demo
 - **Fellegi-Sunter probabilistic matching** — EM-trained m/u probabilities, automatic threshold estimation, comparison vectors with 2/3-level agreement
 - **Vertex AI embeddings** — 85%+ F1 accuracy with no GPU needed (Google Cloud managed API)
 - **Database sync** — incremental Postgres matching with persistent ANN index and golden record versioning
-- **REST API + MCP Server** — real-time matching via HTTP or Claude Desktop (12 tools: match, unmerge, explain, config advisor, etc.)
+- **REST API + MCP Server** — real-time matching via HTTP or Claude Desktop (27 tools: match, unmerge, explain, config advisor, etc.)
 - **Review queue** — REST endpoint surfaces borderline pairs for data steward approval/rejection
 - **Lineage tracking** — every merge decision saved to a JSON sidecar with per-field score breakdown
 - **Daemon mode** — `goldenmatch watch --daemon` runs as a service with health endpoint and PID file
@@ -239,47 +239,6 @@ Guides you through GPU mode selection, Vertex AI / Colab / local GPU configurati
 
 ![GPU Selection](docs/screenshots/setup-gpu.svg)
 
-## Benchmarks (v0.6.0)
-
-Tested on [Leipzig benchmark datasets](https://dbs.uni-leipzig.de/research/projects/object-matching/benchmark-datasets-for-entity-resolution) (DBLP-ACM, Abt-Buy).
-
-### Accuracy
-
-| Dataset | Strategy | Precision | Recall | F1 | Cost |
-|---------|----------|-----------|--------|-----|------|
-| DBLP-ACM (bibliographic) | Weighted fuzzy | 97.2% | 97.1% | **97.2%** | $0 |
-| DBLP-ACM | Fellegi-Sunter (opt-in) | 98.8% | 57.6% | 72.8% | $0 |
-| DBLP-ACM | Learned blocking | 97.6% | 96.3% | 96.9% | $0 |
-| Abt-Buy (product) | Embedding + ANN | 35.5% | 59.4% | 44.5% | $0 |
-| Abt-Buy | Model extraction + emb | 39.3% | 71.0% | 50.6% | $0 |
-| Abt-Buy | **Domain + emb + LLM** | **94.8%** | **58.3%** | **72.2%** | **$0.04** |
-| Amazon-Google (software) | emb+ANN + LLM | 63.3% | 35.2% | **45.3%** | $0.02 |
-
-### PPRL (Privacy-Preserving Record Linkage)
-
-Benchmarked on FEBRL4 (5K vs 5K synthetic person records) and NCVR (North Carolina Voter Registration):
-
-| Strategy | Precision | Recall | F1 | Privacy |
-|----------|-----------|--------|-----|---------|
-| Normal fuzzy (baseline) | 56.5% | 74.6% | 64.3% | None |
-| **PPRL auto-config (FEBRL4)** | **99.7%** | **86.1%** | **92.4%** | Per-field HMAC |
-| PPRL auto-config (NCVR) | 64.0% | 93.8% | 76.1% | Per-field HMAC |
-| PPRL paranoid (FEBRL4) | 98.9% | 76.0% | 86.0% | HMAC + balanced |
-
-PPRL with auto-configuration beats manual tuning on both datasets. Zero-config: GoldenMatch profiles your data and picks optimal fields, bloom filter parameters, and threshold automatically.
-
-### Speed
-
-| Records | Time | Throughput | Memory |
-|---------|------|-----------|--------|
-| 1,000 | 0.15s | 6,667 rec/s | 101 MB |
-| 10,000 | 1.67s | 5,975 rec/s | 123 MB |
-| 100,000 | 12.78s | **7,823 rec/s** | 546 MB |
-
-Measured on a laptop (Windows 11, Python 3.12, 16GB RAM) with fuzzy + exact + golden record pipeline.
-
----
-
 ## Why GoldenMatch?
 
 | | GoldenMatch | [dedupe](https://github.com/dedupeio/dedupe) | [recordlinkage](https://github.com/J535D165/recordlinkage) | [Zingg](https://github.com/zinggAI/zingg) | [Splink](https://github.com/moj-analytical-services/splink) |
@@ -289,7 +248,7 @@ Measured on a laptop (Windows 11, Python 3.12, 16GB RAM) with fuzzy + exact + go
 | Privacy-preserving (PPRL) | Built-in (92.4% F1) | No | No | No | No |
 | Interactive TUI | Yes | No | No | No | No |
 | Golden record synthesis | 5 strategies | No | No | No | No |
-| MCP server (AI integration) | Yes (12 tools) | No | No | No | No |
+| MCP server (AI integration) | Yes (27 tools) | No | No | No | No |
 | Database sync | Postgres + DuckDB | No | No | No | Spark/DuckDB |
 | Single `pip install` | Yes | Yes | Yes | No (Java/Spark) | Yes |
 | Polars-native | Yes | No (pandas) | No (pandas) | No (Spark) | Yes (DuckDB) |
@@ -559,8 +518,6 @@ For datasets over 1M records, use `goldenmatch sync` (database mode) with increm
 | GPU required | No | No | No | Spark | Yes |
 
 GoldenMatch's sweet spot is **ease of use + competitive accuracy**. On bibliographic matching (DBLP-ACM), GoldenMatch hits 97.2% with zero config. On product matching (Abt-Buy), the LLM scorer reaches 81.7% — within 8pts of Ditto's 89.3%, but with zero training labels and no GPU. Ditto requires 1000+ hand-labeled pairs and a GPU.
-
-## Interactive TUI
 
 ## Large Dataset Mode
 

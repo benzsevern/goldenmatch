@@ -32,3 +32,15 @@ service-account*.json
 .goldenmatch_faiss/
 .superpowers/
 tests/benchmarks/datasets/NCVR/
+
+# AI editor config files
+.mypy_cache/
+.tox/
+*.egg
+htmlcov/
+.venv/
+venv/
+.clinerules
+.cursorrules
+.windsurfrules
+docs/superpowers/

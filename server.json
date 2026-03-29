@@ -21,7 +21,7 @@
   ],
   "remotes": [
     {
-      "transportType": "streamable-http",
+      "type": "streamable-http",
       "url": "https://goldenmatch-mcp-production.up.railway.app/mcp/"
     }
   ]

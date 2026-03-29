@@ -39,7 +39,8 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/benzsevern/goldenmatch"
-Documentation = "https://github.com/benzsevern/goldenmatch/tree/main/docs/wiki"
+Documentation = "https://benzsevern.github.io/goldenmatch/"
+Changelog = "https://github.com/benzsevern/goldenmatch/blob/main/CHANGELOG.md"
 Repository = "https://github.com/benzsevern/goldenmatch"
 Issues = "https://github.com/benzsevern/goldenmatch/issues"
 
@@ -66,6 +67,21 @@ mcp = [
 ]
 pprl = [
     "mp-spdz>=0.3",
+]
+snowflake = [
+    "snowflake-connector-python>=3.0",
+]
+bigquery = [
+    "google-cloud-bigquery>=3.0",
+]
+databricks = [
+    "databricks-sql-connector>=3.0",
+]
+salesforce = [
+    "simple-salesforce>=1.12",
+]
+duckdb = [
+    "duckdb>=0.9",
 ]
 ray = [
     "ray>=2.0",
