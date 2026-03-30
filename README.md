@@ -12,7 +12,7 @@ Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-benzsevern.github.io%2Fgoldenmatch-d4a017)](https://benzsevern.github.io/goldenmatch/)
-[![DQBench ER](https://img.shields.io/badge/DQBench%20ER-58.04-gold)](https://github.com/benzsevern/dqbench)
+[![DQBench ER](https://img.shields.io/badge/DQBench%20ER-77.21-gold)](https://github.com/benzsevern/dqbench)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/benzsevern/goldenmatch/blob/main/scripts/gpu_colab_notebook.ipynb)
 
 ### See it in action
