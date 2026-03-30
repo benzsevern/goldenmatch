@@ -3,28 +3,44 @@ name: "Try GoldenMatch"
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "What to run"
+        type: choice
+        options:
+          - "Basic Dedupe (sample data)"
+          - "Custom CSV"
+          - "DQBench Benchmark"
+        default: "Basic Dedupe (sample data)"
       csv_url:
-        description: "URL to a CSV file (raw GitHub URL, public URL, or gist)"
-        required: true
+        description: "URL to a CSV file (only used in 'Custom CSV' mode)"
+        required: false
         type: string
       config:
-        description: "Match config (simple|fuzzy|exact) or raw YAML"
+        description: "Match config for Custom CSV (simple|fuzzy|exact) or raw YAML"
         required: false
         default: "simple"
         type: string
       name_columns:
-        description: "Comma-separated name columns (e.g. first_name,last_name)"
+        description: "Comma-separated name columns (Custom CSV only, e.g. first_name,last_name)"
         required: false
         type: string
       email_column:
-        description: "Email column name"
+        description: "Email column name (Custom CSV only)"
         required: false
         type: string
 
+permissions:
+  contents: read
+
 jobs:
-  dedupe:
+  run:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      INPUT_CSV_URL: ${{ github.event.inputs.csv_url }}
+      INPUT_CONFIG: ${{ github.event.inputs.config }}
+      INPUT_NAME_COLUMNS: ${{ github.event.inputs.name_columns }}
+      INPUT_EMAIL_COLUMN: ${{ github.event.inputs.email_column }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,20 +51,28 @@ jobs:
       - name: Install GoldenMatch
         run: pip install goldenmatch
 
+      # ── Mode 1: Basic Dedupe ──────────────────────────────────────
+      - name: Basic Dedupe (sample data)
+        if: inputs.mode == 'Basic Dedupe (sample data)'
+        run: python examples/basic_dedupe.py
+
+      # ── Mode 2: Custom CSV ────────────────────────────────────────
       - name: Download CSV
+        if: inputs.mode == 'Custom CSV'
         run: |
-          curl -fsSL "${{ github.event.inputs.csv_url }}" -o input.csv
+          curl -fsSL "$INPUT_CSV_URL" -o input.csv
           echo "=== First 5 rows ==="
           head -6 input.csv
 
       - name: Generate config
+        if: inputs.mode == 'Custom CSV'
         run: |
           python -c "
-          import sys, yaml
+          import os, sys, yaml
 
-          preset = '${{ github.event.inputs.config }}'
-          name_cols = '${{ github.event.inputs.name_columns }}'.strip()
-          email_col = '${{ github.event.inputs.email_column }}'.strip()
+          preset = os.environ.get('INPUT_CONFIG', 'simple').strip()
+          name_cols = os.environ.get('INPUT_NAME_COLUMNS', '').strip()
+          email_col = os.environ.get('INPUT_EMAIL_COLUMN', '').strip()
 
           if preset in ('simple', 'exact', 'fuzzy'):
               matchkeys = []
@@ -94,10 +118,12 @@ jobs:
           print(yaml.dump(config, default_flow_style=False))
           "
 
-      - name: Run GoldenMatch
+      - name: Run GoldenMatch (Custom CSV)
+        if: inputs.mode == 'Custom CSV'
         run: goldenmatch dedupe input.csv --config config.yaml --output results.csv
 
       - name: Show results summary
+        if: inputs.mode == 'Custom CSV'
         run: |
           python -c "
           import polars as pl
@@ -115,8 +141,18 @@ jobs:
           "
 
       - name: Upload results
+        if: inputs.mode == 'Custom CSV'
         uses: actions/upload-artifact@v4
         with:
           name: goldenmatch-results
           path: results.csv
           retention-days: 30
+
+      # ── Mode 3: DQBench Benchmark ─────────────────────────────────
+      - name: Install DQBench
+        if: inputs.mode == 'DQBench Benchmark'
+        run: pip install dqbench
+
+      - name: DQBench Benchmark
+        if: inputs.mode == 'DQBench Benchmark'
+        run: python examples/benchmark.py
