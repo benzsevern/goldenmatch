@@ -147,7 +147,7 @@ from goldenmatch.core.lineage import build_lineage, save_lineage
 from goldenmatch.core.boost import boost_accuracy
 
 # ── Auto-configuration ──────────────────────────────────────────────────
-from goldenmatch.core.autoconfig import auto_configure
+from goldenmatch.core.autoconfig import auto_configure, auto_configure_df
 from goldenmatch.core.threshold import suggest_threshold
 
 # ── Data quality ─────────────────────────────────────────────────────────
@@ -243,7 +243,7 @@ __all__ = [
     # Active learning / boost
     "boost_accuracy",
     # Auto-configuration
-    "auto_configure", "suggest_threshold",
+    "auto_configure", "auto_configure_df", "suggest_threshold",
     # Data quality
     "auto_fix_dataframe", "validate_dataframe", "detect_anomalies",
     # Schema matching
