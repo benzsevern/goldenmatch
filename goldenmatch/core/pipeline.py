@@ -419,7 +419,17 @@ def _run_dedupe_pipeline(
                 if isinstance(val_info, dict) and "value" in val_info:
                     row[col] = val_info["value"]
             golden_rows.append(row)
-        golden_df = pl.DataFrame(golden_rows)
+        # Build explicit schema to prevent mixed-type inference errors.
+        # Golden records from different clusters may have different value types
+        # for the same column (e.g. "0" str vs 0 int).
+        all_keys: set[str] = set()
+        for row in golden_rows:
+            all_keys.update(row.keys())
+        schema_overrides = {
+            k: pl.Utf8 for k in all_keys
+            if k not in ("__cluster_id__", "__golden_confidence__")
+        }
+        golden_df = pl.DataFrame(golden_rows, schema_overrides=schema_overrides)
 
     # Classify records
     multi_cluster_ids = [
@@ -507,6 +517,10 @@ def run_dedupe_df(
     output_report: bool = False,
 ) -> dict:
     """Run dedupe pipeline on a DataFrame directly (no file I/O)."""
+    # Cast all columns to string to prevent schema mismatch errors when
+    # mixed-type columns (e.g. birth_year inferred as i64 in some rows,
+    # str in others) reach blocking/scoring operations.
+    df = df.cast({col: pl.Utf8 for col in df.columns if not col.startswith("__")})
     matchkeys = config.get_matchkeys()
     lf = df.lazy()
     required = _get_required_columns(config)

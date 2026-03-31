@@ -177,7 +177,7 @@ class CanopyConfig(BaseModel):
 
 
 class BlockingConfig(BaseModel):
-    keys: list[BlockingKeyConfig]
+    keys: list[BlockingKeyConfig] = []
     max_block_size: int = 5000
     skip_oversized: bool = False
     strategy: Literal["static", "adaptive", "sorted_neighborhood", "multi_pass", "ann", "canopy", "ann_pairs", "learned"] = "static"
@@ -198,6 +198,25 @@ class BlockingConfig(BaseModel):
     ann_model: str = "all-MiniLM-L6-v2"
     ann_top_k: int = 20
     canopy: CanopyConfig | None = None
+
+    @model_validator(mode="after")
+    def _validate_keys_or_passes(self) -> "BlockingConfig":
+        """Ensure at least keys or passes is provided for strategies that need them."""
+        if self.auto_suggest:
+            return self  # auto_suggest discovers keys at runtime
+        # Strategies that don't need keys: ann, ann_pairs, canopy, learned,
+        # sorted_neighborhood (uses sort_key instead)
+        needs_keys = self.strategy in ("static", "adaptive")
+        needs_passes = self.strategy == "multi_pass"
+        if needs_keys and not self.keys and not self.sub_block_keys:
+            raise ValueError(
+                f"BlockingConfig with strategy='{self.strategy}' requires 'keys'."
+            )
+        if needs_passes and not self.keys and not self.passes:
+            raise ValueError(
+                "BlockingConfig with strategy='multi_pass' requires 'keys' or 'passes'."
+            )
+        return self
 
 
 # ── GoldenFieldRule / GoldenRulesConfig ─────────────────────────────────────

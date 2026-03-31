@@ -32,7 +32,7 @@ _EMAIL_PATTERNS = re.compile(r"(email|e.?mail|email.?addr)", re.IGNORECASE)
 _PHONE_PATTERNS = re.compile(r"(phone|tel|mobile|fax|cell)", re.IGNORECASE)
 _ZIP_PATTERNS = re.compile(r"(zip|postal|postcode|zip.?code)", re.IGNORECASE)
 _ADDRESS_PATTERNS = re.compile(r"(address|street|addr|line.?1|line.?2)", re.IGNORECASE)
-_GEO_PATTERNS = re.compile(r"(city|^state$|state.?cd|^country$|province|region|county)", re.IGNORECASE)
+_GEO_PATTERNS = re.compile(r"((?<![a-z])city|^state$|state.?cd|^country$|province|region|(?<![a-z])county)", re.IGNORECASE)
 _DATE_PATTERNS = re.compile(r"(date|_dt$|_date$|registr|created|updated|birth.?d|dob)", re.IGNORECASE)
 _ID_PATTERNS = re.compile(r"(^id$|^key$|^code$|^sku$|_id$|_key$)", re.IGNORECASE)
 
@@ -107,10 +107,15 @@ def _classify_by_data(values: list[str]) -> tuple[str, float]:
     return col_type, confidence
 
 
-def profile_columns(df: pl.DataFrame, sample_size: int = 1000) -> list[ColumnProfile]:
+def profile_columns(
+    df: pl.DataFrame, sample_size: int = 1000, max_columns: int = 40,
+) -> list[ColumnProfile]:
     """Classify columns by type using name heuristics + data profiling.
 
     Samples randomly to avoid bias from header-adjacent rows.
+    Wide datasets (>max_columns) are trimmed: columns matching known patterns
+    (name, email, phone, zip, address) are prioritized, then remaining columns
+    fill up to the cap.
     """
     # Sample randomly
     if df.height > sample_size:
@@ -118,8 +123,28 @@ def profile_columns(df: pl.DataFrame, sample_size: int = 1000) -> list[ColumnPro
     else:
         sample = df
 
+    # For wide datasets, prioritize columns likely useful for matching
+    columns = [c for c in df.columns if not c.startswith("__")]
+    if len(columns) > max_columns:
+        # Phase 1: keep columns matching known patterns
+        priority = []
+        rest = []
+        for col_name in columns:
+            if _classify_by_name(col_name) is not None:
+                priority.append(col_name)
+            else:
+                rest.append(col_name)
+        # Fill remaining slots from unmatched columns
+        remaining_slots = max(0, max_columns - len(priority))
+        columns = priority + rest[:remaining_slots]
+        logger.info(
+            "Wide dataset (%d columns), auto-configure limited to %d columns "
+            "(%d pattern-matched, %d additional)",
+            len(df.columns), len(columns), len(priority), remaining_slots,
+        )
+
     profiles = []
-    for col_name in df.columns:
+    for col_name in columns:
         # Skip internal columns
         if col_name.startswith("__"):
             continue
@@ -204,7 +229,9 @@ def _adaptive_threshold(fields: list[MatchkeyField]) -> float:
     return 0.80
 
 
-def build_matchkeys(profiles: list[ColumnProfile]) -> list[MatchkeyConfig]:
+def build_matchkeys(
+    profiles: list[ColumnProfile], df: pl.DataFrame | None = None,
+) -> list[MatchkeyConfig]:
     """Generate matchkeys from column profiles."""
     # Separate exact and fuzzy columns
     exact_fields = []
@@ -224,6 +251,18 @@ def build_matchkeys(profiles: list[ColumnProfile]) -> list[MatchkeyConfig]:
             continue
 
         scorer, weight, transforms = scorer_info
+
+        # Skip exact matchkeys for large datasets — exact matchkeys do a full
+        # self-join which is O(N^2) without blocking. For auto-configure, use
+        # exact columns only in blocking (handled by build_blocking).
+        if scorer == "exact" and df is not None and df.height > 10000:
+            logger.info(
+                "Skipping exact matchkey for '%s' (dataset has %d rows; "
+                "exact self-joins are O(N^2) — use blocking instead)",
+                p.name, df.height,
+            )
+            continue
+
         mf = MatchkeyField(
             field=p.name,
             scorer=scorer,
@@ -261,6 +300,17 @@ def build_matchkeys(profiles: list[ColumnProfile]) -> list[MatchkeyConfig]:
             weight=1.0,
             model=None,  # auto-selected later
         ))
+
+    # Limit fuzzy fields to prevent OOM on wide datasets
+    max_fuzzy_fields = 5
+    if len(all_weighted) > max_fuzzy_fields:
+        all_weighted.sort(key=lambda f: f.weight or 0.0, reverse=True)
+        dropped = [f.field for f in all_weighted[max_fuzzy_fields:] if f.field]
+        all_weighted = all_weighted[:max_fuzzy_fields]
+        logger.info(
+            "Truncated fuzzy fields from %d to %d. Dropped: %s",
+            len(all_weighted) + len(dropped), max_fuzzy_fields, dropped,
+        )
 
     if all_weighted:
         threshold = _adaptive_threshold(all_weighted)
@@ -321,8 +371,11 @@ def build_blocking(profiles: list[ColumnProfile], df: pl.DataFrame) -> BlockingC
 
     # Best case: block on highest-cardinality exact column (with low null rate + safe block size)
     if exact_cols:
+        # Pre-filter: only evaluate top 5 by cardinality to avoid expensive group_by on all columns
+        exact_cols_sorted = sorted(exact_cols, key=lambda p: df[p.name].n_unique(), reverse=True)
+        candidates = exact_cols_sorted[:5]
         # Filter out columns that create oversized blocks
-        safe_exact = [p for p in exact_cols if _max_block_size(p.name) <= max_safe_block]
+        safe_exact = [p for p in candidates if _max_block_size(p.name) <= max_safe_block]
         if safe_exact:
             best = max(safe_exact, key=lambda p: df[p.name].n_unique())
             transforms = ["lowercase", "strip"] if best.col_type == "email" else ["strip"]
@@ -337,8 +390,10 @@ def build_blocking(profiles: list[ColumnProfile], df: pl.DataFrame) -> BlockingC
         )
 
     # Name columns: use multi-pass with soundex + substring
+    # Prefer columns matched by name pattern (person names) over data-profiled names
     if name_cols:
-        best_name = name_cols[0].name
+        pattern_names = [p for p in name_cols if _classify_by_name(p.name) == "name"]
+        best_name = (pattern_names[0] if pattern_names else name_cols[0]).name
         return BlockingConfig(
             keys=[BlockingKeyConfig(fields=[best_name], transforms=["lowercase", "soundex"])],
             strategy="multi_pass",
@@ -415,7 +470,7 @@ def auto_configure_df(df: pl.DataFrame) -> GoldenMatchConfig:
     )
 
     # Build matchkeys
-    matchkeys = build_matchkeys(profiles)
+    matchkeys = build_matchkeys(profiles, df=df)
 
     # Check if embeddings are needed
     has_embeddings = any(

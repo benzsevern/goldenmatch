@@ -611,7 +611,7 @@ def build_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[BlockResult]:
         List of BlockResult, one per valid block.
     """
     # Auto-select: pick best key based on histogram analysis
-    if config.auto_select and len(config.keys) > 1:
+    if config.auto_select and config.keys and len(config.keys) > 1:
         best_key = select_best_blocking_key(lf, config.keys, config.max_block_size)
         config = config.model_copy(update={"keys": [best_key], "auto_select": False})
 
