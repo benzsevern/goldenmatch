@@ -66,7 +66,7 @@ def load_file(
         # fast Polars scan_csv path (comma-delimited by default).
         if parse_mode == "auto" and (delimiter is not None or suffix == ".csv"):
             sep = delimiter or ","
-            enc = encoding or "utf8"
+            enc = encoding or "utf8-lossy"
             return pl.scan_csv(path, separator=sep, encoding=enc)
 
         # Otherwise route through smart_load
