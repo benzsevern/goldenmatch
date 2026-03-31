@@ -3,7 +3,7 @@
   "name": "io.github.benzsevern/goldenmatch",
   "title": "GoldenMatch",
   "description": "Entity resolution toolkit — deduplicate, match records, golden records, PPRL",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "repository": {
     "url": "https://github.com/benzsevern/goldenmatch.git",
     "source": "github"
@@ -12,7 +12,7 @@
     {
       "registryType": "pypi",
       "identifier": "goldenmatch",
-      "version": "1.2.1",
+      "version": "1.2.2",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
