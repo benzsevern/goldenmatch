@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import random
+from unittest.mock import patch, MagicMock
+
 import polars as pl
 import pytest
 
@@ -251,3 +254,169 @@ class TestAutoConfigureIntegration:
         )
         config = auto_configure([(str(csv_path), "mystery")])
         assert len(config.get_matchkeys()) >= 1
+
+
+# ── Compound blocking tests ───────────────────────────────────────────────
+
+
+class TestCompoundBlocking:
+    """Tests for compound blocking key generation."""
+
+    def test_compound_keys_when_single_columns_oversized(self):
+        """When all single columns produce blocks > max_safe_block, build_blocking
+        should generate compound BlockingKeyConfig(fields=[col_a, col_b])."""
+        random.seed(42)
+        n = 10000
+        models = [f"Model{i}" for i in range(5)]     # 5 unique -> avg 2000/block
+        states = [f"State{i}" for i in range(4)]      # 4 unique -> avg 2500/block
+        df = pl.DataFrame({
+            "model": [random.choice(models) for _ in range(n)],
+            "state": [random.choice(states) for _ in range(n)],
+            "price": [str(random.randint(1000, 9999)) for _ in range(n)],
+        })
+
+        profiles = [
+            ColumnProfile(name="model", dtype="String", col_type="name", confidence=0.8),
+            ColumnProfile(name="state", dtype="String", col_type="geo", confidence=0.8),
+            ColumnProfile(name="price", dtype="String", col_type="numeric", confidence=0.8),
+        ]
+
+        config = build_blocking(profiles, df)
+
+        # Should produce multi_pass with compound keys
+        assert config.strategy == "multi_pass"
+        assert config.skip_oversized is True
+        assert config.max_block_size == 1000
+        # At least one pass should have 2 fields (compound key)
+        compound_passes = [p for p in (config.passes or []) if len(p.fields) == 2]
+        assert len(compound_passes) >= 1, f"Expected compound passes, got: {config.passes}"
+
+    def test_compound_fallback_when_no_pair_works(self):
+        """When no compound pair brings blocks below threshold, fall through to
+        name-based fallback with skip_oversized=True."""
+        n = 5000
+        df = pl.DataFrame({
+            "col_a": ["A"] * n,
+            "col_b": ["B"] * n,
+        })
+        profiles = [
+            ColumnProfile(name="col_a", dtype="String", col_type="name", confidence=0.8),
+            ColumnProfile(name="col_b", dtype="String", col_type="string", confidence=0.8),
+        ]
+        config = build_blocking(profiles, df)
+        assert config is not None
+        assert config.skip_oversized is True
+
+    def test_candidate_pool_excludes_numeric_date_identifier(self):
+        """Compound candidate pool should exclude numeric, date, and identifier columns."""
+        random.seed(42)
+        n = 10000
+        df = pl.DataFrame({
+            "name": [f"Name{random.randint(1, 5)}" for _ in range(n)],
+            "state": [f"State{random.randint(1, 4)}" for _ in range(n)],
+            "year": [str(random.randint(2000, 2025)) for _ in range(n)],
+            "id": [str(i) for i in range(n)],
+            "amount": [str(random.randint(1, 999)) for _ in range(n)],
+        })
+        profiles = [
+            ColumnProfile(name="name", dtype="String", col_type="name", confidence=0.8),
+            ColumnProfile(name="state", dtype="String", col_type="geo", confidence=0.8),
+            ColumnProfile(name="year", dtype="String", col_type="date", confidence=0.8),
+            ColumnProfile(name="id", dtype="String", col_type="identifier", confidence=0.8),
+            ColumnProfile(name="amount", dtype="String", col_type="numeric", confidence=0.8),
+        ]
+        config = build_blocking(profiles, df)
+        # Compound keys should only use name + geo, not date/identifier/numeric
+        if config.strategy == "multi_pass" and config.passes:
+            all_fields = set()
+            for p in config.passes:
+                all_fields.update(p.fields)
+            assert "id" not in all_fields
+            assert "amount" not in all_fields
+
+
+class TestLLMBlockingKeySuggestion:
+    """Tests for LLM-assisted blocking key selection."""
+
+    def _make_df_and_profiles(self):
+        random.seed(42)
+        n = 10000
+        models = [f"Model{i}" for i in range(5)]
+        states = [f"State{i}" for i in range(4)]
+        df = pl.DataFrame({
+            "model": [random.choice(models) for _ in range(n)],
+            "state": [random.choice(states) for _ in range(n)],
+        })
+        profiles = [
+            ColumnProfile(name="model", dtype="String", col_type="name", confidence=0.8),
+            ColumnProfile(name="state", dtype="String", col_type="geo", confidence=0.8),
+        ]
+        return df, profiles
+
+    @patch("goldenmatch.core.autoconfig._call_llm_for_blocking")
+    def test_valid_llm_suggestion_used(self, mock_llm):
+        mock_llm.return_value = '{"passes": [{"fields": ["model", "state"], "reason": "test"}]}'
+        df, profiles = self._make_df_and_profiles()
+        config = build_blocking(profiles, df, llm_provider="openai")
+        assert config.strategy == "multi_pass"
+        compound_passes = [p for p in (config.passes or []) if len(p.fields) == 2]
+        assert len(compound_passes) >= 1
+        mock_llm.assert_called_once()
+
+    @patch("goldenmatch.core.autoconfig._call_llm_for_blocking")
+    def test_llm_bad_column_name_rejected(self, mock_llm):
+        mock_llm.return_value = '{"passes": [{"fields": ["nonexistent", "state"], "reason": "bad"}]}'
+        df, profiles = self._make_df_and_profiles()
+        config = build_blocking(profiles, df, llm_provider="openai")
+        # Should still produce a valid config via greedy fallback
+        assert config is not None
+        assert config.strategy == "multi_pass"
+
+    @patch("goldenmatch.core.autoconfig._call_llm_for_blocking")
+    def test_llm_failure_falls_back_to_greedy(self, mock_llm):
+        mock_llm.side_effect = Exception("API timeout")
+        df, profiles = self._make_df_and_profiles()
+        config = build_blocking(profiles, df, llm_provider="openai")
+        assert config is not None
+        assert config.skip_oversized is True
+
+    @patch("goldenmatch.core.autoconfig._call_llm_for_blocking")
+    def test_llm_invalid_json_falls_back(self, mock_llm):
+        mock_llm.return_value = "not json at all"
+        df, profiles = self._make_df_and_profiles()
+        config = build_blocking(profiles, df, llm_provider="openai")
+        assert config is not None
+
+    @patch("goldenmatch.core.autoconfig._call_llm_for_blocking")
+    def test_llm_oversized_suggestion_rejected(self, mock_llm):
+        mock_llm.return_value = '{"passes": [{"fields": ["model"], "reason": "bad idea"}]}'
+        df, profiles = self._make_df_and_profiles()
+        config = build_blocking(profiles, df, llm_provider="openai")
+        assert config is not None
+
+
+class TestCompoundBlockingIntegration:
+    """Integration test: auto_configure_df on a wide dataset with oversized single-column blocks."""
+
+    def test_wide_dataset_produces_safe_config(self):
+        random.seed(42)
+        n = 10000
+        models = [f"Model{random.choice('ABCDEFGHIJ')}{i}" for i in range(100)]
+        states = [f"State{i}" for i in range(25)]
+        types = [f"Type{i}" for i in range(10)]
+
+        df = pl.DataFrame({
+            "equipment_name": [random.choice(models) for _ in range(n)],
+            "state": [random.choice(states) for _ in range(n)],
+            "equipment_type": [random.choice(types) for _ in range(n)],
+            "year_made": [str(random.randint(2000, 2025)) for _ in range(n)],
+            "serial": [str(i) for i in range(n)],
+        })
+
+        from goldenmatch.core.autoconfig import auto_configure_df
+        config = auto_configure_df(df)
+
+        assert config.blocking is not None
+        if config.blocking.strategy == "multi_pass":
+            assert config.blocking.skip_oversized is True
+            assert config.blocking.max_block_size <= 1000

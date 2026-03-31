@@ -344,9 +344,262 @@ def build_matchkeys(
     return matchkeys
 
 
+# ── Compound blocking helpers ─────────────────────────────────────────────
+
+
+def _build_compound_blocking(
+    profiles: list[ColumnProfile],
+    df: pl.DataFrame,
+    max_safe_block: int,
+    max_null_rate: float,
+) -> BlockingConfig | None:
+    """Try to build compound blocking keys when single columns are all oversized.
+
+    Uses greedy refinement: pick the best single column, then find the second
+    column that reduces max block size the most. Generates multi-pass compound
+    keys for recall.
+
+    Returns None if no compound pair brings blocks below max_safe_block.
+    """
+    def _null_rate(col_name: str) -> float:
+        return df[col_name].null_count() / df.height if df.height > 0 else 0.0
+
+    # Build unified candidate pool (excludes numeric, date, identifier)
+    candidates = [
+        p for p in profiles
+        if p.col_type not in ("numeric", "date", "identifier")
+        and _null_rate(p.name) <= max_null_rate
+    ]
+    if len(candidates) < 2:
+        return None
+
+    # Sort by cardinality descending — best single column first
+    candidates.sort(key=lambda p: df[p.name].n_unique(), reverse=True)
+    best = candidates[0]
+
+    # Test compound pairs: best + each other candidate (up to 5)
+    pair_results: list[tuple[ColumnProfile, int]] = []
+    for other in candidates[1:6]:
+        try:
+            max_block = df.group_by([best.name, other.name]).len().get_column("len").max()
+            pair_results.append((other, max_block))
+            logger.debug(
+                "Compound pair [%s, %s]: max_block=%d",
+                best.name, other.name, max_block,
+            )
+        except Exception:
+            continue
+
+    if not pair_results:
+        return None
+
+    # Sort by max block ascending — smallest (safest) first
+    pair_results.sort(key=lambda x: x[1])
+    winner, winner_block = pair_results[0]
+
+    if winner_block > max_safe_block:
+        logger.info(
+            "Best compound pair [%s, %s] still produces blocks of %d (> %d). "
+            "No compound key is safe enough.",
+            best.name, winner.name, winner_block, max_safe_block,
+        )
+        return None
+
+    logger.info(
+        "Compound blocking: [%s, %s] -> max_block=%d",
+        best.name, winner.name, winner_block,
+    )
+
+    # Build multi-pass config for recall
+    passes = [
+        # Pass 1: winning compound pair
+        BlockingKeyConfig(fields=[best.name, winner.name], transforms=["lowercase", "strip"]),
+    ]
+
+    # Pass 2: runner-up compound pair (if different and safe)
+    if len(pair_results) > 1:
+        runner_up, runner_up_block = pair_results[1]
+        if runner_up_block <= max_safe_block and runner_up.name != winner.name:
+            passes.append(
+                BlockingKeyConfig(fields=[best.name, runner_up.name], transforms=["lowercase", "strip"]),
+            )
+
+    # Pass 3: recall-focused single-column soundex (relies on skip_oversized)
+    passes.append(
+        BlockingKeyConfig(fields=[best.name], transforms=["lowercase", "soundex"]),
+    )
+
+    return BlockingConfig(
+        keys=[passes[0]],
+        strategy="multi_pass",
+        passes=passes,
+        max_block_size=max_safe_block,
+        skip_oversized=True,
+    )
+
+
+def _call_llm_for_blocking(prompt: str, provider: str) -> str:
+    """Call LLM API for blocking key suggestion. Returns raw response text.
+
+    Uses stdlib urllib (same pattern as llm_scorer.py) — no external deps.
+    """
+    import json as _json
+    import os
+    import urllib.request
+
+    _MODELS = {"openai": "gpt-4o-mini", "anthropic": "claude-haiku-4-5-20251001"}
+    model = os.environ.get("GOLDENMATCH_LLM_MODEL", _MODELS.get(provider, ""))
+
+    if provider == "openai":
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        body = _json.dumps({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+            "max_tokens": 500,
+            "response_format": {"type": "json_object"},
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions",
+            data=body,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = _json.loads(resp.read())
+        return data["choices"][0]["message"]["content"]
+
+    elif provider == "anthropic":
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        body = _json.dumps({
+            "model": model,
+            "max_tokens": 500,
+            "messages": [{"role": "user", "content": prompt}],
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=body,
+            headers={
+                "x-api-key": api_key,
+                "content-type": "application/json",
+                "anthropic-version": "2023-06-01",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = _json.loads(resp.read())
+        return data["content"][0]["text"]
+
+    raise ValueError(f"Unknown provider: {provider}")
+
+
+def _llm_suggest_blocking_keys(
+    profiles: list[ColumnProfile],
+    df: pl.DataFrame,
+    provider: str,
+    max_safe_block: int,
+) -> BlockingConfig | None:
+    """Ask LLM to suggest compound blocking keys, then validate.
+
+    Returns a validated BlockingConfig or None if suggestions are invalid.
+    """
+    # Build prompt with cardinality stats (all non-numeric columns, including date)
+    col_stats = []
+    for p in profiles:
+        if p.col_type == "numeric":
+            continue
+        n_unique = df[p.name].n_unique()
+        max_block = df.group_by(p.name).len().get_column("len").max()
+        col_stats.append(
+            f"  {p.name}: type={p.col_type}, {n_unique:,} unique / {df.height:,} rows, "
+            f"max_block={max_block:,}"
+        )
+
+    prompt = (
+        "You are a data deduplication expert. Given these column profiles with cardinality stats:\n"
+        + "\n".join(col_stats)
+        + f"\n\nDataset: {df.height:,} rows. Max safe block size: {max_safe_block:,}.\n"
+        "Suggest 2-3 multi-pass compound blocking key combinations.\n"
+        "Each pass: 2 columns that together keep max block under the safe limit.\n"
+        "Prioritize recall — different passes should cover different match scenarios "
+        "(e.g., same model different location vs same model different year).\n\n"
+        'Return JSON: {"passes": [{"fields": ["col_a", "col_b"], "reason": "..."}, ...]}'
+    )
+
+    try:
+        raw = _call_llm_for_blocking(prompt, provider)
+    except Exception as e:
+        logger.warning("LLM blocking key suggestion failed: %s", e)
+        return None
+
+    # Parse JSON
+    import json as _json
+    try:
+        text = raw.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+        data = _json.loads(text)
+    except (ValueError, KeyError) as e:
+        logger.warning("LLM returned invalid JSON for blocking keys: %s", e)
+        return None
+
+    suggested_passes = data.get("passes", [])
+    if not suggested_passes:
+        logger.warning("LLM returned empty passes list")
+        return None
+
+    # Validate each suggestion
+    valid_columns = set(df.columns)
+    validated_passes: list[BlockingKeyConfig] = []
+
+    for suggestion in suggested_passes:
+        fields = suggestion.get("fields", [])
+        reason = suggestion.get("reason", "")
+
+        if not all(f in valid_columns for f in fields):
+            bad = [f for f in fields if f not in valid_columns]
+            logger.info("LLM suggestion rejected — unknown columns: %s", bad)
+            continue
+
+        try:
+            max_block = df.group_by(fields).len().get_column("len").max()
+        except Exception:
+            logger.info("LLM suggestion rejected — group_by failed for %s", fields)
+            continue
+
+        if max_block > max_safe_block:
+            logger.info(
+                "LLM suggestion [%s] rejected — max_block=%d > %d. Reason: %s",
+                fields, max_block, max_safe_block, reason,
+            )
+            continue
+
+        logger.info(
+            "LLM suggestion accepted: [%s] -> max_block=%d. Reason: %s",
+            fields, max_block, reason,
+        )
+        validated_passes.append(
+            BlockingKeyConfig(fields=fields, transforms=["lowercase", "strip"])
+        )
+
+    if not validated_passes:
+        logger.info("All LLM blocking key suggestions were rejected")
+        return None
+
+    return BlockingConfig(
+        keys=[validated_passes[0]],
+        strategy="multi_pass",
+        passes=validated_passes,
+        max_block_size=max_safe_block,
+        skip_oversized=True,
+    )
+
+
 # ── Blocking generation ────────────────────────────────────────────────────
 
-def build_blocking(profiles: list[ColumnProfile], df: pl.DataFrame) -> BlockingConfig:
+def build_blocking(
+    profiles: list[ColumnProfile],
+    df: pl.DataFrame,
+    llm_provider: str | None = None,
+) -> BlockingConfig:
     """Generate blocking config from column profiles."""
     # Filter out high-null columns (>20% null) — they create oversized null blocks
     # that cause O(N^2) comparison explosions
@@ -382,12 +635,37 @@ def build_blocking(profiles: list[ColumnProfile], df: pl.DataFrame) -> BlockingC
             return BlockingConfig(
                 keys=[BlockingKeyConfig(fields=[best.name], transforms=transforms)],
             )
-        # All exact columns create oversized blocks — fall through to name-based blocking
+        # All exact columns create oversized blocks — fall through
         logger.info(
             "Exact blocking columns all produce oversized blocks (>%d), "
             "falling through to name-based blocking",
             max_safe_block,
         )
+
+    # ── Check if name-based fallback would also be oversized ──
+    _all_single_oversized = True
+    for p in name_cols:
+        try:
+            if _max_block_size(p.name) <= max_safe_block:
+                _all_single_oversized = False
+                break
+        except Exception:
+            continue
+
+    if _all_single_oversized and (name_cols or text_cols):
+        # All single columns produce oversized blocks — try compound blocking
+        if llm_provider:
+            llm_config = _llm_suggest_blocking_keys(profiles, df, llm_provider, max_safe_block)
+            if llm_config is not None:
+                logger.info("Using LLM-suggested compound blocking keys")
+                return llm_config
+            logger.info("LLM suggestions invalid or unavailable — trying greedy compound")
+
+        compound_config = _build_compound_blocking(profiles, df, max_safe_block, max_null_rate)
+        if compound_config is not None:
+            return compound_config
+
+        logger.info("Compound blocking failed — falling through to single-column fallbacks")
 
     # Name columns: use multi-pass with soundex + substring
     # Prefer columns matched by name pattern (person names) over data-profiled names
@@ -402,7 +680,8 @@ def build_blocking(profiles: list[ColumnProfile], df: pl.DataFrame) -> BlockingC
                 BlockingKeyConfig(fields=[best_name], transforms=["lowercase", "soundex"]),
                 BlockingKeyConfig(fields=[best_name], transforms=["lowercase", "token_sort", "substring:0:8"]),
             ],
-            max_block_size=500,
+            max_block_size=max_safe_block,
+            skip_oversized=True,
         )
 
     # Last resort: canopy on best text column
@@ -412,24 +691,22 @@ def build_blocking(profiles: list[ColumnProfile], df: pl.DataFrame) -> BlockingC
         return BlockingConfig(
             keys=[BlockingKeyConfig(fields=[best_text], transforms=["lowercase", "substring:0:5"])],
             strategy="canopy",
-            canopy=CanopyConfig(
-                fields=[best_text],
-                loose_threshold=0.3,
-                tight_threshold=0.7,
-            ),
+            canopy=CanopyConfig(fields=[best_text], loose_threshold=0.3, tight_threshold=0.7),
+            skip_oversized=True,
         )
 
     # Absolute fallback
     first_string = next(
-        (p for p in profiles if not p.col_type == "numeric"),
+        (p for p in profiles if p.col_type != "numeric"),
         profiles[0] if profiles else None,
     )
     if first_string:
         return BlockingConfig(
             keys=[BlockingKeyConfig(fields=[first_string.name], transforms=["lowercase", "substring:0:5"])],
+            skip_oversized=True,
         )
 
-    return BlockingConfig(keys=[BlockingKeyConfig(fields=[profiles[0].name])])
+    return BlockingConfig(keys=[BlockingKeyConfig(fields=[profiles[0].name])], skip_oversized=True)
 
 
 # ── Model selection ────────────────────────────────────────────────────────
@@ -445,7 +722,7 @@ def select_model(row_count: int, has_embedding_columns: bool, threshold: int = 5
 
 # ── Main entry point ──────────────────────────────────────────────────────
 
-def auto_configure_df(df: pl.DataFrame) -> GoldenMatchConfig:
+def auto_configure_df(df: pl.DataFrame, llm_provider: str | None = None) -> GoldenMatchConfig:
     """Auto-generate a GoldenMatchConfig from a DataFrame.
 
     Profiles columns by name heuristics and data sampling, then builds
@@ -489,7 +766,7 @@ def auto_configure_df(df: pl.DataFrame) -> GoldenMatchConfig:
 
     # Build blocking (required for weighted/probabilistic matchkeys)
     has_fuzzy = any(mk.type in ("weighted", "probabilistic") for mk in matchkeys)
-    blocking = build_blocking(profiles, df) if has_fuzzy else None
+    blocking = build_blocking(profiles, df, llm_provider=llm_provider) if has_fuzzy else None
 
     # Build config
     config = GoldenMatchConfig(
