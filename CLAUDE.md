@@ -174,6 +174,18 @@ Hosted on Railway, registered on Smithery:
 - **Railway project:** `golden-suite-mcp` (service: `goldenmatch-mcp`, port 8200)
 - **Local HTTP:** `goldenmatch mcp-serve --transport http --port 8200`
 
+## Auto-Config
+- `dedupe_df()` supports zero-config: calls `auto_configure_df(df)` when no exact/fuzzy kwargs
+- `auto_configure_df(df)` in `core/autoconfig.py` — profiles DataFrame directly (no file I/O)
+- `auto_configure(files)` delegates to `auto_configure_df` after loading files
+- Classification: date/geo name heuristics are authoritative over data profiling
+- Blocking safety: skips columns with >20% null rate, checks max block size (1000)
+- `_DATE_PATTERNS` in autoconfig.py — checked before phone/name to prevent shadowing
+- `_GEO_PATTERNS` expanded: matches city_desc, state_cd, county (not just ^city$)
+- `utf8-lossy` encoding on all CSV read paths (ingest.py, agent.py, chunked.py, smart_ingest.py, skills.py)
+- `golden` records != total output. `unique + golden = total distinct people`
+- `llm_scorer` and `backend` kwargs applied uniformly after config resolution (not inside zero-config branch)
+
 ## Gotchas
 - .docx files can't be read by Read tool — use `python-docx` or zipfile+XML
 - Windows drive letter paths (C:\) break `file:source_name` CLI parsing — handle in `_parse_file_source`
