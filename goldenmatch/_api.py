@@ -11,11 +11,21 @@ Usage:
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import polars as pl
+
+
+def _detect_llm_provider() -> str | None:
+    """Auto-detect LLM provider from environment variables."""
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "anthropic"
+    if os.environ.get("OPENAI_API_KEY"):
+        return "openai"
+    return None
 
 
 @dataclass
@@ -291,7 +301,8 @@ def dedupe_df(
         else:
             # Zero-config: auto-detect column types and build matchkeys
             from goldenmatch.core.autoconfig import auto_configure_df
-            config = auto_configure_df(df)
+            provider = _detect_llm_provider() if llm_scorer else None
+            config = auto_configure_df(df, llm_provider=provider)
 
     # Apply overrides uniformly regardless of config source
     if backend and hasattr(config, "backend"):
