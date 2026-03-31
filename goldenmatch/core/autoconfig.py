@@ -349,34 +349,24 @@ def select_model(row_count: int, has_embedding_columns: bool, threshold: int = 5
 
 # ── Main entry point ──────────────────────────────────────────────────────
 
-def auto_configure(files: list[tuple[str, str]]) -> GoldenMatchConfig:
-    """Auto-generate a GoldenMatchConfig from input files.
+def auto_configure_df(df: pl.DataFrame) -> GoldenMatchConfig:
+    """Auto-generate a GoldenMatchConfig from a DataFrame.
+
+    Profiles columns by name heuristics and data sampling, then builds
+    matchkeys, blocking, and golden rules automatically.
 
     Args:
-        files: List of (path, source_name) tuples.
+        df: Polars DataFrame to auto-configure for.
 
     Returns:
         A fully populated GoldenMatchConfig ready for pipeline execution.
     """
-    # Load and combine files
-    dfs = []
-    for path, source_name in files:
-        p = Path(path)
-        if p.suffix.lower() in (".xlsx", ".xls"):
-            df = pl.read_excel(p, engine="openpyxl")
-        elif p.suffix.lower() == ".parquet":
-            df = pl.read_parquet(p)
-        else:
-            df = pl.read_csv(p, encoding="utf8-lossy", infer_schema_length=10000, ignore_errors=True)
-        dfs.append(df)
+    total_rows = df.height
 
-    combined = pl.concat(dfs, how="diagonal") if len(dfs) > 1 else dfs[0]
-    total_rows = combined.height
-
-    logger.info("Auto-configuring %d rows, %d columns", total_rows, len(combined.columns))
+    logger.info("Auto-configuring %d rows, %d columns", total_rows, len(df.columns))
 
     # Profile columns
-    profiles = profile_columns(combined)
+    profiles = profile_columns(df)
 
     logger.info(
         "Detected column types: %s",
@@ -403,7 +393,7 @@ def auto_configure(files: list[tuple[str, str]]) -> GoldenMatchConfig:
 
     # Build blocking (required for weighted/probabilistic matchkeys)
     has_fuzzy = any(mk.type in ("weighted", "probabilistic") for mk in matchkeys)
-    blocking = build_blocking(profiles, combined) if has_fuzzy else None
+    blocking = build_blocking(profiles, df) if has_fuzzy else None
 
     # Build config
     config = GoldenMatchConfig(
@@ -414,6 +404,31 @@ def auto_configure(files: list[tuple[str, str]]) -> GoldenMatchConfig:
     )
 
     return config
+
+
+def auto_configure(files: list[tuple[str, str]]) -> GoldenMatchConfig:
+    """Auto-generate a GoldenMatchConfig from input files.
+
+    Args:
+        files: List of (path, source_name) tuples.
+
+    Returns:
+        A fully populated GoldenMatchConfig ready for pipeline execution.
+    """
+    # Load and combine files
+    dfs = []
+    for path, source_name in files:
+        p = Path(path)
+        if p.suffix.lower() in (".xlsx", ".xls"):
+            df = pl.read_excel(p, engine="openpyxl")
+        elif p.suffix.lower() == ".parquet":
+            df = pl.read_parquet(p)
+        else:
+            df = pl.read_csv(p, encoding="utf8-lossy", infer_schema_length=10000, ignore_errors=True)
+        dfs.append(df)
+
+    combined = pl.concat(dfs, how="diagonal") if len(dfs) > 1 else dfs[0]
+    return auto_configure_df(combined)
 
 
 def build_probabilistic_matchkeys(profiles: list[ColumnProfile]) -> list[MatchkeyConfig]:
