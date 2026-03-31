@@ -515,7 +515,7 @@ def smart_load(
     try:
         text = path.read_text(encoding=enc, errors="replace")
     except Exception:
-        text = path.read_text(encoding="utf8", errors="replace")
+        text = path.read_text(encoding="utf8-lossy", errors="replace")
         enc = "utf8"
         log.append("encoding fallback to utf8")
 

@@ -329,7 +329,7 @@ class AgentSession:
 
     def analyze(self, file_path: str) -> dict[str, Any]:
         """Load a CSV and return profiling + strategy analysis."""
-        df = pl.read_csv(file_path, encoding="utf8", ignore_errors=True)
+        df = pl.read_csv(file_path, encoding="utf8-lossy", ignore_errors=True)
         self.data = df
 
         profile = profile_for_agent(df)
@@ -373,7 +373,7 @@ class AgentSession:
         """Full deduplication with profiling, strategy, gating, and review queue."""
         from goldenmatch._api import dedupe_df
 
-        df = pl.read_csv(file_path, encoding="utf8", ignore_errors=True)
+        df = pl.read_csv(file_path, encoding="utf8-lossy", ignore_errors=True)
         self.data = df
 
         profile = profile_for_agent(df)
@@ -438,8 +438,8 @@ class AgentSession:
         """Match two CSV sources with profiling, strategy, and gating."""
         from goldenmatch._api import match_df
 
-        df_a = pl.read_csv(file_a, encoding="utf8", ignore_errors=True)
-        df_b = pl.read_csv(file_b, encoding="utf8", ignore_errors=True)
+        df_a = pl.read_csv(file_a, encoding="utf8-lossy", ignore_errors=True)
+        df_b = pl.read_csv(file_b, encoding="utf8-lossy", ignore_errors=True)
 
         # Profile the target (first file)
         profile = profile_for_agent(df_a)
@@ -481,7 +481,7 @@ class AgentSession:
         """
         from goldenmatch._api import dedupe_df
 
-        df = pl.read_csv(file_path, encoding="utf8", ignore_errors=True)
+        df = pl.read_csv(file_path, encoding="utf8-lossy", ignore_errors=True)
         self.data = df
 
         profile = profile_for_agent(df)

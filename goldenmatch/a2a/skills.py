@@ -83,7 +83,7 @@ def dispatch_skill(skill_id: str, params: dict) -> dict:
         analysis = session.analyze(params["file_path"])
         decision = select_strategy(
             profile_for_agent(
-                pl.read_csv(params["file_path"], encoding="utf8", ignore_errors=True)
+                pl.read_csv(params["file_path"], encoding="utf8-lossy", ignore_errors=True)
             )
         )
         cfg = _decision_to_config(decision)

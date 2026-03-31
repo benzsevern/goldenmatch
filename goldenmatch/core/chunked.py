@@ -167,7 +167,7 @@ class ChunkedMatcher:
         """Read CSV in chunks."""
         # Read full file lazily and collect in chunks
         try:
-            full_df = pl.read_csv(path, encoding="utf8", ignore_errors=True)
+            full_df = pl.read_csv(path, encoding="utf8-lossy", ignore_errors=True)
         except Exception:
             full_df = pl.read_csv(str(path), ignore_errors=True)
 
