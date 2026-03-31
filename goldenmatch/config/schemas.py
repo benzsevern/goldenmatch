@@ -204,11 +204,13 @@ class BlockingConfig(BaseModel):
         """Ensure at least keys or passes is provided for strategies that need them."""
         if self.auto_suggest:
             return self  # auto_suggest discovers keys at runtime
+        # Strategies that don't need keys: ann, ann_pairs, canopy, learned,
+        # sorted_neighborhood (uses sort_key instead)
         needs_keys = self.strategy in ("static", "adaptive")
         needs_passes = self.strategy == "multi_pass"
         if needs_keys and not self.keys and not self.sub_block_keys:
             raise ValueError(
-                "BlockingConfig with strategy='static' or 'adaptive' requires 'keys'."
+                f"BlockingConfig with strategy='{self.strategy}' requires 'keys'."
             )
         if needs_passes and not self.keys and not self.passes:
             raise ValueError(

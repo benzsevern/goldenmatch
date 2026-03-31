@@ -32,7 +32,7 @@ _EMAIL_PATTERNS = re.compile(r"(email|e.?mail|email.?addr)", re.IGNORECASE)
 _PHONE_PATTERNS = re.compile(r"(phone|tel|mobile|fax|cell)", re.IGNORECASE)
 _ZIP_PATTERNS = re.compile(r"(zip|postal|postcode|zip.?code)", re.IGNORECASE)
 _ADDRESS_PATTERNS = re.compile(r"(address|street|addr|line.?1|line.?2)", re.IGNORECASE)
-_GEO_PATTERNS = re.compile(r"(\bcity\b|^state$|state.?cd|^country$|province|region|\bcounty\b)", re.IGNORECASE)
+_GEO_PATTERNS = re.compile(r"((?<![a-z])city|^state$|state.?cd|^country$|province|region|(?<![a-z])county)", re.IGNORECASE)
 _DATE_PATTERNS = re.compile(r"(date|_dt$|_date$|registr|created|updated|birth.?d|dob)", re.IGNORECASE)
 _ID_PATTERNS = re.compile(r"(^id$|^key$|^code$|^sku$|_id$|_key$)", re.IGNORECASE)
 
@@ -256,6 +256,11 @@ def build_matchkeys(
         # self-join which is O(N^2) without blocking. For auto-configure, use
         # exact columns only in blocking (handled by build_blocking).
         if scorer == "exact" and df is not None and df.height > 10000:
+            logger.info(
+                "Skipping exact matchkey for '%s' (dataset has %d rows; "
+                "exact self-joins are O(N^2) — use blocking instead)",
+                p.name, df.height,
+            )
             continue
 
         mf = MatchkeyField(
@@ -299,9 +304,13 @@ def build_matchkeys(
     # Limit fuzzy fields to prevent OOM on wide datasets
     max_fuzzy_fields = 5
     if len(all_weighted) > max_fuzzy_fields:
-        # Sort by weight descending, keep top N
         all_weighted.sort(key=lambda f: f.weight or 0.0, reverse=True)
+        dropped = [f.field for f in all_weighted[max_fuzzy_fields:] if f.field]
         all_weighted = all_weighted[:max_fuzzy_fields]
+        logger.info(
+            "Truncated fuzzy fields from %d to %d. Dropped: %s",
+            len(all_weighted) + len(dropped), max_fuzzy_fields, dropped,
+        )
 
     if all_weighted:
         threshold = _adaptive_threshold(all_weighted)
