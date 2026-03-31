@@ -32,7 +32,8 @@ _EMAIL_PATTERNS = re.compile(r"(email|e.?mail|email.?addr)", re.IGNORECASE)
 _PHONE_PATTERNS = re.compile(r"(phone|tel|mobile|fax|cell)", re.IGNORECASE)
 _ZIP_PATTERNS = re.compile(r"(zip|postal|postcode|zip.?code)", re.IGNORECASE)
 _ADDRESS_PATTERNS = re.compile(r"(address|street|addr|line.?1|line.?2)", re.IGNORECASE)
-_GEO_PATTERNS = re.compile(r"(^city$|^state$|^country$|province|region)", re.IGNORECASE)
+_GEO_PATTERNS = re.compile(r"(city|^state$|state.?cd|^country$|province|region|county)", re.IGNORECASE)
+_DATE_PATTERNS = re.compile(r"(date|_dt$|_date$|registr|created|updated|birth.?d|dob)", re.IGNORECASE)
 _ID_PATTERNS = re.compile(r"(^id$|^key$|^code$|^sku$|_id$|_key$)", re.IGNORECASE)
 
 
@@ -48,19 +49,26 @@ class ColumnProfile:
 
 
 def _classify_by_name(col_name: str) -> str | None:
-    """Phase 1: classify column by name pattern matching."""
+    """Phase 1: classify column by name pattern matching.
+
+    Order matters: more specific patterns (date, geo) are checked before
+    broader ones (name, phone) to avoid misclassification (e.g., city names
+    matching the name pattern, or date columns matching the phone pattern).
+    """
+    if _DATE_PATTERNS.search(col_name):
+        return "date"
     if _EMAIL_PATTERNS.search(col_name):
         return "email"
-    if _PHONE_PATTERNS.search(col_name):
-        return "phone"
     if _ZIP_PATTERNS.search(col_name):
         return "zip"
-    if _NAME_PATTERNS.search(col_name):
-        return "name"
-    if _ADDRESS_PATTERNS.search(col_name):
-        return "address"
     if _GEO_PATTERNS.search(col_name):
         return "geo"
+    if _ADDRESS_PATTERNS.search(col_name):
+        return "address"
+    if _PHONE_PATTERNS.search(col_name):
+        return "phone"
+    if _NAME_PATTERNS.search(col_name):
+        return "name"
     if _ID_PATTERNS.search(col_name):
         return "identifier"
     return None
@@ -130,8 +138,16 @@ def profile_columns(df: pl.DataFrame, sample_size: int = 1000) -> list[ColumnPro
         # Phase 2: data profiling
         data_type, data_confidence = _classify_by_data(values)
 
-        # Combine: Phase 2 wins when it contradicts Phase 1
-        if name_type and data_type != "string":
+        # Combine: name heuristics are authoritative for structural types
+        # (date, geo) because data profiling frequently misclassifies them
+        # (e.g., ISO dates look like phone numbers, city names look like person names).
+        # For other types, Phase 2 (data) wins when it contradicts Phase 1 (name).
+        _name_authoritative = {"date", "geo"}
+        if name_type and name_type in _name_authoritative:
+            # Name pattern is authoritative for date/geo — trust it
+            col_type = name_type
+            confidence = 0.9
+        elif name_type and data_type != "string":
             # Both have opinions — Phase 2 wins if types differ
             if name_type == data_type:
                 col_type = name_type
@@ -282,17 +298,42 @@ def build_matchkeys(profiles: list[ColumnProfile]) -> list[MatchkeyConfig]:
 
 def build_blocking(profiles: list[ColumnProfile], df: pl.DataFrame) -> BlockingConfig:
     """Generate blocking config from column profiles."""
-    exact_cols = [p for p in profiles if p.col_type in ("email", "phone", "zip", "identifier")]
+    # Filter out high-null columns (>20% null) — they create oversized null blocks
+    # that cause O(N^2) comparison explosions
+    max_null_rate = 0.20
+
+    def _null_rate(col_name: str) -> float:
+        return df[col_name].null_count() / df.height if df.height > 0 else 0.0
+
+    exact_cols = [
+        p for p in profiles
+        if p.col_type in ("email", "phone", "zip", "identifier")
+        and _null_rate(p.name) <= max_null_rate
+    ]
     name_cols = [p for p in profiles if p.col_type == "name"]
     text_cols = [p for p in profiles if p.col_type in ("description", "string", "address")]
 
-    # Best case: block on highest-cardinality exact column
+    def _max_block_size(col_name: str) -> int:
+        """Largest group size when blocking on this column."""
+        return df.group_by(col_name).len().get_column("len").max()
+
+    max_safe_block = 1000  # blocks larger than this cause OOM on ensemble scorers
+
+    # Best case: block on highest-cardinality exact column (with low null rate + safe block size)
     if exact_cols:
-        # Sort by cardinality (descending)
-        best = max(exact_cols, key=lambda p: df[p.name].n_unique())
-        transforms = ["lowercase", "strip"] if best.col_type == "email" else ["strip"]
-        return BlockingConfig(
-            keys=[BlockingKeyConfig(fields=[best.name], transforms=transforms)],
+        # Filter out columns that create oversized blocks
+        safe_exact = [p for p in exact_cols if _max_block_size(p.name) <= max_safe_block]
+        if safe_exact:
+            best = max(safe_exact, key=lambda p: df[p.name].n_unique())
+            transforms = ["lowercase", "strip"] if best.col_type == "email" else ["strip"]
+            return BlockingConfig(
+                keys=[BlockingKeyConfig(fields=[best.name], transforms=transforms)],
+            )
+        # All exact columns create oversized blocks — fall through to name-based blocking
+        logger.info(
+            "Exact blocking columns all produce oversized blocks (>%d), "
+            "falling through to name-based blocking",
+            max_safe_block,
         )
 
     # Name columns: use multi-pass with soundex + substring
