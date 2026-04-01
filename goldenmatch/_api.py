@@ -48,6 +48,7 @@ class DedupeResult:
     stats: dict = field(default_factory=dict)
     scored_pairs: list[tuple[int, int, float]] = field(default_factory=list)
     config: Any = None
+    plan: Any = None  # RunPlan from preflight, if run
 
     def to_csv(self, path: str, which: str = "golden") -> Path:
         """Write results to CSV.
@@ -260,6 +261,31 @@ def dedupe(
     )
 
 
+def preflight(
+    df: pl.DataFrame,
+    *,
+    config: Any | None = None,
+    safety: str = "conservative",
+) -> Any:
+    """Run preflight analysis — sample the dataset, measure resources, project costs.
+
+    Returns a RunPlan with projections, adjusted config, and any downgrades.
+    Use the plan with dedupe_df(df, plan=plan) to skip re-running preflight.
+
+    Args:
+        df: Polars DataFrame to analyze.
+        config: GoldenMatchConfig or None for auto-config.
+        safety: "conservative", "aggressive", or "none".
+
+    Returns:
+        RunPlan with projections, adjusted config, and downgrades.
+    """
+    from goldenmatch.core.preflight import preflight as _preflight
+    if isinstance(config, str):
+        config = load_config(config)
+    return _preflight(df, config=config, safety=safety)
+
+
 def dedupe_df(
     df: pl.DataFrame,
     *,
@@ -271,6 +297,9 @@ def dedupe_df(
     llm_scorer: bool = False,
     backend: str | None = None,
     source_name: str = "dataframe",
+    run_preflight: bool = True,
+    safety: str = "conservative",
+    plan: Any | None = None,
 ) -> DedupeResult:
     """Deduplicate a Polars DataFrame directly (no file I/O).
 
@@ -287,31 +316,55 @@ def dedupe_df(
         llm_scorer: Enable LLM scoring for borderline pairs.
         backend: Processing backend: None (default), "ray".
         source_name: Source label for the DataFrame (default: "dataframe").
+        run_preflight: Run preflight analysis for large datasets (default: True).
+        safety: Safety policy: "conservative", "aggressive", or "none".
+        plan: Pre-computed RunPlan from preflight() to skip re-running.
 
     Returns:
         DedupeResult with golden records, clusters, dupes, unique, and stats.
     """
-    from goldenmatch.core.pipeline import run_dedupe_df
+    from goldenmatch.core.pipeline import run_dedupe_df as _run_dedupe_df
 
-    if isinstance(config, str):
-        config = load_config(config)
-    elif config is None:
-        if exact or fuzzy:
-            config = _build_config(exact, fuzzy, blocking, threshold, llm_scorer, backend)
-        else:
-            # Zero-config: auto-detect column types and build matchkeys
-            from goldenmatch.core.autoconfig import auto_configure_df
-            provider = _detect_llm_provider() if llm_scorer else None
-            config = auto_configure_df(df, llm_provider=provider)
+    run_plan = plan
+    circuit_breaker = None
 
-    # Apply overrides uniformly regardless of config source
-    if backend and hasattr(config, "backend"):
-        config.backend = backend
-    if llm_scorer and hasattr(config, "llm_scorer"):
-        from goldenmatch.config.schemas import LLMScorerConfig
-        config.llm_scorer = LLMScorerConfig(enabled=True)
+    if plan is not None:
+        # User provided a pre-computed RunPlan
+        config = plan.adjusted_config
+        run_plan = plan
+    else:
+        # Build config as before
+        if isinstance(config, str):
+            config = load_config(config)
+        elif config is None:
+            if exact or fuzzy:
+                config = _build_config(exact, fuzzy, blocking, threshold, llm_scorer, backend)
+            else:
+                from goldenmatch.core.autoconfig import auto_configure_df
+                provider = _detect_llm_provider() if llm_scorer else None
+                config = auto_configure_df(df, llm_provider=provider)
 
-    result = run_dedupe_df(df, config, source_name=source_name)
+        # Apply overrides uniformly
+        if backend and hasattr(config, "backend"):
+            config.backend = backend
+        if llm_scorer and hasattr(config, "llm_scorer"):
+            from goldenmatch.config.schemas import LLMScorerConfig
+            config.llm_scorer = LLMScorerConfig(enabled=True)
+
+        # Run preflight for large datasets
+        if run_preflight and safety != "none" and df.height > 10_000:
+            from goldenmatch.core.preflight import preflight as _preflight
+            run_plan = _preflight(df, config=config, safety=safety)
+            config = run_plan.adjusted_config
+
+    # Create circuit breaker
+    if safety != "none":
+        from goldenmatch.config.schemas import SafetyPolicy
+        from goldenmatch.core.circuit_breaker import CircuitBreaker
+        circuit_breaker = CircuitBreaker(policy=SafetyPolicy(mode=safety))
+
+    result = _run_dedupe_df(df, config, source_name=source_name,
+                             circuit_breaker=circuit_breaker)
 
     return DedupeResult(
         golden=result.get("golden"),
@@ -321,6 +374,7 @@ def dedupe_df(
         stats=_extract_stats(result),
         scored_pairs=_extract_pairs(result),
         config=config,
+        plan=run_plan,
     )
 
 

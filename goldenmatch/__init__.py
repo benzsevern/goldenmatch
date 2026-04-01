@@ -35,6 +35,7 @@ from goldenmatch._api import (
     dedupe_df,
     match,
     match_df,
+    preflight,
     score_strings,
     score_pair_df,
     explain_pair_df,
@@ -113,6 +114,11 @@ from goldenmatch.core.probabilistic import train_em, score_probabilistic
 
 # ── Learned blocking ─────────────────────────────────────────────────────
 from goldenmatch.core.learned_blocking import learn_blocking_rules, apply_learned_blocks
+
+# ── Preflight & Safety ──────────────────────────────────────────────────
+from goldenmatch.core.preflight import RunPlan, ResourceProjection, SampleStats, Downgrade, PreflightError
+from goldenmatch.config.schemas import SafetyPolicy
+from goldenmatch.core.circuit_breaker import CircuitBreaker, CircuitBreakerError
 
 # ── LLM scoring ──────────────────────────────────────────────────────────
 from goldenmatch.core.llm_scorer import llm_score_pairs
@@ -194,10 +200,13 @@ __all__ = [
     # Version
     "__version__",
     # High-level API
-    "dedupe", "dedupe_df", "match", "match_df",
+    "dedupe", "dedupe_df", "match", "match_df", "preflight",
     "score_strings", "score_pair_df", "explain_pair_df",
     "pprl_link", "evaluate", "load_config",
     "DedupeResult", "MatchResult",
+    # Preflight & Safety
+    "RunPlan", "ResourceProjection", "SampleStats", "Downgrade", "PreflightError",
+    "SafetyPolicy", "CircuitBreaker", "CircuitBreakerError",
     # Agent
     "AgentSession", "ReviewQueue", "gate_pairs",
     # Config
