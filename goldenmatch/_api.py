@@ -330,7 +330,7 @@ def dedupe_df(
 
     if plan is not None:
         # User provided a pre-computed RunPlan
-        config = plan.adjusted_config
+        config = plan.config
         run_plan = plan
     else:
         # Build config as before
@@ -355,7 +355,7 @@ def dedupe_df(
         if run_preflight and safety != "none" and df.height > 10_000:
             from goldenmatch.core.preflight import preflight as _preflight
             run_plan = _preflight(df, config=config, safety=safety)
-            config = run_plan.adjusted_config
+            config = run_plan.config
 
     # Create circuit breaker
     if safety != "none":

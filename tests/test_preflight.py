@@ -130,3 +130,63 @@ class TestPreflightSmallDataset:
         assert plan is not None
         assert isinstance(plan, RunPlan)
         assert len(plan.downgrades) == 0
+
+
+class TestIntegration:
+    def test_dedupe_df_with_preflight(self):
+        """End-to-end: dedupe_df runs preflight for large datasets."""
+        import goldenmatch as gm
+
+        # Create 10001 rows (just above the 10K threshold)
+        n = 10001
+        df = pl.DataFrame({
+            "first_name": [f"Person{i % 500}" for i in range(n)],
+            "last_name": [f"Last{i % 300}" for i in range(n)],
+            "email": [f"p{i}@test.com" for i in range(n)],
+            "zip": [f"{10000 + i % 100}" for i in range(n)],
+        })
+
+        result = gm.dedupe_df(df, run_preflight=True, safety="conservative")
+
+        assert result.plan is not None
+        assert result.plan.projection is not None
+        assert result.plan.config is not None
+        assert result.plan.config.safety.mode == "conservative"
+
+    def test_dedupe_df_skip_preflight(self):
+        """run_preflight=False skips preflight."""
+        import goldenmatch as gm
+
+        df = pl.DataFrame({
+            "name": [f"Person{i}" for i in range(10001)],
+            "email": [f"p{i}@test.com" for i in range(10001)],
+        })
+
+        result = gm.dedupe_df(df, run_preflight=False)
+        assert result.plan is None
+
+    def test_dedupe_df_safety_none(self):
+        """safety='none' skips preflight even for large datasets."""
+        import goldenmatch as gm
+
+        df = pl.DataFrame({
+            "name": [f"Person{i}" for i in range(10001)],
+            "email": [f"p{i}@test.com" for i in range(10001)],
+        })
+
+        result = gm.dedupe_df(df, safety="none")
+        assert result.plan is None
+
+    def test_standalone_preflight(self):
+        """gm.preflight() returns a RunPlan."""
+        import goldenmatch as gm
+
+        df = pl.DataFrame({
+            "first_name": [f"Person{i}" for i in range(500)],
+            "last_name": [f"Last{i}" for i in range(500)],
+            "email": [f"p{i}@test.com" for i in range(500)],
+        })
+
+        plan = gm.preflight(df)
+        assert isinstance(plan, gm.RunPlan)
+        assert plan.projection is not None
