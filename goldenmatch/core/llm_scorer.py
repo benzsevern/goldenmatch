@@ -134,6 +134,24 @@ def llm_score_pairs(
         len(auto_accept), auto_threshold, len(candidates), candidate_lo, candidate_hi, len(below),
     )
 
+    # Adaptive candidate range: if too many candidates for the budget,
+    # raise candidate_lo to target the most ambiguous pairs only
+    max_candidates = (budget._config.max_calls if budget and budget._config.max_calls else 500) * batch_size
+    if len(candidates) > max_candidates:
+        candidate_scores = sorted([pairs[i][2] for i in candidates], reverse=True)
+        adaptive_lo = candidate_scores[max_candidates - 1]
+        # Re-classify: keep only pairs above the new threshold
+        new_candidates = [i for i in candidates if pairs[i][2] >= adaptive_lo]
+        dropped = len(candidates) - len(new_candidates)
+        below.extend(i for i in candidates if pairs[i][2] < adaptive_lo)
+        candidates = new_candidates
+        logger.info(
+            "Adaptive range: raised candidate_lo from %.2f to %.2f "
+            "(%d candidates -> %d, %d dropped to keep within budget)",
+            candidate_lo, adaptive_lo, dropped + len(candidates),
+            len(candidates), dropped,
+        )
+
     if not candidates:
         result = list(pairs)
         for i in auto_accept:

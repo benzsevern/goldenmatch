@@ -581,6 +581,9 @@ def score_blocks_parallel(
     frozen_exclude = frozenset(matched_pairs)
 
     all_pairs = []
+    total_blocks = len(blocks)
+    log_interval = max(total_blocks // 10, 1)  # log ~10 progress updates
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_idx = {}
         for i, block in enumerate(blocks):
@@ -590,6 +593,7 @@ def score_blocks_parallel(
             )
             future_to_idx[future] = i
 
+        completed = 0
         for future in as_completed(future_to_idx):
             pairs = future.result()
             if target_ids is not None:
@@ -600,10 +604,18 @@ def score_blocks_parallel(
             all_pairs.extend(pairs)
             for a, b, s in pairs:
                 matched_pairs.add((min(a, b), max(a, b)))
+            completed += 1
+            if completed % log_interval == 0:
+                logger.info(
+                    "Scoring progress: %d/%d blocks (%d%%), %d pairs so far",
+                    completed, total_blocks,
+                    int(completed / total_blocks * 100),
+                    len(all_pairs),
+                )
 
     logger.info(
         "Parallel scoring: %d blocks, %d workers, %d pairs found",
-        len(blocks), max_workers, len(all_pairs),
+        total_blocks, max_workers, len(all_pairs),
     )
     return all_pairs
 
