@@ -6,6 +6,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 
 ## [Unreleased]
 
+## [1.2.6] - 2026-04-01
+
+### Added
+- Iterative LLM calibration: samples ~100 pairs per round, learns optimal threshold via grid search, converges in 2-3 rounds (~200 pairs, ~$0.01) instead of scoring all candidates
+- Concurrent LLM requests via ThreadPoolExecutor with configurable `max_workers` (default 5)
+- Thread-safe BudgetTracker with `threading.RLock`
+- ANN hybrid blocking: oversized blocks fall back to ANN sub-blocking via embeddings (embeds only unique text values)
+- LLM-assisted column classification for ambiguous auto-config types
+- Utility-based fuzzy field ranking (cardinality × completeness × string length)
+- Price/cost/amount column name patterns to prevent zip misclassification
+- `get_embedder()` GPU routing — returns VertexEmbedder when mode=vertex
+- 3 new LLMScorerConfig fields: `calibration_sample_size`, `calibration_max_rounds`, `calibration_convergence_delta`
+- 3 new ColumnProfile fields: `null_rate`, `cardinality_ratio`, `avg_len`
+- 40 new tests (test_llm_calibration.py, test_ann_subblock.py, expanded test_autoconfig.py)
+
+### Fixed
+- ID patterns checked before phone/zip in auto-config — SalesID no longer misclassified as "phone"
+- SalePrice (5-digit amounts) no longer misclassified as "zip"
+- Identifier classifications authoritative over data profiling
+- fiModelDesc no longer dropped from fuzzy fields on wide datasets
+- Default batch_size bumped from 20 to 75
+- "Never demote" behavior: LLM-rejected pairs keep original fuzzy score (was 0.0)
+- Robust error handling: URLError/timeout retried, fut.result() guarded, ANN failures caught gracefully
+- VertexEmbedder import failures fall back to local embedder
+
+### Changed
+- LLM scorer uses iterative calibration when candidates > calibration_sample_size (100)
+- Multi-pass blocking passes ann_column/ann_top_k/ann_model to static builder
+- `_classify_by_name` check order: date → email → ID → price → zip → geo → address → phone → name
+
 ## [1.2.0] - 2026-03-25
 
 ### Added

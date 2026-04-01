@@ -16,6 +16,14 @@ GoldenMatch is benchmarked against the [University of Leipzig entity resolution 
 
 **Structured data (DBLP-ACM):** RapidFuzz multi-pass fuzzy at 97.2% — zero cost, within 2pts of Ditto. **Product matching (Abt-Buy):** Vertex AI for candidate generation + GPT-4o-mini as scorer on borderline pairs achieves 81.7% — within 8pts of Ditto (89.3%) but with zero training labels and no GPU.
 
+### Equipment Data Benchmark (v1.2.6)
+
+| Dataset | Records | Strategy | Clusters | Matched | LLM Cost | Time |
+|---------|---------|----------|----------|---------|----------|------|
+| **Bulldozer** | 401K | Multi-pass + ANN hybrid + LLM calibration | 27,937 | 384,650 | ~$0.01 | 323s |
+
+Using iterative LLM calibration (v1.2.6), the LLM learned the optimal threshold from just 200 sampled pairs. ANN hybrid blocking recovered 363 sub-blocks from 15 oversized blocks, matching 949 additional records. 87.7% of clusters have confidence >= 0.4. See `examples/equipment_dedup.py` for the full configuration.
+
 ### Comparison with Other Tools
 
 | Tool | DBLP-ACM | Abt-Buy | Approach | Training Required |

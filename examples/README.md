@@ -25,6 +25,7 @@ python basic_dedupe.py
 | `llm_product_matching.py` | LLM clustering for product data | goldenmatch, OPENAI_API_KEY |
 | `agent_demo.py` | Autonomous ER agent with confidence gating and review queue | goldenmatch |
 | `benchmark.py` | DQBench ER benchmark (precision, recall, F1, throughput) | goldenmatch, dqbench |
+| `equipment_dedup.py` | Equipment/auction dedup: multi-pass blocking, ANN fallback, weighted fuzzy, LLM calibration | goldenmatch, OPENAI_API_KEY |
 
 ## For Coding AIs
 

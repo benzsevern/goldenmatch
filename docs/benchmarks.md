@@ -50,6 +50,16 @@ Product matching benefits from domain extraction (electronics) and LLM scoring (
 
 GoldenMatch trades ~8pts of F1 on Abt-Buy for zero training labels and no GPU requirement. On DBLP-ACM, it matches within 2pts of state-of-the-art.
 
+### Equipment data (v1.2.6)
+
+| Dataset | Records | Strategy | Clusters | Matched | LLM Cost | Time |
+|---------|---------|----------|----------|---------|----------|------|
+| Bulldozer auctions | 401,125 | Multi-pass + ANN hybrid + LLM calibration | 27,937 | 384,650 | ~$0.01 | 323s |
+
+Using iterative LLM calibration, the LLM learned threshold=0.947 from 200 sampled pairs instead of scoring 37,500 pairs. ANN hybrid blocking recovered 363 sub-blocks from 15 oversized blocks, matching 949 additional records that string blocking missed. 87.7% of clusters have confidence >= 0.4.
+
+See [`examples/equipment_dedup.py`](https://github.com/benzsevern/goldenmatch/blob/main/examples/equipment_dedup.py) for the full configuration.
+
 ---
 
 ## PPRL accuracy

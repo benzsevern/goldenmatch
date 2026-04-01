@@ -3,6 +3,8 @@
 
 **Entity resolution toolkit — deduplicate records, match across sources, and maintain golden records. Works on files or live databases.**
 
+**v1.2.6** — Iterative LLM calibration, ANN hybrid blocking, auto-config classification fixes. ([Changelog](#whats-new-in-v126))
+
 Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode auto-detects your data; optional LLM boost for harder datasets.
 
 [![PyPI](https://img.shields.io/pypi/v/goldenmatch?color=d4a017)](https://pypi.org/project/goldenmatch/)
@@ -75,6 +77,9 @@ goldenmatch demo
 - **Ray distributed backend** -- scale to 10M+ records with `pip install goldenmatch[ray]` and `--backend ray`. Zero config locally, Ray cluster for 50M+
 - **Ground truth builder** -- `goldenmatch label` shows pairs interactively, type y/n/s to build ground truth CSV for accuracy measurement
 - **dbt integration** — `dbt-goldenmatch` package for DuckDB-based entity resolution in dbt pipelines
+- **Iterative LLM calibration** — learns optimal threshold from ~200 sampled pairs instead of scoring all candidates
+- **ANN hybrid blocking** — oversized blocks fall back to embedding-based sub-blocking
+- **Auto-config classification fixes** — ID/price patterns, utility-based field ranking, LLM-assisted classification
 
 ## Installation
 
@@ -474,6 +479,8 @@ goldenmatch dedupe products.csv --llm-boost
 
 **Active sampling** selects the most informative pairs for the LLM to label (uncertainty, disagreement, boundary, diversity), reducing label cost by ~45% compared to random sampling.
 
+**Iterative calibration:** When many borderline pairs exist, iterative calibration samples ~100 pairs per round, learns the optimal threshold via grid search, and applies it to all candidates — typically converging in 2-3 rounds.
+
 **Note:** LLM boost is most valuable for product matching with local models (MiniLM) where it improved Abt-Buy from 44.5% to 59.5% F1. For structured data (names, addresses, bibliographic), fuzzy matching alone achieves 97%+ F1.
 
 ## Benchmarks
@@ -501,6 +508,8 @@ Measured on a laptop (17GB RAM) with exact + fuzzy matching, blocking, clusterin
 | 100,000 | 12s | **8,200 rec/s** | 571,000 | 544 MB |
 
 **Fuzzy matching speedup:** Parallel block scoring + intra-field early termination reduced 100K fuzzy matching from ~100s to **~39s** (2.5x) through the pipeline. The 1M exact-only benchmark runs in **7.8s**.
+
+**Equipment data (401K rows):** 27,937 clusters, 384,650 matched, 323s. LLM calibration learned threshold from 200 pairs (~$0.01). ANN fallback created 363 sub-blocks from 15 oversized blocks.
 
 For datasets over 1M records, use `goldenmatch sync` (database mode) with incremental matching and persistent ANN indexing. See [Large Dataset Mode](#large-dataset-mode).
 
@@ -666,6 +675,12 @@ goldenmatch/
 | [GoldenFlow](https://github.com/benzsevern/goldenflow) | Transform & standardize data | `pip install goldenflow` |
 | [GoldenMatch](https://github.com/benzsevern/goldenmatch) | Deduplicate & match records | `pip install goldenmatch` |
 | [GoldenPipe](https://github.com/benzsevern/goldenpipe) | Orchestrate the full pipeline | `pip install goldenpipe` |
+
+## What's New in v1.2.6
+
+- **Iterative LLM calibration** — instead of scoring all candidates, calibrates the decision threshold from ~200 sampled pairs. Typically converges in 2-3 rounds at negligible cost (~$0.01 on a 401K-row equipment dataset).
+- **ANN hybrid blocking** — oversized blocks that exceed the max block size now fall back to embedding-based ANN sub-blocking automatically, keeping blocks tractable without manual tuning.
+- **Auto-config classification fixes** — improved heuristics for ID and price fields, utility-based field ranking to select better blocking keys, and LLM-assisted classification for ambiguous column names.
 
 ## License
 

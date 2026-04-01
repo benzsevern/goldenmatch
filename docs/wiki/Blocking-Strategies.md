@@ -68,6 +68,25 @@ blocking:
 
 Best for: noisy data where no single key catches all matches. Our best results on Leipzig benchmarks use multi-pass.
 
+### ANN Hybrid (v1.2.6)
+
+Combine multi-pass with ANN fallback for oversized blocks. When a block exceeds `max_block_size`, it embeds the unique text values and creates sub-blocks via FAISS instead of skipping:
+
+```yaml
+blocking:
+  strategy: multi_pass
+  passes:
+    - fields: [model_desc, state]
+    - fields: [base_model]
+      transforms: [soundex]
+  max_block_size: 1000
+  skip_oversized: true
+  ann_column: equipment_text   # enables ANN fallback
+  ann_top_k: 20
+```
+
+Best for: large datasets where some blocks are too big for string blocking alone. On the Bulldozer dataset (401K rows), ANN hybrid recovered 363 sub-blocks from 15 oversized blocks, matching 949 additional records.
+
 ### ANN
 
 Approximate nearest neighbor blocking using FAISS on sentence-transformer embeddings. Groups semantically similar records.

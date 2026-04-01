@@ -89,6 +89,37 @@ blocking:
 
 ---
 
+## ANN hybrid blocking
+
+*New in v1.2.6.* Combine multi-pass string blocking with ANN fallback for oversized blocks. When a block exceeds `max_block_size` and would normally be skipped, GoldenMatch embeds only the unique text values in that block and uses FAISS to create smaller sub-blocks.
+
+```yaml
+blocking:
+  strategy: multi_pass
+  passes:
+    - fields: [model_desc, state]
+      transforms: [lowercase, strip]
+    - fields: [base_model]
+      transforms: [lowercase, soundex]
+  max_block_size: 1000
+  skip_oversized: true
+  ann_column: description_text     # enables ANN fallback
+  ann_top_k: 20
+```
+
+How it works:
+1. Multi-pass blocking creates string-based blocks (fast, handles most data)
+2. Blocks exceeding `max_block_size` trigger ANN fallback instead of being skipped
+3. ANN embeds only **unique text values** (e.g., 61K records with 187 unique texts = seconds)
+4. FAISS finds nearest neighbors among unique texts, Union-Find creates sub-blocks
+5. Sub-blocks still exceeding `max_block_size` (after 10x cap) are skipped
+
+On the Bulldozer dataset (401K rows), this recovered 363 sub-blocks from 15 oversized blocks that would otherwise be skipped, matching 949 additional records.
+
+Requires Vertex AI (`GOLDENMATCH_GPU_MODE=vertex`) or local sentence-transformers for embedding.
+
+---
+
 ## ANN blocking
 
 Use FAISS approximate nearest-neighbor search on sentence-transformer embeddings. Requires `pip install goldenmatch[embeddings]`.

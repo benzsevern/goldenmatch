@@ -41,21 +41,46 @@ llm_scorer:
   auto_threshold: 0.95      # auto-accept pairs above this (no LLM call)
   candidate_lo: 0.75        # lower bound of LLM scoring range
   candidate_hi: 0.95        # upper bound (same as auto_threshold)
-  batch_size: 20
+  batch_size: 75            # pairs per API call
+  max_workers: 3            # concurrent LLM requests
 ```
 
 How it works:
 1. Fuzzy scoring produces pairs with scores in [0, 1]
 2. Pairs above `auto_threshold` (0.95) are auto-accepted -- no LLM call
-3. Pairs in `[candidate_lo, candidate_hi]` (0.75--0.95) are sent to the LLM
-4. Pairs below `candidate_lo` (0.75) are rejected
-5. The LLM returns a match probability that overrides the fuzzy score
+3. Pairs in `[candidate_lo, candidate_hi]` (0.75--0.95) are candidates for LLM scoring
+4. Pairs below `candidate_lo` (0.75) keep their original fuzzy score
+5. LLM-approved pairs get score=1.0; LLM-rejected pairs keep their fuzzy score (never demoted)
 
 ```python
 import goldenmatch as gm
 
 scored = gm.llm_score_pairs(borderline_pairs, df, llm_config)
 ```
+
+---
+
+## Iterative calibration
+
+*New in v1.2.6.* When the candidate set is large (>100 pairs), GoldenMatch uses iterative calibration instead of scoring every pair:
+
+1. **Round 1**: Stratified sample of 100 pairs across the score range
+2. **Learn threshold**: Grid search finds the score that best separates LLM YES from NO
+3. **Round 2+**: Focused sample of 100 pairs near the learned threshold (threshold +/- 0.03)
+4. **Converge**: Stop when threshold shifts less than 0.01 between rounds
+5. **Apply**: Pairs above threshold promoted to 1.0; all others keep original score
+
+Typically converges in 2-3 rounds (~200 pairs, ~$0.01). On the Bulldozer dataset (401K rows, 23.7M candidate pairs), calibration learned threshold=0.947 from just 200 pairs.
+
+```yaml
+llm_scorer:
+  enabled: true
+  calibration_sample_size: 100      # pairs per round
+  calibration_max_rounds: 5         # max iterations
+  calibration_convergence_delta: 0.01  # stop when threshold shift < this
+```
+
+Calibration activates automatically when candidates exceed `calibration_sample_size`. For small candidate sets (<=100 pairs), all pairs are scored directly.
 
 ---
 
@@ -181,9 +206,10 @@ Both providers return `(text, input_tokens, output_tokens)` tuples for budget tr
 | Abt-Buy (electronics) | Domain + emb + LLM | $0.04 | 72.2% |
 | Amazon-Google (software) | emb + ANN + LLM | $0.02 | 45.3% |
 | Abt-Buy (Vertex AI + LLM) | Embeddings + GPT-4o-mini | $0.74 | 81.7% |
+| Bulldozer 401K (equipment) | Multi-pass + ANN + calibration | ~$0.01 | 87.7% conf |
 | Typical 5K dataset | LLM scorer (borderline only) | ~$0.05 | varies |
 
-The LLM scorer sends only borderline pairs (typically 1--5% of all comparisons), keeping costs low. Budget cap of $0.05 covers most datasets.
+With iterative calibration (v1.2.6+), the LLM scores only ~200 pairs to learn the optimal threshold, then applies it to all candidates. This reduced the Bulldozer benchmark from ~$0.50 (37,500 pairs) to ~$0.01 (200 pairs).
 
 ---
 

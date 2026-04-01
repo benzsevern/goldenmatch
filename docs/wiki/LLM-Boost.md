@@ -89,3 +89,46 @@ Uses Claude Haiku or GPT-4o-mini by default (~$0.001/pair).
 | `--llm-retrain` | Force re-labeling and retraining |
 | `--llm-provider` | Override provider (auto, anthropic, openai) |
 | `--llm-max-labels` | Max pairs to label (default 500) |
+
+## LLM Scorer: Iterative Calibration (v1.2.6)
+
+The LLM scorer now uses iterative calibration for large candidate sets. Instead of scoring every borderline pair:
+
+1. **Sample** 100 pairs stratified across the score range
+2. **Ask the LLM** to classify them (match/non-match)
+3. **Learn the threshold** via grid search over LLM labels
+4. **Refine** with focused sampling near the threshold
+5. **Apply** the learned threshold to all remaining candidates
+
+This reduced the Bulldozer benchmark (401K rows) from 37,500 LLM-scored pairs (~$0.50, 25 min) to 200 pairs (~$0.01, 42s).
+
+```yaml
+llm_scorer:
+  enabled: true
+  batch_size: 75
+  max_workers: 3
+  calibration_sample_size: 100
+  calibration_max_rounds: 5
+  calibration_convergence_delta: 0.01
+  budget:
+    max_cost_usd: 1.00
+    max_calls: 500
+```
+
+## ANN Hybrid Blocking (v1.2.6)
+
+Multi-pass blocking now supports ANN fallback for oversized blocks. Set `ann_column` on your blocking config:
+
+```yaml
+blocking:
+  strategy: multi_pass
+  passes:
+    - fields: [model, state]
+    - fields: [model, category]
+  max_block_size: 1000
+  skip_oversized: true
+  ann_column: description_text   # enables ANN fallback
+  ann_top_k: 20
+```
+
+Oversized blocks are embedded (unique text values only) and sub-blocked via FAISS instead of being skipped. See `examples/equipment_dedup.py` for a complete example.
