@@ -168,7 +168,7 @@ class TestIterativeCalibrate:
 
         def mock_batch_score(candidate_indices, pairs, row_lookup, cols,
                              provider, api_key, model, batch_size,
-                             budget=None, max_workers=1):
+                             budget=None, max_workers=1, circuit_breaker=None):
             return {i: pairs[i][2] >= real_threshold for i in candidate_indices}
 
         with patch("goldenmatch.core.llm_scorer._batch_score", side_effect=mock_batch_score):
@@ -192,7 +192,7 @@ class TestIterativeCalibrate:
         call_count = 0
         def mock_batch_score(candidate_indices, pairs, row_lookup, cols,
                              provider, api_key, model, batch_size,
-                             budget=None, max_workers=1):
+                             budget=None, max_workers=1, circuit_breaker=None):
             nonlocal call_count
             call_count += 1
             return {i: pairs[i][2] >= 0.87 for i in candidate_indices}
@@ -222,7 +222,7 @@ class TestIterativeCalibrate:
 
         def mock_batch_score(candidate_indices, pairs, row_lookup, cols,
                              provider, api_key, model, batch_size,
-                             budget=None, max_workers=1):
+                             budget=None, max_workers=1, circuit_breaker=None):
             if budget:
                 budget.record_usage(100, 50, model)
             return {i: pairs[i][2] >= 0.87 for i in candidate_indices}
@@ -249,7 +249,7 @@ class TestIterativeCalibrate:
         call_count = 0
         def mock_batch_score(candidate_indices, pairs, row_lookup, cols,
                              provider, api_key, model, batch_size,
-                             budget=None, max_workers=1):
+                             budget=None, max_workers=1, circuit_breaker=None):
             nonlocal call_count
             call_count += 1
             return {i: pairs[i][2] >= 0.87 for i in candidate_indices}
@@ -302,7 +302,7 @@ class TestLLMScorePairsCalibration:
 
         def mock_batch_score(candidate_indices, pairs, row_lookup, cols,
                              provider, api_key, model, batch_size,
-                             budget=None, max_workers=5):
+                             budget=None, max_workers=5, circuit_breaker=None):
             return {i: pairs[i][2] >= real_threshold for i in candidate_indices}
 
         with patch("goldenmatch.core.llm_scorer._batch_score", side_effect=mock_batch_score):
@@ -345,7 +345,7 @@ class TestLLMScorePairsCalibration:
 
         def mock_batch_score(candidate_indices, pairs, row_lookup, cols,
                              provider, api_key, model, batch_size,
-                             budget=None, max_workers=5):
+                             budget=None, max_workers=5, circuit_breaker=None):
             return {i: (i % 2 == 0) for i in candidate_indices}
 
         with patch("goldenmatch.core.llm_scorer._batch_score", side_effect=mock_batch_score):
