@@ -188,6 +188,7 @@ def _run_dedupe_pipeline(
     llm_retrain: bool = False,
     llm_provider: str | None = None,
     llm_max_labels: int = 500,
+    circuit_breaker: object | None = None,
 ) -> dict:
     """Shared dedupe pipeline logic (post-ingest).
 
@@ -313,6 +314,7 @@ def _run_dedupe_pipeline(
                 blocks, mk, matched_pairs,
                 across_files_only=across_files_only,
                 source_lookup=source_lookup if across_files_only else None,
+                circuit_breaker=circuit_breaker,
             )
             all_pairs.extend(pairs)
 
@@ -364,7 +366,8 @@ def _run_dedupe_pipeline(
             all_pairs = llm_cluster_pairs(all_pairs, collected_df, config=config.llm_scorer)
         else:
             from goldenmatch.core.llm_scorer import llm_score_pairs
-            all_pairs = llm_score_pairs(all_pairs, collected_df, config=config.llm_scorer)
+            all_pairs = llm_score_pairs(all_pairs, collected_df, config=config.llm_scorer,
+                                         circuit_breaker=circuit_breaker)
         # Filter to scored matches only
         all_pairs = [(a, b, s) for a, b, s in all_pairs if s > 0.5]
 
@@ -385,6 +388,12 @@ def _run_dedupe_pipeline(
             )
         except ImportError as e:
             logger.warning("LLM boost unavailable: %s", e)
+
+    if circuit_breaker is not None:
+        action = circuit_breaker.check("post_scoring")
+        if action.action == "stop":
+            from goldenmatch.core.circuit_breaker import CircuitBreakerError
+            raise CircuitBreakerError(f"Stopped after scoring: {action.reason}")
 
     # ── Step 4: CLUSTER ──
     all_ids = collected_df["__row_id__"].to_list()
@@ -515,6 +524,7 @@ def run_dedupe_df(
     output_dupes: bool = False,
     output_unique: bool = False,
     output_report: bool = False,
+    circuit_breaker: object | None = None,
 ) -> dict:
     """Run dedupe pipeline on a DataFrame directly (no file I/O)."""
     # Cast all columns to string to prevent schema mismatch errors when
@@ -530,7 +540,8 @@ def run_dedupe_df(
     combined_lf = lf.collect().lazy()
     return _run_dedupe_pipeline(combined_lf, config, matchkeys,
                                 output_golden, output_clusters,
-                                output_dupes, output_unique, output_report)
+                                output_dupes, output_unique, output_report,
+                                circuit_breaker=circuit_breaker)
 
 
 def run_match(
