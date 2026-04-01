@@ -277,6 +277,7 @@ def _batch_score(
         if budget:
             estimated_tokens = len(batch_idx) * 80
             if not budget.can_send(estimated_tokens):
+                logger.debug("Budget exhausted, skipping batch of %d pairs.", len(batch_idx))
                 return {}
 
         # Build prompt
@@ -335,9 +336,17 @@ def _batch_score(
                     time.sleep(wait)
                     continue
                 logger.error("LLM API error: %s", e)
-                return {idx: False for idx in batch_idx}
+                return {}
+            except (urllib.error.URLError, OSError) as e:
+                if attempt < 2:
+                    wait = (attempt + 1) * 5
+                    logger.warning("LLM network error: %s. Retrying in %ds...", e, wait)
+                    time.sleep(wait)
+                    continue
+                logger.error("LLM network error (unrecoverable): %s", e)
+                return {}
 
-        return {idx: False for idx in batch_idx}
+        return {}
 
     # Sequential fast path for small workloads
     if len(all_batches) <= 2 or max_workers <= 1:
@@ -367,7 +376,15 @@ def _batch_score(
             futures[fut] = batch_idx
 
         for fut in as_completed(futures):
-            batch_result = fut.result()
+            try:
+                batch_result = fut.result()
+            except Exception:
+                batch_idx = futures[fut]
+                logger.error(
+                    "LLM batch scoring failed for %d pairs. Skipping batch.",
+                    len(batch_idx), exc_info=True,
+                )
+                continue
             results.update(batch_result)
             completed += 1
             if completed % 10 == 0 or completed == len(futures):
@@ -438,7 +455,7 @@ def _stratified_sample(
     bins: list[list[int]] = [[] for _ in range(n_bins)]
     for i in available:
         score = pairs[i][2]
-        bin_idx = min(int((score - score_lo) / bin_width), n_bins - 1)
+        bin_idx = max(0, min(int((score - score_lo) / bin_width), n_bins - 1))
         bins[bin_idx].append(i)
 
     total_available = len(available)
@@ -540,6 +557,13 @@ def _iterative_calibrate(
             provider, api_key, model, batch_size,
             budget=budget, max_workers=max_workers,
         )
+
+        if not round_results:
+            logger.warning(
+                "LLM calibration round %d: no results returned (budget exhausted or API failure). Stopping.",
+                round_num,
+            )
+            break
 
         for idx, is_match in round_results.items():
             all_labels[idx] = (pairs[idx][2], is_match)

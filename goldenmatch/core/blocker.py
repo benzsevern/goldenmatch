@@ -77,12 +77,18 @@ def _build_static_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[Block
             if size > config.max_block_size:
                 if config.skip_oversized and config.ann_column:
                     # ANN fallback: embed oversized block's records and sub-block
-                    ann_sub = _ann_sub_block(
-                        group_df, config.ann_column, config.ann_top_k,
-                        config.ann_model, config.max_block_size, key_str,
-                    )
-                    if ann_sub:
-                        results.extend(ann_sub)
+                    try:
+                        ann_sub = _ann_sub_block(
+                            group_df, config.ann_column, config.ann_top_k,
+                            config.ann_model, config.max_block_size, key_str,
+                        )
+                        if ann_sub:
+                            results.extend(ann_sub)
+                    except Exception:
+                        logger.error(
+                            "ANN sub-blocking failed for block %r (%d records). Skipping block.",
+                            key_str, size, exc_info=True,
+                        )
                     continue
                 elif config.skip_oversized:
                     logger.warning(
@@ -196,7 +202,11 @@ def _ann_sub_block(
         member_list = sorted(members)
         if len(member_list) > max_block_size:
             n_oversized += 1
-            continue  # still too big even after ANN sub-blocking
+            logger.warning(
+                "ANN sub-block from %r still has %d records (> max %d). Skipping.",
+                parent_key, len(member_list), max_block_size,
+            )
+            continue
         sub_df = block_df[member_list]
         results.append(BlockResult(
             block_key=f"{parent_key}_ann_{min(member_list)}",

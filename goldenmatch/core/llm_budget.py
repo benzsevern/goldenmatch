@@ -26,7 +26,7 @@ class BudgetTracker:
 
     def __init__(self, config: BudgetConfig) -> None:
         self._config = config
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._total_input_tokens = 0
         self._total_output_tokens = 0
         self._total_calls = 0
@@ -100,25 +100,27 @@ class BudgetTracker:
 
     @property
     def budget_exhausted(self) -> bool:
-        if (
-            self._config.max_cost_usd is not None
-            and self._total_cost >= self._config.max_cost_usd
-        ):
-            return True
-        if (
-            self._config.max_calls is not None
-            and self._total_calls >= self._config.max_calls
-        ):
-            return True
-        return False
+        with self._lock:
+            if (
+                self._config.max_cost_usd is not None
+                and self._total_cost >= self._config.max_cost_usd
+            ):
+                return True
+            if (
+                self._config.max_calls is not None
+                and self._total_calls >= self._config.max_calls
+            ):
+                return True
+            return False
 
     @property
     def budget_remaining_pct(self) -> float:
-        if self._config.max_cost_usd is not None and self._config.max_cost_usd > 0:
-            return max(0.0, 100.0 * (1 - self._total_cost / self._config.max_cost_usd))
-        if self._config.max_calls is not None and self._config.max_calls > 0:
-            return max(0.0, 100.0 * (1 - self._total_calls / self._config.max_calls))
-        return 100.0
+        with self._lock:
+            if self._config.max_cost_usd is not None and self._config.max_cost_usd > 0:
+                return max(0.0, 100.0 * (1 - self._total_cost / self._config.max_cost_usd))
+            if self._config.max_calls is not None and self._config.max_calls > 0:
+                return max(0.0, 100.0 * (1 - self._total_calls / self._config.max_calls))
+            return 100.0
 
     def summary(self) -> dict:
         """Return summary dict for EngineStats / lineage."""

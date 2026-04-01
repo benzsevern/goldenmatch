@@ -231,6 +231,7 @@ def _llm_classify_columns(
     High-confidence classifications (date, geo, email, identifier) are trusted.
     """
     import json as _json
+    import urllib.error
 
     # Filter to ambiguous profiles
     high_confidence_types = {"date", "geo", "email", "identifier"}
@@ -267,7 +268,7 @@ def _llm_classify_columns(
 
     try:
         raw = _call_llm_for_blocking(prompt, provider)
-    except Exception as e:
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError, KeyError) as e:
         logger.warning("LLM column classification failed: %s. Using heuristics only.", e)
         return profiles
 
@@ -280,8 +281,11 @@ def _llm_classify_columns(
             if text.startswith("json"):
                 text = text[4:]
         data = _json.loads(text)
-    except (ValueError, IndexError):
-        logger.warning("LLM column classification returned unparseable response.")
+    except (ValueError, IndexError) as e:
+        logger.warning(
+            "LLM column classification returned unparseable response (error: %s). "
+            "Raw response (first 200 chars): %.200s", e, raw,
+        )
         return profiles
 
     # Normalize type aliases
@@ -303,6 +307,8 @@ def _llm_classify_columns(
     profile_by_name = {p.name: p for p in profiles}
     for col_name, llm_type in classifications.items():
         if col_name not in profile_by_name:
+            continue
+        if not isinstance(llm_type, str):
             continue
         p = profile_by_name[col_name]
         # Only correct ambiguous columns
