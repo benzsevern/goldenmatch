@@ -397,6 +397,15 @@ class MemoryConfig(BaseModel):
     learning: LearningConfig = Field(default_factory=LearningConfig)
 
 
+class SafetyPolicy(BaseModel):
+    """Resource safety policy for preflight and circuit breakers."""
+    max_comparisons: int = 10_000_000
+    max_memory_mb: float = 4096
+    max_llm_cost_usd: float = 5.00
+    max_wall_time_seconds: float = 3600
+    mode: Literal["conservative", "aggressive", "none"] = "conservative"
+
+
 # ── MatchSettingsConfig ─────────────────────────────────────────────────────
 
 
@@ -422,6 +431,7 @@ class GoldenMatchConfig(BaseModel):
     domain: DomainConfig | None = None
     backend: str | None = None  # None (default Polars), "ray", "duckdb"
     memory: MemoryConfig | None = None
+    safety: SafetyPolicy | None = None
 
     @model_validator(mode="after")
     def _validate_fuzzy_needs_blocking(self) -> "GoldenMatchConfig":
