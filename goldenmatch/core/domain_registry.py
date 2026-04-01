@@ -54,6 +54,7 @@ class DomainRulebook:
     attribute_patterns: dict[str, str] = field(default_factory=dict)  # name -> regex
     stop_words: list[str] = field(default_factory=list)
     normalization: dict[str, str] = field(default_factory=dict)  # rules like "strip_hyphens", "uppercase"
+    autoconfig_preset: dict | None = field(default=None, repr=False)  # auto-config tuning preset from YAML
 
     # Compiled patterns (lazily populated)
     _compiled_ids: dict[str, re.Pattern] | None = field(default=None, repr=False)
@@ -155,6 +156,7 @@ def load_rulebook(path: str | Path) -> DomainRulebook:
         attribute_patterns=data.get("attribute_patterns", {}),
         stop_words=data.get("stop_words", []),
         normalization=data.get("normalization", {}),
+        autoconfig_preset=data.get("autoconfig_preset"),
     )
     rulebook.compile()
     return rulebook

@@ -23,3 +23,23 @@ stop_words:
 normalization:
   lowercase: true
   strip_punctuation: true
+autoconfig_preset:
+  blocking:
+    strategy: multi_pass
+    max_block_size: 1000
+    skip_oversized: true
+  scorer_overrides:
+    name: {scorer: ensemble, weight: 2.0}
+    first_name: {scorer: ensemble, weight: 1.5}
+    last_name: {scorer: ensemble, weight: 1.5}
+    email: {scorer: exact, weight: 1.0}
+    phone: {scorer: exact, weight: 0.8}
+    address: {scorer: token_sort, weight: 0.8}
+    zip: {scorer: exact, weight: 0.3}
+  threshold: 0.80
+  recommended_standardization:
+    name: [strip, name_proper]
+    first_name: [strip, name_proper]
+    last_name: [strip, name_proper]
+    email: [email]
+    phone: [phone]

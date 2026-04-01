@@ -57,3 +57,15 @@ stop_words:
 normalization:
   lowercase: true
   strip_punctuation: true
+autoconfig_preset:
+  blocking:
+    strategy: multi_pass
+    max_block_size: 500
+    skip_oversized: true
+  scorer_overrides:
+    name: {scorer: ensemble, weight: 2.0}
+    npi: {scorer: exact, weight: 1.5}
+    specialty: {scorer: token_sort, weight: 0.8}
+  threshold: 0.90
+  recommended_standardization:
+    name: [strip, name_proper]

@@ -56,3 +56,15 @@ stop_words:
 normalization:
   uppercase: true
   strip_punctuation: true
+autoconfig_preset:
+  blocking:
+    strategy: static
+    max_block_size: 500
+    skip_oversized: true
+  scorer_overrides:
+    name: {scorer: ensemble, weight: 2.0}
+    ticker: {scorer: exact, weight: 1.5}
+    sector: {scorer: exact, weight: 0.5}
+  threshold: 0.90
+  recommended_standardization:
+    name: [strip, name_lower]

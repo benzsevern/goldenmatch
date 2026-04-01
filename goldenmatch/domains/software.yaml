@@ -68,3 +68,16 @@ stop_words:
 normalization:
   lowercase: true
   strip_punctuation: true
+autoconfig_preset:
+  blocking:
+    strategy: ann
+    ann_top_k: 20
+    max_block_size: 1000
+    skip_oversized: true
+  scorer_overrides:
+    name: {scorer: ensemble, weight: 2.0}
+    version: {scorer: exact, weight: 1.0}
+    platform: {scorer: exact, weight: 0.5}
+  threshold: 0.80
+  recommended_standardization:
+    name: [strip, name_lower]

@@ -52,3 +52,15 @@ stop_words:
 normalization:
   uppercase: true
   strip_punctuation: false
+autoconfig_preset:
+  blocking:
+    strategy: multi_pass
+    max_block_size: 1000
+    skip_oversized: true
+  scorer_overrides:
+    address: {scorer: token_sort, weight: 2.0}
+    city: {scorer: exact, weight: 0.5}
+    zip: {scorer: exact, weight: 0.5}
+  threshold: 0.85
+  recommended_standardization:
+    address: [strip, address]
