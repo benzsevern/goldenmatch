@@ -31,6 +31,7 @@ _NAME_PATTERNS = re.compile(
 _EMAIL_PATTERNS = re.compile(r"(email|e.?mail|email.?addr)", re.IGNORECASE)
 _PHONE_PATTERNS = re.compile(r"(phone|tel|mobile|fax|cell)", re.IGNORECASE)
 _ZIP_PATTERNS = re.compile(r"(zip|postal|postcode|zip.?code)", re.IGNORECASE)
+_PRICE_PATTERNS = re.compile(r"(price|cost|amount|revenue|salary|fee|charge|total|balance)", re.IGNORECASE)
 _ADDRESS_PATTERNS = re.compile(r"(address|street|addr|line.?1|line.?2)", re.IGNORECASE)
 _GEO_PATTERNS = re.compile(r"((?<![a-z])city|^state$|state.?cd|^country$|province|region|(?<![a-z])county)", re.IGNORECASE)
 _DATE_PATTERNS = re.compile(r"(date|_dt$|_date$|registr|created|updated|birth.?d|dob)", re.IGNORECASE)
@@ -48,19 +49,26 @@ class ColumnProfile:
     col_type: str  # email, name, phone, zip, address, geo, identifier, description, numeric, date, string
     confidence: float  # 0.0 to 1.0
     sample_values: list[str] = field(default_factory=list)
+    null_rate: float = 0.0  # fraction of nulls (0-1)
+    cardinality_ratio: float = 0.0  # unique values / total rows (0-1)
+    avg_len: float = 0.0  # average string length
 
 
 def _classify_by_name(col_name: str) -> str | None:
     """Phase 1: classify column by name pattern matching.
 
-    Order matters: more specific patterns (date, geo) are checked before
-    broader ones (name, phone) to avoid misclassification (e.g., city names
-    matching the name pattern, or date columns matching the phone pattern).
+    Order matters: ID and price before phone/zip to prevent data profiling
+    from overriding name-based classification (e.g., 7-digit IDs as phones,
+    5-digit prices as zips).
     """
     if _DATE_PATTERNS.search(col_name):
         return "date"
     if _EMAIL_PATTERNS.search(col_name):
         return "email"
+    if _ID_PATTERNS.search(col_name):
+        return "identifier"
+    if _PRICE_PATTERNS.search(col_name):
+        return "numeric"
     if _ZIP_PATTERNS.search(col_name):
         return "zip"
     if _GEO_PATTERNS.search(col_name):
@@ -71,8 +79,6 @@ def _classify_by_name(col_name: str) -> str | None:
         return "phone"
     if _NAME_PATTERNS.search(col_name):
         return "name"
-    if _ID_PATTERNS.search(col_name):
-        return "identifier"
     return None
 
 
@@ -111,6 +117,7 @@ def _classify_by_data(values: list[str]) -> tuple[str, float]:
 
 def profile_columns(
     df: pl.DataFrame, sample_size: int = 1000, max_columns: int = 40,
+    llm_provider: str | None = None,
 ) -> list[ColumnProfile]:
     """Classify columns by type using name heuristics + data profiling.
 
@@ -154,10 +161,18 @@ def profile_columns(
         dtype = str(df[col_name].dtype)
 
         # Get non-null string values for profiling
+        col_series = sample[col_name]
+        total_rows = col_series.len()
+        null_count = col_series.null_count()
+        null_rate = null_count / total_rows if total_rows > 0 else 0.0
+
         values = [
-            str(v) for v in sample[col_name].drop_nulls().to_list()
+            str(v) for v in col_series.drop_nulls().to_list()
             if v is not None and str(v).strip()
         ]
+
+        cardinality_ratio = len(set(values)) / total_rows if total_rows > 0 else 0.0
+        avg_len = sum(len(v) for v in values) / len(values) if values else 0.0
 
         # Phase 1: name heuristics
         name_type = _classify_by_name(col_name)
@@ -169,7 +184,7 @@ def profile_columns(
         # (date, geo) because data profiling frequently misclassifies them
         # (e.g., ISO dates look like phone numbers, city names look like person names).
         # For other types, Phase 2 (data) wins when it contradicts Phase 1 (name).
-        _name_authoritative = {"date", "geo"}
+        _name_authoritative = {"date", "geo", "identifier", "numeric"}
         if name_type and name_type in _name_authoritative:
             # Name pattern is authoritative for date/geo — trust it
             col_type = name_type
@@ -195,7 +210,127 @@ def profile_columns(
             col_type=col_type,
             confidence=confidence,
             sample_values=values[:5],
+            null_rate=null_rate,
+            cardinality_ratio=cardinality_ratio,
+            avg_len=avg_len,
         ))
+
+    # LLM correction pass for ambiguous columns
+    if llm_provider and profiles:
+        profiles = _llm_classify_columns(profiles, llm_provider)
+
+    return profiles
+
+
+def _llm_classify_columns(
+    profiles: list[ColumnProfile], provider: str,
+) -> list[ColumnProfile]:
+    """Use LLM to correct ambiguous column classifications and rank match fields.
+
+    Only sends columns with low confidence or generic types (string, numeric).
+    High-confidence classifications (date, geo, email, identifier) are trusted.
+    """
+    import json as _json
+    import urllib.error
+
+    # Filter to ambiguous profiles
+    high_confidence_types = {"date", "geo", "email", "identifier"}
+    ambiguous = [
+        p for p in profiles
+        if p.confidence < 0.8 or p.col_type in ("string", "numeric")
+        if p.col_type not in high_confidence_types
+    ]
+
+    if not ambiguous:
+        return profiles
+
+    # Build prompt
+    col_lines = []
+    for p in ambiguous:
+        samples = ", ".join(p.sample_values[:5]) if p.sample_values else "no samples"
+        col_lines.append(f'  "{p.name}": [{samples}]')
+
+    all_col_names = [p.name for p in profiles if p.col_type not in high_confidence_types]
+
+    prompt = (
+        "You are classifying database columns for entity matching/deduplication.\n\n"
+        "For each column below, provide:\n"
+        '1. "type": one of: identifier, name, description, numeric, date, geo, '
+        "email, phone, zip, address, price, string\n"
+        '2. "match_rank": rank the top 5 columns most useful for entity matching '
+        "(1=most useful). Only rank columns that would help identify duplicate records.\n\n"
+        "Columns with sample values:\n"
+        + "\n".join(col_lines)
+        + "\n\nAll columns available for ranking: " + ", ".join(all_col_names)
+        + '\n\nRespond in JSON: {"classifications": {"col_name": "type", ...}, '
+        '"match_ranking": ["col1", "col2", "col3", "col4", "col5"]}'
+    )
+
+    try:
+        raw = _call_llm_for_blocking(prompt, provider)
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError, KeyError) as e:
+        logger.warning("LLM column classification failed: %s. Using heuristics only.", e)
+        return profiles
+
+    # Parse response
+    try:
+        # Extract JSON from response (may be wrapped in markdown)
+        text = raw.strip()
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        data = _json.loads(text)
+    except (ValueError, IndexError) as e:
+        logger.warning(
+            "LLM column classification returned unparseable response (error: %s). "
+            "Raw response (first 200 chars): %.200s", e, raw,
+        )
+        return profiles
+
+    # Normalize type aliases
+    _type_aliases = {
+        "id": "identifier", "ids": "identifier",
+        "desc": "description", "text": "string",
+        "location": "geo", "city": "geo", "state": "geo",
+        "postal": "zip", "postcode": "zip",
+        "cost": "numeric", "price": "numeric", "amount": "numeric",
+        "tel": "phone", "telephone": "phone",
+    }
+    valid_types = {
+        "identifier", "name", "description", "numeric", "date", "geo",
+        "email", "phone", "zip", "address", "string",
+    }
+
+    # Apply type corrections
+    classifications = data.get("classifications", {})
+    profile_by_name = {p.name: p for p in profiles}
+    for col_name, llm_type in classifications.items():
+        if col_name not in profile_by_name:
+            continue
+        if not isinstance(llm_type, str):
+            continue
+        p = profile_by_name[col_name]
+        # Only correct ambiguous columns
+        if p.col_type in high_confidence_types:
+            continue
+        normalized = _type_aliases.get(llm_type.lower(), llm_type.lower())
+        if normalized in valid_types:
+            logger.info("LLM reclassified '%s': %s -> %s", col_name, p.col_type, normalized)
+            p.col_type = normalized
+            p.confidence = 0.85
+
+    # Apply match ranking (stored as metadata for build_matchkeys to use)
+    match_ranking = data.get("match_ranking", [])
+    if match_ranking:
+        # Store ranking as a special attribute on profiles
+        for rank, col_name in enumerate(match_ranking[:5]):
+            if col_name in profile_by_name:
+                # Use a high utility boost so LLM-ranked fields sort first
+                p = profile_by_name[col_name]
+                p.cardinality_ratio = max(p.cardinality_ratio, 0.9 - rank * 0.1)
+                p.avg_len = max(p.avg_len, 40 - rank * 5)
+        logger.info("LLM match ranking: %s", match_ranking[:5])
 
     return profiles
 
@@ -304,9 +439,18 @@ def build_matchkeys(
         ))
 
     # Limit fuzzy fields to prevent OOM on wide datasets
+    # Rank by match utility: cardinality * completeness * string length
     max_fuzzy_fields = 5
     if len(all_weighted) > max_fuzzy_fields:
-        all_weighted.sort(key=lambda f: f.weight or 0.0, reverse=True)
+        profile_lookup = {p.name: p for p in profiles}
+
+        def _field_utility(f: MatchkeyField) -> float:
+            if not f.field or f.field not in profile_lookup:
+                return f.weight or 0.0
+            p = profile_lookup[f.field]
+            return p.cardinality_ratio * (1 - p.null_rate) * min(p.avg_len / 20, 1.0)
+
+        all_weighted.sort(key=_field_utility, reverse=True)
         dropped = [f.field for f in all_weighted[max_fuzzy_fields:] if f.field]
         all_weighted = all_weighted[:max_fuzzy_fields]
         logger.info(
@@ -741,7 +885,7 @@ def auto_configure_df(df: pl.DataFrame, llm_provider: str | None = None) -> Gold
     logger.info("Auto-configuring %d rows, %d columns", total_rows, len(df.columns))
 
     # Profile columns
-    profiles = profile_columns(df)
+    profiles = profile_columns(df, llm_provider=llm_provider)
 
     logger.info(
         "Detected column types: %s",

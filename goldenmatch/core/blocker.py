@@ -75,7 +75,22 @@ def _build_static_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[Block
                 continue
 
             if size > config.max_block_size:
-                if config.skip_oversized:
+                if config.skip_oversized and config.ann_column:
+                    # ANN fallback: embed oversized block's records and sub-block
+                    try:
+                        ann_sub = _ann_sub_block(
+                            group_df, config.ann_column, config.ann_top_k,
+                            config.ann_model, config.max_block_size, key_str,
+                        )
+                        if ann_sub:
+                            results.extend(ann_sub)
+                    except Exception:
+                        logger.error(
+                            "ANN sub-blocking failed for block %r (%d records). Skipping block.",
+                            key_str, size, exc_info=True,
+                        )
+                    continue
+                elif config.skip_oversized:
                     logger.warning(
                         f"Block {key_str!r} has {size} records "
                         f"(exceeds max_block_size={config.max_block_size}). Skipping."
@@ -92,6 +107,117 @@ def _build_static_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[Block
                 df=group_df.lazy(),
             ))
 
+    return results
+
+
+def _ann_sub_block(
+    block_df: pl.DataFrame,
+    ann_column: str,
+    ann_top_k: int,
+    ann_model: str,
+    max_block_size: int,
+    parent_key: str,
+) -> list[BlockResult]:
+    """ANN fallback for oversized blocks.
+
+    Embeds only the unique text values in the block, maps embeddings back
+    to all records, then uses FAISS to find neighbors and create sub-blocks.
+    """
+    from goldenmatch.core.ann_blocker import ANNBlocker
+    from goldenmatch.core.cluster import UnionFind
+    from goldenmatch.core.embedder import get_embedder
+
+    size = len(block_df)
+
+    # Cap: only ANN sub-block moderately oversized blocks (up to 10x max_block_size)
+    # Truly massive blocks (60K+) would still be too expensive to embed
+    if size > max_block_size * 10:
+        logger.info(
+            "ANN fallback: block %r has %d records (>%dx max). Too large, skipping.",
+            parent_key, size, 10,
+        )
+        return []
+
+    if ann_column not in block_df.columns:
+        logger.warning(
+            "ANN fallback: column %r not in block %r. Skipping %d records.",
+            ann_column, parent_key, size,
+        )
+        return []
+
+    # Deduplicate texts — embed only unique values
+    all_texts = block_df[ann_column].to_list()
+    unique_texts = list(set(t for t in all_texts if t is not None and str(t).strip()))
+
+    if len(unique_texts) < 2:
+        logger.info("ANN fallback: block %r has <2 unique texts. Skipping.", parent_key)
+        return []
+
+    logger.info(
+        "ANN fallback: block %r has %d records, %d unique texts. Embedding...",
+        parent_key, size, len(unique_texts),
+    )
+
+    embedder = get_embedder(ann_model)
+    unique_embeddings = embedder.embed_column(
+        unique_texts, cache_key=f"ann_sub_{parent_key}",
+    )
+
+    # Map unique embeddings back to all records
+    text_to_idx = {t: i for i, t in enumerate(unique_texts)}
+    record_indices = []  # index into unique_embeddings for each record
+    valid_records = []   # indices into block_df that have valid text
+    for i, t in enumerate(all_texts):
+        if t is not None and str(t).strip() and t in text_to_idx:
+            record_indices.append(text_to_idx[t])
+            valid_records.append(i)
+
+    if len(valid_records) < 2:
+        return []
+
+    import numpy as np
+    record_embeddings = unique_embeddings[np.array(record_indices)]
+
+    # Build FAISS index and query
+    blocker = ANNBlocker(top_k=min(ann_top_k, len(valid_records) - 1))
+    blocker.build_index(record_embeddings)
+    pairs = blocker.query(record_embeddings)
+
+    # Group into sub-blocks via Union-Find
+    row_ids = block_df["__row_id__"].to_list()
+    uf = UnionFind()
+    for a, b in pairs:
+        real_a = valid_records[a]
+        real_b = valid_records[b]
+        uf.add(real_a)
+        uf.add(real_b)
+        uf.union(real_a, real_b)
+
+    clusters = uf.get_clusters()
+    results: list[BlockResult] = []
+    n_oversized = 0
+    for members in clusters:
+        if len(members) < 2:
+            continue
+        member_list = sorted(members)
+        if len(member_list) > max_block_size:
+            n_oversized += 1
+            logger.warning(
+                "ANN sub-block from %r still has %d records (> max %d). Skipping.",
+                parent_key, len(member_list), max_block_size,
+            )
+            continue
+        sub_df = block_df[member_list]
+        results.append(BlockResult(
+            block_key=f"{parent_key}_ann_{min(member_list)}",
+            df=sub_df.lazy(),
+            strategy="ann",
+        ))
+
+    logger.info(
+        "ANN fallback: block %r -> %d sub-blocks (%d still oversized)",
+        parent_key, len(results), n_oversized,
+    )
     return results
 
 
@@ -320,6 +446,9 @@ def _build_multi_pass_blocks(lf: pl.LazyFrame, config: BlockingConfig) -> list[B
             keys=[pass_config],
             max_block_size=config.max_block_size,
             skip_oversized=config.skip_oversized,
+            ann_column=config.ann_column,
+            ann_top_k=config.ann_top_k,
+            ann_model=config.ann_model,
         )
         blocks = _build_static_blocks(lf, temp_config)
         for block in blocks:

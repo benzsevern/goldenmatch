@@ -23,6 +23,7 @@ import logging
 import os
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import polars as pl
 
@@ -39,6 +40,7 @@ def llm_score_pairs(
     api_key: str | None = None,
     model: str | None = None,
     batch_size: int = 20,
+    max_workers: int = 5,
     display_columns: list[str] | None = None,
     config: "LLMScorerConfig | None" = None,
     return_budget: bool = False,
@@ -66,17 +68,24 @@ def llm_score_pairs(
 
     Returns:
         Updated pairs list (or tuple with budget summary if return_budget=True).
-        LLM-approved pairs get score=1.0, LLM-rejected pairs get score=0.0,
-        others unchanged.
+        LLM-approved pairs get score=1.0. LLM-rejected or unconfirmed pairs
+        keep their original fuzzy score (never demoted).
     """
     from goldenmatch.config.schemas import LLMScorerConfig
 
     # Resolve config -> individual params
+    calibration_sample_size = 100
+    calibration_max_rounds = 5
+    calibration_convergence_delta = 0.01
     if config is not None:
         auto_threshold = config.auto_threshold
         candidate_lo = config.candidate_lo
         candidate_hi = config.candidate_hi
         batch_size = config.batch_size
+        max_workers = config.max_workers
+        calibration_sample_size = config.calibration_sample_size
+        calibration_max_rounds = config.calibration_max_rounds
+        calibration_convergence_delta = config.calibration_convergence_delta
         if config.provider:
             provider = config.provider
         if config.model:
@@ -134,24 +143,6 @@ def llm_score_pairs(
         len(auto_accept), auto_threshold, len(candidates), candidate_lo, candidate_hi, len(below),
     )
 
-    # Adaptive candidate range: if too many candidates for the budget,
-    # raise candidate_lo to target the most ambiguous pairs only
-    max_candidates = (budget._config.max_calls if budget and budget._config.max_calls else 500) * batch_size
-    if len(candidates) > max_candidates:
-        candidate_scores = sorted([pairs[i][2] for i in candidates], reverse=True)
-        adaptive_lo = candidate_scores[max_candidates - 1]
-        # Re-classify: keep only pairs above the new threshold
-        new_candidates = [i for i in candidates if pairs[i][2] >= adaptive_lo]
-        dropped = len(candidates) - len(new_candidates)
-        below.extend(i for i in candidates if pairs[i][2] < adaptive_lo)
-        candidates = new_candidates
-        logger.info(
-            "Adaptive range: raised candidate_lo from %.2f to %.2f "
-            "(%d candidates -> %d, %d dropped to keep within budget)",
-            candidate_lo, adaptive_lo, dropped + len(candidates),
-            len(candidates), dropped,
-        )
-
     if not candidates:
         result = list(pairs)
         for i in auto_accept:
@@ -170,32 +161,76 @@ def llm_score_pairs(
 
     # Score candidates with LLM
     t0 = time.perf_counter()
-    llm_results = _batch_score(
-        candidates, pairs, row_lookup, cols,
-        provider, api_key, model, batch_size,
-        budget=budget,
-    )
-    elapsed = time.perf_counter() - t0
 
-    n_match = sum(1 for v in llm_results.values() if v)
-    logger.info(
-        "LLM scored %d pairs in %.1fs: %d matches, %d non-matches",
-        len(llm_results), elapsed, n_match, len(llm_results) - n_match,
-    )
+    if len(candidates) > calibration_sample_size:
+        # Iterative calibration path
+        learned_threshold, llm_results = _iterative_calibrate(
+            candidates, pairs, row_lookup, cols,
+            provider, api_key, model, batch_size,
+            budget=budget, max_workers=max_workers,
+            sample_size=calibration_sample_size,
+            max_rounds=calibration_max_rounds,
+            convergence_delta=calibration_convergence_delta,
+            candidate_lo=candidate_lo,
+            candidate_hi=candidate_hi,
+        )
 
-    # Build result
-    result = list(pairs)
-    for i in auto_accept:
-        a, b, _ = result[i]
-        result[i] = (a, b, 1.0)
-    for i in candidates:
-        a, b, s = result[i]
-        if i in llm_results:
-            if llm_results[i]:
+        elapsed = time.perf_counter() - t0
+
+        # Build result: auto-accept
+        result = list(pairs)
+        for i in auto_accept:
+            a, b, _ = result[i]
+            result[i] = (a, b, 1.0)
+
+        # Apply LLM labels to sampled pairs
+        for i, is_match in llm_results.items():
+            if is_match:
+                a, b, _ = result[i]
                 result[i] = (a, b, 1.0)
-            else:
-                result[i] = (a, b, 0.0)
-        # else: budget ran out mid-scoring, keep original score
+            # else: keep original fuzzy score (never demote)
+
+        # Apply learned threshold to unsampled pairs
+        n_promoted = 0
+        n_unchanged = 0
+        for i in candidates:
+            if i not in llm_results:
+                if pairs[i][2] >= learned_threshold:
+                    a, b, _ = result[i]
+                    result[i] = (a, b, 1.0)
+                    n_promoted += 1
+                else:
+                    n_unchanged += 1
+
+        logger.info(
+            "LLM calibration applied in %.1fs: %d promoted, %d unchanged",
+            elapsed, n_promoted + sum(1 for m in llm_results.values() if m), n_unchanged,
+        )
+    else:
+        # Direct scoring path: few candidates, score them all
+        llm_results = _batch_score(
+            candidates, pairs, row_lookup, cols,
+            provider, api_key, model, batch_size,
+            budget=budget, max_workers=max_workers,
+        )
+        elapsed = time.perf_counter() - t0
+
+        n_match = sum(1 for v in llm_results.values() if v)
+        logger.info(
+            "LLM scored %d pairs in %.1fs: %d matches, %d non-matches",
+            len(llm_results), elapsed, n_match, len(llm_results) - n_match,
+        )
+
+        # Build result
+        result = list(pairs)
+        for i in auto_accept:
+            a, b, _ = result[i]
+            result[i] = (a, b, 1.0)
+        for i in candidates:
+            if i in llm_results and llm_results[i]:
+                a, b, _ = result[i]
+                result[i] = (a, b, 1.0)
+            # else: keep original fuzzy score (never demote)
 
     return _return(result)
 
@@ -221,19 +256,29 @@ def _batch_score(
     model: str,
     batch_size: int,
     budget: "BudgetTracker | None" = None,
+    max_workers: int = 5,
 ) -> dict[int, bool]:
-    """Score candidate pairs in batches. Returns {pair_index: is_match}."""
+    """Score candidate pairs in batches with concurrent requests.
+
+    Returns {pair_index: is_match}.
+    """
     results: dict[int, bool] = {}
 
+    # Pre-build all batch slices
+    all_batches: list[list[int]] = []
     for bi in range(0, len(candidate_indices), batch_size):
-        # Check budget before each batch
-        if budget:
-            estimated_tokens = batch_size * 80  # rough estimate per pair
-            if not budget.can_send(estimated_tokens):
-                logger.info("LLM budget exhausted after %d/%d pairs.", bi, len(candidate_indices))
-                break
+        all_batches.append(candidate_indices[bi:bi + batch_size])
 
-        batch_idx = candidate_indices[bi:bi + batch_size]
+    total_pairs = len(candidate_indices)
+
+    def _score_one_batch(batch_idx: list[int]) -> dict[int, bool]:
+        """Score a single batch via LLM. Called from worker threads."""
+        # Check budget (thread-safe via lock in BudgetTracker)
+        if budget:
+            estimated_tokens = len(batch_idx) * 80
+            if not budget.can_send(estimated_tokens):
+                logger.debug("Budget exhausted, skipping batch of %d pairs.", len(batch_idx))
+                return {}
 
         # Build prompt
         prompt_parts = [
@@ -250,7 +295,7 @@ def _batch_score(
 
         prompt = "\n".join(prompt_parts)
 
-        # Call LLM
+        # Call LLM with retries
         for attempt in range(3):
             try:
                 if provider == "openai":
@@ -262,7 +307,6 @@ def _batch_score(
                         prompt, api_key, model, max_tokens=len(batch_idx) * 10,
                     )
 
-                # Record budget usage
                 if budget:
                     budget.record_usage(
                         input_tokens=in_tok, output_tokens=out_tok, model=model,
@@ -277,15 +321,14 @@ def _batch_score(
                     elif "NO" in line:
                         batch_results.append(False)
 
-                # Pad if parsing missed some
                 while len(batch_results) < len(batch_idx):
                     batch_results.append(False)
 
-                for k, idx in enumerate(batch_idx):
-                    if k < len(batch_results):
-                        results[idx] = batch_results[k]
-
-                break
+                return {
+                    idx: batch_results[k]
+                    for k, idx in enumerate(batch_idx)
+                    if k < len(batch_results)
+                }
             except urllib.error.HTTPError as e:
                 if e.code == 429 and attempt < 2:
                     wait = (attempt + 1) * 5
@@ -293,15 +336,275 @@ def _batch_score(
                     time.sleep(wait)
                     continue
                 logger.error("LLM API error: %s", e)
-                # Mark batch as non-match on failure
-                for idx in batch_idx:
-                    results[idx] = False
-                break
+                return {}
+            except (urllib.error.URLError, OSError) as e:
+                if attempt < 2:
+                    wait = (attempt + 1) * 5
+                    logger.warning("LLM network error: %s. Retrying in %ds...", e, wait)
+                    time.sleep(wait)
+                    continue
+                logger.error("LLM network error (unrecoverable): %s", e)
+                return {}
 
-        if (bi // batch_size) % 10 == 0 and bi > 0:
-            logger.info("  LLM progress: %d/%d pairs", bi + len(batch_idx), len(candidate_indices))
+        return {}
+
+    # Sequential fast path for small workloads
+    if len(all_batches) <= 2 or max_workers <= 1:
+        for bi, batch_idx in enumerate(all_batches):
+            batch_result = _score_one_batch(batch_idx)
+            if not batch_result and budget and budget.budget_exhausted:
+                logger.info("LLM budget exhausted after %d/%d pairs.",
+                            bi * batch_size, total_pairs)
+                break
+            results.update(batch_result)
+            if (bi + 1) % 10 == 0:
+                logger.info("  LLM progress: %d/%d pairs",
+                            min((bi + 1) * batch_size, total_pairs), total_pairs)
+        return results
+
+    # Concurrent path
+    completed = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {}
+        for batch_idx in all_batches:
+            # Pre-check budget before submitting (avoid wasting threads)
+            if budget and budget.budget_exhausted:
+                logger.info("LLM budget exhausted, skipping remaining %d batches.",
+                            len(all_batches) - len(futures))
+                break
+            fut = pool.submit(_score_one_batch, batch_idx)
+            futures[fut] = batch_idx
+
+        for fut in as_completed(futures):
+            try:
+                batch_result = fut.result()
+            except Exception:
+                batch_idx = futures[fut]
+                logger.error(
+                    "LLM batch scoring failed for %d pairs. Skipping batch.",
+                    len(batch_idx), exc_info=True,
+                )
+                continue
+            results.update(batch_result)
+            completed += 1
+            if completed % 10 == 0 or completed == len(futures):
+                logger.info("  LLM progress: %d/%d batches (%d pairs scored)",
+                            completed, len(futures), len(results))
 
     return results
+
+
+def _compute_threshold(labels: dict[int, tuple[float, bool]]) -> float:
+    """Find optimal threshold separating YES from NO labels via grid search.
+
+    Args:
+        labels: {pair_index: (fuzzy_score, is_match)} from LLM responses.
+
+    Returns:
+        Optimal threshold score. Pairs at or above this are matches.
+    """
+    yes_scores = [s for s, m in labels.values() if m]
+    no_scores = [s for s, m in labels.values() if not m]
+
+    if not yes_scores:
+        return max(s for s, _ in labels.values()) + 0.001
+    if not no_scores:
+        return min(s for s, _ in labels.values()) - 0.001
+
+    if max(no_scores) < min(yes_scores):
+        return (max(no_scores) + min(yes_scores)) / 2
+
+    all_scores = sorted(set(yes_scores + no_scores))
+    best_threshold = (max(no_scores) + min(yes_scores)) / 2
+    best_cost = float("inf")
+
+    for i in range(len(all_scores) - 1):
+        candidate = (all_scores[i] + all_scores[i + 1]) / 2
+        cost = 0
+        for score, is_match in labels.values():
+            if is_match and score < candidate:
+                cost += 1
+            elif not is_match and score >= candidate:
+                cost += 1
+        if cost < best_cost:
+            best_cost = cost
+            best_threshold = candidate
+
+    return best_threshold
+
+
+def _stratified_sample(
+    candidate_indices: list[int],
+    pairs: list[tuple[int, int, float]],
+    sample_size: int,
+    score_lo: float,
+    score_hi: float,
+    already_scored: set[int],
+) -> list[int]:
+    """Stratified sample across the score range for round 1."""
+    import random as _random
+
+    available = [i for i in candidate_indices if i not in already_scored]
+    if len(available) <= sample_size:
+        return available
+
+    score_range = score_hi - score_lo
+    bin_width = max(0.01, score_range / 20)
+    n_bins = max(1, int(score_range / bin_width))
+
+    bins: list[list[int]] = [[] for _ in range(n_bins)]
+    for i in available:
+        score = pairs[i][2]
+        bin_idx = max(0, min(int((score - score_lo) / bin_width), n_bins - 1))
+        bins[bin_idx].append(i)
+
+    total_available = len(available)
+    result: list[int] = []
+    remaining_quota = sample_size
+
+    for b in bins:
+        if not b or remaining_quota <= 0:
+            continue
+        quota = max(1, round(sample_size * len(b) / total_available))
+        quota = min(quota, remaining_quota, len(b))
+        result.extend(_random.sample(b, quota))
+        remaining_quota -= quota
+
+    if len(result) < sample_size:
+        remaining = [i for i in available if i not in set(result)]
+        extra = min(sample_size - len(result), len(remaining))
+        if extra > 0:
+            result.extend(_random.sample(remaining, extra))
+
+    return result[:sample_size]
+
+
+def _focused_sample(
+    candidate_indices: list[int],
+    pairs: list[tuple[int, int, float]],
+    sample_size: int,
+    threshold: float,
+    band_width: float,
+    already_scored: set[int],
+) -> list[int]:
+    """Focused sample near the learned threshold for rounds 2+."""
+    import random as _random
+
+    lo = threshold - band_width
+    hi = threshold + band_width
+
+    available = [
+        i for i in candidate_indices
+        if i not in already_scored and lo <= pairs[i][2] <= hi
+    ]
+
+    if len(available) <= sample_size:
+        return available
+
+    return _random.sample(available, sample_size)
+
+
+def _iterative_calibrate(
+    candidate_indices: list[int],
+    pairs: list[tuple[int, int, float]],
+    row_lookup: dict[int, dict],
+    cols: list[str],
+    provider: str,
+    api_key: str,
+    model: str,
+    batch_size: int,
+    budget: "BudgetTracker | None" = None,
+    max_workers: int = 5,
+    sample_size: int = 100,
+    max_rounds: int = 5,
+    convergence_delta: float = 0.01,
+    candidate_lo: float = 0.75,
+    candidate_hi: float = 0.95,
+) -> tuple[float, dict[int, bool]]:
+    """Iterative LLM calibration: sample, score, learn threshold, repeat.
+
+    Returns (learned_threshold, {pair_index: is_match} for scored pairs).
+    """
+    all_labels: dict[int, tuple[float, bool]] = {}
+    all_llm_results: dict[int, bool] = {}
+    already_scored: set[int] = set()
+    prev_threshold = (candidate_lo + candidate_hi) / 2
+
+    for round_num in range(1, max_rounds + 1):
+        if budget and budget.budget_exhausted:
+            logger.info("LLM calibration: budget exhausted before round %d.", round_num)
+            break
+
+        if round_num == 1:
+            sample = _stratified_sample(
+                candidate_indices, pairs, sample_size,
+                score_lo=candidate_lo, score_hi=candidate_hi,
+                already_scored=already_scored,
+            )
+        else:
+            sample = _focused_sample(
+                candidate_indices, pairs, sample_size,
+                threshold=prev_threshold, band_width=0.03,
+                already_scored=already_scored,
+            )
+
+        if not sample:
+            logger.info("LLM calibration round %d: no unscored pairs to sample. Stopping.", round_num)
+            break
+
+        round_results = _batch_score(
+            sample, pairs, row_lookup, cols,
+            provider, api_key, model, batch_size,
+            budget=budget, max_workers=max_workers,
+        )
+
+        if not round_results:
+            logger.warning(
+                "LLM calibration round %d: no results returned (budget exhausted or API failure). Stopping.",
+                round_num,
+            )
+            break
+
+        for idx, is_match in round_results.items():
+            all_labels[idx] = (pairs[idx][2], is_match)
+            all_llm_results[idx] = is_match
+            already_scored.add(idx)
+
+        if not all_labels:
+            break
+        threshold = _compute_threshold(all_labels)
+
+        n_match = sum(1 for m in round_results.values() if m)
+        n_no = len(round_results) - n_match
+        sample_scores = [pairs[i][2] for i in sample]
+        score_lo_round = min(sample_scores) if sample_scores else 0
+        score_hi_round = max(sample_scores) if sample_scores else 0
+
+        if round_num == 1:
+            logger.info(
+                "LLM calibration round %d: %d pairs (%.3f-%.3f), %d match, %d non-match -> threshold %.3f",
+                round_num, len(round_results), score_lo_round, score_hi_round,
+                n_match, n_no, threshold,
+            )
+        else:
+            delta = abs(threshold - prev_threshold)
+            logger.info(
+                "LLM calibration round %d: %d pairs (%.3f-%.3f), %d match, %d non-match -> threshold %.3f (delta %.3f)",
+                round_num, len(round_results), score_lo_round, score_hi_round,
+                n_match, n_no, threshold, delta,
+            )
+
+            if abs(threshold - prev_threshold) < convergence_delta:
+                logger.info(
+                    "LLM calibration converged after %d rounds (%d pairs). Threshold: %.3f",
+                    round_num, len(all_llm_results), threshold,
+                )
+                prev_threshold = threshold
+                break
+
+        prev_threshold = threshold
+
+    return prev_threshold, all_llm_results
 
 
 def _call_openai(
