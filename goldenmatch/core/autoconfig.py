@@ -368,8 +368,20 @@ def _adaptive_threshold(fields: list[MatchkeyField]) -> float:
 
 def build_matchkeys(
     profiles: list[ColumnProfile], df: pl.DataFrame | None = None,
+    preset: dict | None = None,
 ) -> list[MatchkeyConfig]:
-    """Generate matchkeys from column profiles."""
+    """Generate matchkeys from column profiles.
+
+    Args:
+        profiles: Column profiles from ``profile_columns()``.
+        df: Optional DataFrame (used to skip exact matchkeys on large datasets).
+        preset: Optional domain autoconfig preset dict.  When present,
+            ``scorer_overrides`` entries replace the default ``_SCORER_MAP``
+            lookup for matching columns and ``threshold`` replaces the
+            adaptive threshold.
+    """
+    scorer_overrides = (preset or {}).get("scorer_overrides", {})
+
     # Separate exact and fuzzy columns
     exact_fields = []
     fuzzy_fields = []
@@ -378,6 +390,19 @@ def build_matchkeys(
     for p in profiles:
         if p.col_type in ("numeric", "date", "identifier"):
             continue  # skip non-matchable columns
+
+        # Check if preset overrides the scorer for this column
+        if p.name in scorer_overrides:
+            ov = scorer_overrides[p.name]
+            scorer = ov.get("scorer", "token_sort")
+            weight = ov.get("weight", 1.0)
+            transforms = ov.get("transforms", ["lowercase", "strip"])
+            mf = MatchkeyField(field=p.name, scorer=scorer, weight=weight, transforms=transforms)
+            if scorer == "exact":
+                exact_fields.append(mf)
+            else:
+                fuzzy_fields.append(mf)
+            continue
 
         if p.col_type == "description":
             description_columns.append(p)
@@ -459,7 +484,8 @@ def build_matchkeys(
         )
 
     if all_weighted:
-        threshold = _adaptive_threshold(all_weighted)
+        preset_threshold = (preset or {}).get("threshold")
+        threshold = preset_threshold if preset_threshold is not None else _adaptive_threshold(all_weighted)
         matchkeys.append(MatchkeyConfig(
             name="fuzzy_match",
             type="weighted",
@@ -866,6 +892,42 @@ def select_model(row_count: int, has_embedding_columns: bool, threshold: int = 5
     return "all-MiniLM-L6-v2"
 
 
+# ── Domain preset blocking helper ────────────────────────────────────────
+
+
+def _build_blocking_from_preset(
+    profiles: list[ColumnProfile],
+    df: pl.DataFrame,
+    preset: dict | None,
+    llm_provider: str | None,
+) -> BlockingConfig:
+    """Build blocking config using domain preset as baseline."""
+    if preset and "blocking" in preset:
+        bp = preset["blocking"]
+        strategy = bp.get("strategy", "multi_pass")
+
+        if strategy == "ann":
+            text_cols = [p for p in profiles if p.col_type in ("description", "string", "name")]
+            ann_col = text_cols[0].name if text_cols else None
+            if ann_col:
+                return BlockingConfig(
+                    strategy="ann",
+                    ann_column=ann_col,
+                    ann_top_k=bp.get("ann_top_k", 20),
+                    max_block_size=bp.get("max_block_size", 1000),
+                    skip_oversized=bp.get("skip_oversized", True),
+                    keys=[BlockingKeyConfig(fields=[ann_col], transforms=["lowercase"])],
+                )
+
+        if strategy in ("static", "multi_pass"):
+            blocking = build_blocking(profiles, df, llm_provider=llm_provider)
+            blocking.max_block_size = bp.get("max_block_size", blocking.max_block_size)
+            blocking.skip_oversized = bp.get("skip_oversized", blocking.skip_oversized)
+            return blocking
+
+    return build_blocking(profiles, df, llm_provider=llm_provider)
+
+
 # ── Main entry point ──────────────────────────────────────────────────────
 
 def auto_configure_df(df: pl.DataFrame, llm_provider: str | None = None) -> GoldenMatchConfig:
@@ -892,8 +954,16 @@ def auto_configure_df(df: pl.DataFrame, llm_provider: str | None = None) -> Gold
         {p.name: p.col_type for p in profiles},
     )
 
-    # Build matchkeys
-    matchkeys = build_matchkeys(profiles, df=df)
+    # Detect domain and load preset
+    from goldenmatch.core.domain_detector import detect_domain
+
+    domain_result = detect_domain(profiles)
+    preset = domain_result.preset
+    if preset:
+        logger.info("Using domain preset from '%s' (confidence %.2f)", domain_result.domain, domain_result.confidence)
+
+    # Build matchkeys (preset influences scorer/weight choices)
+    matchkeys = build_matchkeys(profiles, df=df, preset=preset)
 
     # Check if embeddings are needed
     has_embeddings = any(
@@ -912,13 +982,26 @@ def auto_configure_df(df: pl.DataFrame, llm_provider: str | None = None) -> Gold
 
     # Build blocking (required for weighted/probabilistic matchkeys)
     has_fuzzy = any(mk.type in ("weighted", "probabilistic") for mk in matchkeys)
-    blocking = build_blocking(profiles, df, llm_provider=llm_provider) if has_fuzzy else None
+    blocking = _build_blocking_from_preset(profiles, df, preset, llm_provider) if has_fuzzy else None
+
+    # Build standardization from preset
+    standardization = None
+    if preset and preset.get("recommended_standardization"):
+        from goldenmatch.config.schemas import StandardizationConfig
+
+        rules = {}
+        for col_name, std_list in preset["recommended_standardization"].items():
+            if col_name in df.columns:
+                rules[col_name] = std_list
+        if rules:
+            standardization = StandardizationConfig(rules=rules)
 
     # Build config
     config = GoldenMatchConfig(
         matchkeys=matchkeys,
         blocking=blocking,
         golden_rules=GoldenRulesConfig(default_strategy="most_complete"),
+        standardization=standardization,
         output=OutputConfig(),
     )
 

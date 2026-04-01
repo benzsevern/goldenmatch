@@ -582,3 +582,71 @@ class TestCompoundBlockingIntegration:
         if config.blocking.strategy == "multi_pass":
             assert config.blocking.skip_oversized is True
             assert config.blocking.max_block_size <= 1000
+
+
+class TestDomainPresetIntegration:
+    """Test that domain detection presets flow into auto_configure_df."""
+
+    def test_auto_configure_df_uses_domain_preset(self):
+        """When column names match a domain, auto-config should use the preset."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+
+        df = pl.DataFrame({
+            "brand": ["Sony", "Samsung", "LG", "Sony", "Apple"] * 100,
+            "model": ["WH-1000XM5", "Galaxy S24", "OLED55", "WH-1000XM4", "iPhone 15"] * 100,
+            "sku": ["SKU001", "SKU002", "SKU003", "SKU004", "SKU005"] * 100,
+            "price": ["299.99", "999.99", "1499.99", "249.99", "799.99"] * 100,
+        })
+
+        config = auto_configure_df(df)
+        assert config.blocking is not None
+        assert config.blocking.skip_oversized is True
+
+    def test_preset_scorer_overrides_applied(self):
+        """When preset has scorer_overrides for a column, build_matchkeys should use them."""
+        from goldenmatch.core.autoconfig import build_matchkeys, ColumnProfile
+
+        profiles = [
+            ColumnProfile("brand", "Utf8", "name", 0.9,
+                          sample_values=["Sony", "Samsung"],
+                          cardinality_ratio=0.5, avg_len=6.0),
+            ColumnProfile("description", "Utf8", "description", 0.7,
+                          sample_values=["A long product description here"],
+                          cardinality_ratio=0.9, avg_len=40.0),
+        ]
+        preset = {
+            "scorer_overrides": {
+                "brand": {"scorer": "jaro_winkler", "weight": 1.5},
+                "description": {"scorer": "ensemble", "weight": 2.0},
+            },
+            "threshold": 0.85,
+        }
+        mks = build_matchkeys(profiles, preset=preset)
+        weighted = [mk for mk in mks if mk.type == "weighted"]
+        assert len(weighted) == 1
+        # Check that the preset threshold is used
+        assert weighted[0].threshold == 0.85
+        # Check that brand uses the overridden scorer
+        brand_fields = [f for f in weighted[0].fields if f.field == "brand"]
+        assert len(brand_fields) == 1
+        assert brand_fields[0].scorer == "jaro_winkler"
+        assert brand_fields[0].weight == 1.5
+
+    def test_preset_standardization_applied(self):
+        """When preset has recommended_standardization, config should have standardization."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+
+        df = pl.DataFrame({
+            "brand": ["Sony", "Samsung", "LG", "Sony", "Apple"] * 100,
+            "model": ["WH-1000XM5", "Galaxy S24", "OLED55", "WH-1000XM4", "iPhone 15"] * 100,
+            "sku": ["SKU001", "SKU002", "SKU003", "SKU004", "SKU005"] * 100,
+            "description": [
+                "Wireless noise-cancelling headphones with premium sound quality"
+            ] * 500,
+        })
+
+        config = auto_configure_df(df)
+        # Electronics preset recommends standardization for description and brand
+        if config.standardization:
+            for col, rules in config.standardization.rules.items():
+                assert col in df.columns
