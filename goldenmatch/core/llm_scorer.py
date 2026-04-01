@@ -44,6 +44,7 @@ def llm_score_pairs(
     display_columns: list[str] | None = None,
     config: "LLMScorerConfig | None" = None,
     return_budget: bool = False,
+    circuit_breaker: object | None = None,
 ) -> "list[tuple[int, int, float]] | tuple[list[tuple[int, int, float]], dict | None]":
     """Score borderline pairs with an LLM.
 
@@ -212,6 +213,7 @@ def llm_score_pairs(
             candidates, pairs, row_lookup, cols,
             provider, api_key, model, batch_size,
             budget=budget, max_workers=max_workers,
+            circuit_breaker=circuit_breaker,
         )
         elapsed = time.perf_counter() - t0
 
@@ -257,6 +259,7 @@ def _batch_score(
     batch_size: int,
     budget: "BudgetTracker | None" = None,
     max_workers: int = 5,
+    circuit_breaker: object | None = None,
 ) -> dict[int, bool]:
     """Score candidate pairs in batches with concurrent requests.
 
@@ -390,6 +393,12 @@ def _batch_score(
             if completed % 10 == 0 or completed == len(futures):
                 logger.info("  LLM progress: %d/%d batches (%d pairs scored)",
                             completed, len(futures), len(results))
+
+    if circuit_breaker is not None:
+        action = circuit_breaker.check("llm_scoring")
+        if action.action == "stop":
+            logger.warning("Circuit breaker stopped LLM scoring: %s", action.reason)
+            return results
 
     return results
 
