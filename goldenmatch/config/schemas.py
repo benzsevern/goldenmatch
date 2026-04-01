@@ -356,7 +356,11 @@ class LLMScorerConfig(BaseModel):
     auto_threshold: float = 0.95  # auto-accept pairs above this
     candidate_lo: float = 0.75  # lower bound of LLM scoring range
     candidate_hi: float = 0.95  # upper bound (same as auto_threshold)
-    batch_size: int = 20
+    batch_size: int = 75
+    max_workers: int = 5  # concurrent LLM requests
+    calibration_sample_size: int = 100  # pairs per calibration round
+    calibration_max_rounds: int = 5  # max calibration iterations
+    calibration_convergence_delta: float = 0.01  # stop when threshold shift < this
     budget: BudgetConfig | None = None
     mode: str = "pairwise"  # "pairwise" (legacy) or "cluster" (in-context LLM clustering)
     cluster_max_size: int = 100  # max records per LLM cluster block

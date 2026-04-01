@@ -79,7 +79,19 @@ _embedders: dict[str, Embedder] = {}
 
 
 def get_embedder(model_name: str = "all-MiniLM-L6-v2") -> Embedder:
-    """Return a cached Embedder instance for *model_name*."""
+    """Return a cached Embedder instance, using GPU routing when available.
+
+    Checks GOLDENMATCH_GPU_MODE to select the right backend:
+    - vertex: uses VertexEmbedder (Google Vertex AI, no local GPU needed)
+    - remote: uses RemoteEmbedder (custom endpoint)
+    - local/cpu_safe: uses local sentence-transformers Embedder
+    """
     if model_name not in _embedders:
-        _embedders[model_name] = Embedder(model_name)
+        from goldenmatch.core.gpu import detect_gpu_mode, GPUMode
+        mode = detect_gpu_mode()
+        if mode == GPUMode.VERTEX:
+            from goldenmatch.core.vertex_embedder import VertexEmbedder
+            _embedders[model_name] = VertexEmbedder()
+        else:
+            _embedders[model_name] = Embedder(model_name)
     return _embedders[model_name]

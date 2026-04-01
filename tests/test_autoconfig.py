@@ -56,9 +56,27 @@ class TestClassifyByName:
         assert _classify_by_name("customer_id") == "identifier"
         assert _classify_by_name("sku") == "identifier"
 
+    def test_price(self):
+        assert _classify_by_name("SalePrice") == "numeric"
+        assert _classify_by_name("amount") == "numeric"
+        assert _classify_by_name("total_cost") == "numeric"
+        assert _classify_by_name("revenue") == "numeric"
+
+    def test_id_before_phone(self):
+        """ID pattern should match before phone — SalesID is an ID, not a phone."""
+        assert _classify_by_name("SalesID") == "identifier"
+        assert _classify_by_name("MachineID") == "identifier"
+        assert _classify_by_name("PhoneID") == "identifier"
+        assert _classify_by_name("TelephoneId") == "identifier"
+
+    def test_phone_still_works(self):
+        """Phone columns without ID suffix still classified as phone."""
+        assert _classify_by_name("phone") == "phone"
+        assert _classify_by_name("mobile") == "phone"
+        assert _classify_by_name("fax_number") == "phone"
+
     def test_unknown(self):
         assert _classify_by_name("foobar") is None
-        assert _classify_by_name("amount") is None
 
 
 class TestClassifyByData:
@@ -114,6 +132,66 @@ class TestProfileColumns:
         })
         profiles = profile_columns(df)
         assert all(p.name != "__row_id__" for p in profiles)
+
+
+class TestIdentifierNotOverridden:
+    """Identifier columns should not be overridden by phone/zip data profiling."""
+
+    def test_id_column_with_numeric_data(self):
+        """SalesID with 7-digit integers should stay 'identifier', not become 'phone'."""
+        df = pl.DataFrame({
+            "SalesID": [str(1139246 + i) for i in range(100)],
+            "name": [f"Record {i}" for i in range(100)],
+        })
+        profiles = profile_columns(df)
+        types = {p.name: p.col_type for p in profiles}
+        assert types["SalesID"] == "identifier"
+
+    def test_price_column_not_zip(self):
+        """SalePrice with 5-digit values should be 'numeric', not 'zip'."""
+        df = pl.DataFrame({
+            "SalePrice": [str(v) for v in [66000, 57000, 10000, 38500, 11000] * 20],
+            "name": [f"Record {i}" for i in range(100)],
+        })
+        profiles = profile_columns(df)
+        types = {p.name: p.col_type for p in profiles}
+        assert types["SalePrice"] == "numeric"
+
+
+class TestUtilityRanking:
+    """Fuzzy field truncation should rank by match utility, not column order."""
+
+    def test_high_utility_field_kept(self):
+        """A high-cardinality, long-string field should rank above short low-cardinality ones."""
+        profiles = [
+            ColumnProfile("UsageBand", "Utf8", "name", 0.7,
+                          sample_values=["Low", "Medium", "High"],
+                          cardinality_ratio=0.01, avg_len=4.0),
+            ColumnProfile("ProductSize", "Utf8", "name", 0.7,
+                          sample_values=["Small", "Large"],
+                          cardinality_ratio=0.005, avg_len=5.0),
+            ColumnProfile("Drive_System", "Utf8", "name", 0.7,
+                          sample_values=["2WD", "4WD"],
+                          cardinality_ratio=0.005, avg_len=3.0),
+            ColumnProfile("Enclosure", "Utf8", "name", 0.7,
+                          sample_values=["OROPS", "EROPS"],
+                          cardinality_ratio=0.005, avg_len=5.0),
+            ColumnProfile("Forks", "Utf8", "name", 0.7,
+                          sample_values=["Yes", "No"],
+                          cardinality_ratio=0.005, avg_len=3.0),
+            ColumnProfile("Ride_Control", "Utf8", "name", 0.7,
+                          sample_values=["Yes", "No"],
+                          cardinality_ratio=0.005, avg_len=3.0),
+            ColumnProfile("fiModelDesc", "Utf8", "string", 0.5,
+                          sample_values=["580D LL", "310SE", "416D 4x4x4"],
+                          cardinality_ratio=0.8, avg_len=12.0),
+        ]
+        mks = build_matchkeys(profiles)
+        weighted = [mk for mk in mks if mk.type == "weighted"]
+        assert len(weighted) == 1
+        field_names = [f.field for f in weighted[0].fields if f.field]
+        # fiModelDesc should be included despite being last in column order
+        assert "fiModelDesc" in field_names
 
 
 class TestBuildMatchkeys:
