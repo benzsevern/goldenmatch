@@ -473,6 +473,90 @@ class TestLLMBlockingKeySuggestion:
         assert config is not None
 
 
+class TestLLMColumnClassification:
+    """Test LLM-assisted column classification in profile_columns."""
+
+    def test_happy_path_corrects_ambiguous_types(self):
+        """LLM response should override ambiguous classifications."""
+        from goldenmatch.core.autoconfig import _llm_classify_columns, ColumnProfile
+
+        profiles = [
+            ColumnProfile("SalesID", "Utf8", "phone", 0.7, ["1139246", "1139248"]),
+            ColumnProfile("SalePrice", "Utf8", "zip", 0.7, ["66000", "57000"]),
+            ColumnProfile("fiModelDesc", "Utf8", "string", 0.3, ["580D", "310SE"]),
+            ColumnProfile("state", "Utf8", "geo", 0.9, ["CA", "TX"]),  # high confidence, should NOT change
+        ]
+
+        llm_response = '{"classifications": {"SalesID": "identifier", "SalePrice": "numeric", "fiModelDesc": "description"}, "match_ranking": ["fiModelDesc", "SalesID", "SalePrice"]}'
+
+        with patch("goldenmatch.core.autoconfig._call_llm_for_blocking", return_value=llm_response):
+            result = _llm_classify_columns(profiles, "openai")
+
+        types = {p.name: p.col_type for p in result}
+        assert types["SalesID"] == "identifier"
+        assert types["SalePrice"] == "numeric"
+        assert types["fiModelDesc"] == "description"
+        assert types["state"] == "geo"  # unchanged (high confidence)
+
+    def test_markdown_wrapped_json(self):
+        """LLM response wrapped in markdown code blocks should be parsed."""
+        from goldenmatch.core.autoconfig import _llm_classify_columns, ColumnProfile
+
+        profiles = [
+            ColumnProfile("col1", "Utf8", "string", 0.3, ["abc"]),
+        ]
+
+        llm_response = '```json\n{"classifications": {"col1": "name"}, "match_ranking": ["col1"]}\n```'
+
+        with patch("goldenmatch.core.autoconfig._call_llm_for_blocking", return_value=llm_response):
+            result = _llm_classify_columns(profiles, "openai")
+
+        assert result[0].col_type == "name"
+
+    def test_unparseable_response_returns_original(self):
+        """Garbage LLM response should return profiles unchanged."""
+        from goldenmatch.core.autoconfig import _llm_classify_columns, ColumnProfile
+
+        profiles = [
+            ColumnProfile("col1", "Utf8", "string", 0.3, ["abc"]),
+        ]
+
+        with patch("goldenmatch.core.autoconfig._call_llm_for_blocking", return_value="not json at all"):
+            result = _llm_classify_columns(profiles, "openai")
+
+        assert result[0].col_type == "string"  # unchanged
+
+    def test_api_failure_returns_original(self):
+        """LLM API failure should return profiles unchanged."""
+        from goldenmatch.core.autoconfig import _llm_classify_columns, ColumnProfile
+        import urllib.error
+
+        profiles = [
+            ColumnProfile("col1", "Utf8", "string", 0.3, ["abc"]),
+        ]
+
+        with patch("goldenmatch.core.autoconfig._call_llm_for_blocking",
+                    side_effect=urllib.error.URLError("network down")):
+            result = _llm_classify_columns(profiles, "openai")
+
+        assert result[0].col_type == "string"
+
+    def test_non_string_type_ignored(self):
+        """LLM returning non-string type values should not crash."""
+        from goldenmatch.core.autoconfig import _llm_classify_columns, ColumnProfile
+
+        profiles = [
+            ColumnProfile("col1", "Utf8", "string", 0.3, ["abc"]),
+        ]
+
+        llm_response = '{"classifications": {"col1": 123}, "match_ranking": []}'
+
+        with patch("goldenmatch.core.autoconfig._call_llm_for_blocking", return_value=llm_response):
+            result = _llm_classify_columns(profiles, "openai")
+
+        assert result[0].col_type == "string"  # unchanged, 123 ignored
+
+
 class TestCompoundBlockingIntegration:
     """Integration test: auto_configure_df on a wide dataset with oversized single-column blocks."""
 
