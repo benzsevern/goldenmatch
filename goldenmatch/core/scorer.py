@@ -536,6 +536,7 @@ def score_blocks_parallel(
     across_files_only: bool = False,
     source_lookup: dict[int, str] | None = None,
     target_ids: set[int] | None = None,
+    circuit_breaker: object | None = None,
 ) -> list[tuple[int, int, float]]:
     """Score all blocks in parallel using threads.
 
@@ -575,6 +576,12 @@ def score_blocks_parallel(
             all_pairs.extend(pairs)
             for a, b, s in pairs:
                 matched_pairs.add((min(a, b), max(a, b)))
+            if circuit_breaker is not None:
+                circuit_breaker.add_comparisons(len(pairs))
+                action = circuit_breaker.check("scoring (sequential)")
+                if action.action == "stop":
+                    logger.warning("Circuit breaker stopped sequential scoring: %s", action.reason)
+                    break
         return all_pairs
 
     # Snapshot exclude_pairs so threads see a frozen copy
@@ -612,6 +619,14 @@ def score_blocks_parallel(
                     int(completed / total_blocks * 100),
                     len(all_pairs),
                 )
+            if circuit_breaker is not None:
+                circuit_breaker.add_comparisons(len(pairs))
+                action = circuit_breaker.check(f"scoring block {completed}/{total_blocks}")
+                if action.action == "stop":
+                    logger.warning("Circuit breaker stopped scoring at block %d/%d: %s", completed, total_blocks, action.reason)
+                    for f in future_to_idx:
+                        f.cancel()
+                    break
 
     logger.info(
         "Parallel scoring: %d blocks, %d workers, %d pairs found",
