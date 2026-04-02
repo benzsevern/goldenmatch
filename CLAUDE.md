@@ -30,7 +30,7 @@
 
 ## Testing
 - `pytest --tb=short` from project root — all tests must pass after every change
-- 1173 tests (+ 6 skipped for optional deps), run in ~50s
+- 1271 tests (+ 6 skipped for optional deps), run in ~55s
 - Coverage: 72% (with db/mcp/connectors excluded via pyproject.toml [tool.coverage.run] omit)
 - Key module coverage: scorer 87%, probabilistic 96%, pprl/autoconfig 95%, _api 85%, pipeline 82%
 - Fixtures in `tests/conftest.py`: `sample_csv`, `sample_csv_b`, `sample_parquet`
@@ -138,6 +138,9 @@
 - Domain extraction: `core/domain.py` — auto-detects product subdomain (electronics vs software), extracts brand/model/SKU/color/specs (electronics) or name/version/edition/platform (software). Model normalization strips hyphens, region/color suffixes. Pipeline step between standardize and matchkeys.
 - LLM extraction: `core/llm_extract.py` — LLM-based feature extraction for low-confidence records. Reuses BudgetTracker. O(N) preprocessing, not O(N^2) pair scoring.
 - Domain registry: `core/domain_registry.py` — YAML-based custom domain rulebooks. Search paths: `.goldenmatch/domains/` (local), `~/.goldenmatch/domains/` (global), `goldenmatch/domains/` (built-in). MCP tools: `list_domains`, `create_domain`, `test_domain`
+- Domain detector: `core/domain_detector.py` — `detect_domain(profiles)` scores column profiles against domain YAML packs for auto-config preset selection. Uses word-boundary matching (split on `[^a-zA-Z0-9]+`), NOT substring matching.
+- Preflight system: `core/preflight.py` — `preflight()`, `RunPlan`, `ResourceProjection`, `SampleStats`, `Downgrade`, `PreflightError`. Sample-based resource estimation + auto-downgrade cascade (skip_oversized → halve max_block_size → ANN → DuckDB). Aggressive mode also tightens LLM band + raises thresholds.
+- Circuit breaker: `core/circuit_breaker.py` — `CircuitBreaker`, `CircuitAction`, `CircuitBreakerError`. Checks memory (psutil), LLM cost, comparison count at pipeline checkpoints (scorer, LLM batches, post-scoring stage).
 - MCP `suggest_config` tool: analyze bad merges, identify guilty fields, suggest threshold/weight changes
 - REST review queue: `GET /reviews` returns borderline pairs for steward review, `POST /reviews/decide` records approve/reject decisions
 - Daemon mode: `watch_daemon()` in `db/watch.py` — adds health endpoint (HTTP /health), PID file, SIGTERM handling to watch mode
@@ -224,6 +227,9 @@ Hosted on Railway, registered on Smithery:
 - Unicode box drawing chars (pipe/dash) crash on Windows cp1252 terminal -- use ASCII in benchmark scripts
 - GitHub release triggers publish workflow -- `twine upload --skip-existing` avoids double-publish errors
 - `discover_rulebooks()` returns all 7 packs -- domain match tests must accept retail alongside electronics (overlapping signals like "brand", "sku")
+- `psutil>=5.9` is a core dependency (circuit_breaker.py and preflight.py) -- not optional
+- Domain YAML packs have `autoconfig_preset` sections with `blocking`, `scorer_overrides`, `threshold`, `recommended_standardization`. Standardization values must be valid standardizer names (NOT matchkey transforms)
+- Preflight `_get_blocking_stats` namespaces keys by config index (`f"{ki}:{bk}"`) to avoid collisions across multi-pass blocking keys
 - pgrx 0.12.9 does NOT auto-generate SQL files -- must provide handwritten `sql/goldenmatch_pg--0.1.0.sql` manually
 - pgrx in workspace mode is broken -- postgres crate must be excluded from workspace (`exclude = ["postgres"]` in root Cargo.toml)
 - pgrx extension functions live in `goldenmatch` schema (per .control file) -- must use `goldenmatch.function_name()` or explicit `::TEXT` casts in psql
@@ -274,7 +280,23 @@ result.stats           # dict — total_records, total_clusters, matched_records
 result.total_records   # int
 result.total_clusters  # int
 result.match_rate      # float
+result.plan            # RunPlan | None — preflight projections and downgrades
 ```
+
+### dedupe_df() — preflight & safety params
+```python
+result = goldenmatch.dedupe_df(
+    df,
+    run_preflight=True,       # auto-runs for >10K rows
+    safety="conservative",    # "conservative", "aggressive", "none"
+    plan=None,                # pre-computed RunPlan from gm.preflight()
+)
+result.plan                   # RunPlan | None — projections, downgrades
+```
+- Cannot pass both `config=` and `plan=` (raises ValueError)
+- `safety="none"` skips preflight entirely (backwards-compatible default behavior)
+- `gm.preflight(df)` returns a `RunPlan` for inspection before committing
+- Param is `run_preflight` (not `preflight`) to avoid shadowing the module-level `preflight()` function
 
 ### StandardizationConfig — use rules dict, NOT keyword args
 ```python
