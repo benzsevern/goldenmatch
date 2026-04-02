@@ -26,14 +26,29 @@ Using iterative LLM calibration (v1.2.6), the LLM learned the optimal threshold 
 
 ### Comparison with Other Tools
 
-| Tool | DBLP-ACM | Abt-Buy | Approach | Training Required |
-|------|----------|---------|----------|-------------------|
-| **GoldenMatch** | **97.2%** | **72.2%** (local) / **81.7%** (Vertex) | multi-pass fuzzy + domain extraction + LLM | No |
-| **Ditto** | 99.0% | 89.3% | Fine-tuned DistilBERT | Yes (1000+ labels) |
-| **DeepMatcher** | 98.4% | 62.8% | Deep learning | Yes |
-| **Splink** | ~95% | ~70% | Fellegi-Sunter (Spark) | Yes (labels) |
-| **dedupe** | ~96% | ~75% | Active learning | Yes (200+ labels) |
-| **Zingg** | ~96% | ~80% | Active learning (Spark) | Yes (labels) |
+| Tool | DBLP-ACM | Abt-Buy | BPID (PII) | Approach | Training Required |
+|------|----------|---------|------------|----------|-------------------|
+| **GoldenMatch** | **97.2%** | **81.7%** (Vertex) | **75.0%** | multi-pass fuzzy + domain extraction + embeddings | No |
+| **Ditto** | 99.0% | 89.3% | 75.2% | Fine-tuned DistilBERT | Yes (1000+ labels) |
+| **Sudowoodo** | -- | -- | 78.8% | Contrastive self-supervised | Yes (fine-tuned) |
+| **DeepMatcher** | 98.4% | 62.8% | -- | Deep learning | Yes |
+| **Splink** | ~95% | ~70% | -- | Fellegi-Sunter (Spark) | Yes (labels) |
+| **dedupe** | ~96% | ~75% | -- | Active learning | Yes (200+ labels) |
+| **Zingg** | ~96% | ~80% | -- | Active learning (Spark) | Yes (labels) |
+
+### BPID — PII Deduplication (EMNLP 2024)
+
+[BPID](https://aclanthology.org/2024.emnlp-industry.40/) (Amazon, EMNLP 2024) — first open-source adversarial PII matching benchmark. 10,000 profile pairs with intentional near-miss traps.
+
+| Configuration | Precision | Recall | F1 | Cost |
+|---------------|-----------|--------|-----|------|
+| Naive weighted | 54.1% | 86.5% | 66.5% | $0 |
+| Optimized (DOB parsing + phone norm) | 65.5% | 86.9% | **74.7%** | $0 |
+| + Vertex AI embeddings (65/35 blend) | 67.2% | 84.9% | **75.0%** | ~$0.10 |
+
+GoldenMatch matches Ditto (75.0% vs 75.2%) with zero training data. DOB component parsing was worth +0.08 F1. LLM boost reduced F1 by 0.013 — adversarial profiles trick language models too.
+
+See the [full benchmark writeup](https://bensevern.dev/blog/2026-04-02-goldenmatch-bpid-benchmark).
 
 ### Key Findings
 
@@ -41,6 +56,7 @@ Using iterative LLM calibration (v1.2.6), the LLM learned the optimal threshold 
 - **Abt-Buy (72.2% local / 81.7% Vertex)**: Domain extraction (brand, model, SKU) + embedding ANN + LLM scorer on borderline pairs. Local pipeline uses MiniLM embeddings + domain extraction for $0.04. Vertex AI pipeline achieves 81.7% at ~$0.74.
 - **Amazon-Google (45.3%)**: Clean emb+ANN + LLM pipeline. Software product matching is inherently harder -- adding domain extraction or token normalization hurts F1 (more noise). SOTA is ~78% (GPT-4 few-shot, Ditto fine-tuned).
 - **DBLP-Scholar (74.7%)**: Multi-pass blocking + fuzzy scoring.
+- **BPID (75.0%)**: Matches Ditto with zero training. DOB parsing is the single biggest lever for PII matching. Embeddings help marginally; LLMs hurt on adversarial data.
 
 See [Comparison with Other Tools](Comparison.md) for a full feature-by-feature breakdown.
 

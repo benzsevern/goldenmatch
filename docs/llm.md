@@ -207,9 +207,12 @@ Both providers return `(text, input_tokens, output_tokens)` tuples for budget tr
 | Amazon-Google (software) | emb + ANN + LLM | $0.02 | 45.3% |
 | Abt-Buy (Vertex AI + LLM) | Embeddings + GPT-4o-mini | $0.74 | 81.7% |
 | Bulldozer 401K (equipment) | Multi-pass + ANN + calibration | ~$0.01 | 87.7% conf |
+| **BPID (adversarial PII)** | **Classical + GPT-4.1-mini** | **~$1.42** | **73.7% (worse)** |
 | Typical 5K dataset | LLM scorer (borderline only) | ~$0.05 | varies |
 
 With iterative calibration (v1.2.6+), the LLM scores only ~200 pairs to learn the optimal threshold, then applies it to all candidates. This reduced the Bulldozer benchmark from ~$0.50 (37,500 pairs) to ~$0.01 (200 pairs).
+
+**When LLM scoring hurts:** On BPID's adversarial PII data, GPT-4.1-mini reduced F1 from 75.0% to 73.7%. The LLM achieved only 60.7% accuracy on borderline pairs — near-miss traps (same name + shared phone + contradicting DOB) fool LLMs just as effectively as string matchers. For adversarial PII benchmarks, structured feature engineering (DOB parsing, phone normalization) is more effective than LLM reasoning. See the [BPID benchmark writeup](https://bensevern.dev/blog/2026-04-02-goldenmatch-bpid-benchmark).
 
 ---
 

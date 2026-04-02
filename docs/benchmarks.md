@@ -38,17 +38,37 @@ For structured data (names, addresses, bibliographic records), fuzzy matching al
 
 Product matching benefits from domain extraction (electronics) and LLM scoring (borderline pairs). Adding too many candidate sources can hurt software matching -- keep the candidate set clean.
 
+### PII deduplication (BPID)
+
+[BPID](https://aclanthology.org/2024.emnlp-industry.40/) (EMNLP 2024, Amazon) is the first open-source benchmark for personal identity deduplication. 10,000 adversarial profile pairs with 5 attributes: name, email (list), phone (list), address (list), DOB.
+
+| Configuration | Precision | Recall | F1 | Cost |
+|---------------|-----------|--------|-----|------|
+| Naive weighted scoring | 54.1% | 86.5% | 66.5% | $0 |
+| Optimized (DOB parsing + phone normalization) | 65.5% | 86.9% | **74.7%** | $0 |
+| Classical + Vertex AI embeddings (65/35 blend) | 67.2% | 84.9% | **75.0%** | ~$0.10 |
+| + GPT-4.1-mini LLM boost | 62.3% | 90.2% | 73.7% | ~$1.42 |
+
+**Key findings:**
+- **DOB component parsing** was the single biggest lever (+0.08 F1). Extracting (year, month, day) from free-text dates and detecting birth year contradictions.
+- **Vertex AI embeddings** added marginal gains (+0.003 F1) because adversarial pairs are designed to be semantically similar.
+- **LLM boost hurt** (-0.013 F1). GPT-4.1-mini achieved only 60.7% accuracy on borderline pairs — adversarial profiles trick LLMs just as they trick string matchers.
+- **Zero training data** — GoldenMatch matches Ditto (75.0% vs 75.2%) without any labeled examples.
+
+See the [full benchmark writeup](https://bensevern.dev/blog/2026-04-02-goldenmatch-bpid-benchmark) and `D:/show_case/bpid_bench/` for scripts.
+
 ### Comparison with other tools
 
-| Tool | Abt-Buy F1 | DBLP-ACM F1 | Training Required | Zero-Config |
-|------|-----------|-------------|-------------------|-------------|
-| **GoldenMatch** | **81.7%** | **97.2%** | No | Yes |
-| dedupe | ~75% | ~96% | Yes | No |
-| Splink | ~70% | ~95% | Yes | No |
-| Zingg | ~80% | ~96% | Yes | No |
-| Ditto | 89.3% | 99.0% | Yes (1000+ labels) | No |
+| Tool | Abt-Buy F1 | DBLP-ACM F1 | BPID F1 (PII) | Training Required | Zero-Config |
+|------|-----------|-------------|---------------|-------------------|-------------|
+| **GoldenMatch** | **81.7%** | **97.2%** | **75.0%** | No | Yes |
+| dedupe | ~75% | ~96% | -- | Yes | No |
+| Splink | ~70% | ~95% | -- | Yes | No |
+| Zingg | ~80% | ~96% | -- | Yes | No |
+| Ditto | 89.3% | 99.0% | 75.2% | Yes (1000+ labels) | No |
+| Sudowoodo | -- | -- | 78.8% | Yes (fine-tuned BERT) | No |
 
-GoldenMatch trades ~8pts of F1 on Abt-Buy for zero training labels and no GPU requirement. On DBLP-ACM, it matches within 2pts of state-of-the-art.
+GoldenMatch matches Ditto on PII deduplication (75.0% vs 75.2%) and DBLP-ACM (97.2% vs 99.0%) with zero training. The Abt-Buy gap (~8pts) is the main area where fine-tuned PLMs hold an advantage.
 
 ### Equipment data (v1.2.6)
 
@@ -149,6 +169,17 @@ OPENAI_API_KEY=... python tests/benchmarks/run_llm_budget_bench.py
 
 Requires an OpenAI API key.
 
+### BPID (PII deduplication)
+
+Download the dataset from [Zenodo](https://zenodo.org/records/13932202) (Apache 2.0), then:
+
+```bash
+# From the bpid_bench directory
+python run_bpid_optimized.py     # Classical scoring (0.747 F1)
+python run_bpid_ann.py           # + Vertex AI embeddings (0.750 F1)
+python run_bpid_llm_v2.py        # + LLM boost (requires OPENAI_API_KEY)
+```
+
 ### Throughput benchmark
 
 ```bash
@@ -178,3 +209,7 @@ python tests/analyze_results.py
 5. **PPRL auto-config beats manual tuning.** 92.4% F1 vs 89.8% on FEBRL4, with zero manual configuration.
 
 6. **4 PPRL fields beats 6.** Fewer, higher-quality fields reduce noise in bloom filter comparison.
+
+7. **DOB parsing outperforms LLM reasoning on adversarial PII data.** On BPID, parsing dates into (year, month, day) components added +0.08 F1. LLM boost reduced F1 by 0.013 — adversarial profiles are designed to trick language models just as effectively as string matchers.
+
+8. **GoldenMatch matches Ditto on PII without training.** 75.0% vs 75.2% F1 on BPID with zero labeled pairs, zero fine-tuning, zero GPU.

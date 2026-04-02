@@ -481,7 +481,7 @@ goldenmatch dedupe products.csv --llm-boost
 
 **Iterative calibration:** When many borderline pairs exist, iterative calibration samples ~100 pairs per round, learns the optimal threshold via grid search, and applies it to all candidates — typically converging in 2-3 rounds.
 
-**Note:** LLM boost is most valuable for product matching with local models (MiniLM) where it improved Abt-Buy from 44.5% to 59.5% F1. For structured data (names, addresses, bibliographic), fuzzy matching alone achieves 97%+ F1.
+**Note:** LLM boost is most valuable for product matching with local models (MiniLM) where it improved Abt-Buy from 44.5% to 59.5% F1. For structured data (names, addresses, bibliographic), fuzzy matching alone achieves 97%+ F1. On adversarial PII data ([BPID benchmark](https://aclanthology.org/2024.emnlp-industry.40/)), LLM scoring actually reduced F1 — structured feature engineering (DOB parsing, phone normalization) outperforms LLM reasoning when near-miss traps are designed to fool language models.
 
 ## Benchmarks
 
@@ -496,6 +496,15 @@ goldenmatch dedupe products.csv --llm-boost
 | **Amazon-Google** (1.4K vs 3.2K) | Vertex AI + reranking | **44.0%** | ~$0.10 |
 
 **Structured data (names, addresses, bibliographic):** RapidFuzz multi-pass fuzzy matching at 97.2% — zero cost, zero labels. **Product matching:** Vertex AI embeddings for candidate generation + GPT-4o-mini scorer for borderline pairs achieves 81.7% at ~$0.74 total cost.
+
+### BPID — PII Deduplication (EMNLP 2024)
+
+| Dataset | Records | Strategy | Precision | Recall | F1 | Cost |
+|---------|---------|----------|-----------|--------|-----|------|
+| **BPID** (10K pairs) | 20K profiles | Classical (DOB parsing + phone norm) | 65.5% | 86.9% | **74.7%** | $0 |
+| **BPID** | 20K profiles | Classical + Vertex AI embeddings (65/35) | 67.2% | 84.9% | **75.0%** | ~$0.10 |
+
+[BPID](https://aclanthology.org/2024.emnlp-industry.40/) is Amazon's adversarial PII benchmark — 10,000 profile pairs with intentional near-miss traps (gender name swaps, shared identifiers across different people, contradicting birthdates). GoldenMatch matches Ditto (0.750 vs 0.752 F1) with **zero training data**. Key insight: DOB component parsing was worth +0.08 F1; embeddings added +0.003; LLM boost hurt (-0.013) because adversarial profiles trick language models too. See the [full benchmark writeup](https://bensevern.dev/blog/2026-04-02-goldenmatch-bpid-benchmark).
 
 ### Throughput (Scale Curve)
 
@@ -519,6 +528,7 @@ For datasets over 1M records, use `goldenmatch sync` (database mode) with increm
 |---|---|---|---|---|---|
 | Abt-Buy F1 | **81.7%** | ~75% | ~70% | ~80% | 89.3% |
 | DBLP-ACM F1 | **97.2%** | ~96% | ~95% | ~96% | 99.0% |
+| BPID F1 (PII) | **75.0%** | -- | -- | -- | 75.2% |
 | Training required | No | Yes | Yes | Yes | Yes (1000+) |
 | Zero-config | Yes | No | No | No | No |
 | Interactive TUI | Yes | No | No | No | No |
@@ -526,7 +536,7 @@ For datasets over 1M records, use `goldenmatch sync` (database mode) with increm
 | REST API / MCP | Both | Cloud only | No | No | No |
 | GPU required | No | No | No | Spark | Yes |
 
-GoldenMatch's sweet spot is **ease of use + competitive accuracy**. On bibliographic matching (DBLP-ACM), GoldenMatch hits 97.2% with zero config. On product matching (Abt-Buy), the LLM scorer reaches 81.7% — within 8pts of Ditto's 89.3%, but with zero training labels and no GPU. Ditto requires 1000+ hand-labeled pairs and a GPU.
+GoldenMatch's sweet spot is **ease of use + competitive accuracy**. On bibliographic matching (DBLP-ACM), GoldenMatch hits 97.2% with zero config. On product matching (Abt-Buy), the LLM scorer reaches 81.7% — within 8pts of Ditto's 89.3%. On PII deduplication (BPID), GoldenMatch matches Ditto at 75.0% vs 75.2% — with zero training labels and no GPU.
 
 ## Large Dataset Mode
 

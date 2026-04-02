@@ -91,9 +91,11 @@
 
 ## Accuracy Strategy
 - Structured data (names, addresses, bibliographic): fuzzy matching alone → 97.2% F1. No embeddings or LLM needed.
+- PII deduplication (BPID, EMNLP 2024): DOB component parsing + phone normalization + Vertex AI embeddings → **75.0% F1** (matches Ditto 75.2%, zero training). DOB parsing alone was +0.08 F1. LLM boost *hurt* by -0.013 — adversarial profiles fool LLMs. Scripts in `D:\show_case\bpid_bench\`.
 - Product matching (electronics/Abt-Buy): domain extraction + emb+ANN + LLM → **72.2% F1** (P=94.8%, $0.04). Domain extraction gets 393/1081 model matches for free.
 - Product matching (software/Amazon-Google): emb+ANN + LLM → **45.3% F1** (P=63.3%, $0.02). Clean emb+ANN pipeline is best — adding domain extraction/token normalization/mfr blocking adds noise and hurts F1. SOTA is ~78% (GPT-4 few-shot, Ditto fine-tuned).
 - Product matching lesson: adding candidate sources (domain extraction, token normalization, manufacturer blocking) helps electronics (Abt-Buy) but HURTS software (Amazon-Google). More pairs = more noise. For domains without precise identifiers, keep the candidate set clean and let the LLM filter.
+- PII lesson: on adversarial data, structured feature engineering (date parsing, phone normalization, first-name extraction) outperforms LLM reasoning. LLMs add value on real-world variety, not on designed traps.
 - LLM scorer sends borderline pairs (0.75-0.95) to GPT, auto-accepts >0.95. Budget cap of $0.05 covers typical datasets.
 - Fellegi-Sunter probabilistic: 98.8% precision, 57.6% recall, 72.8% F1 on DBLP-ACM. Opt-in for automatic parameter estimation and high-precision use cases. Uses Splink-style EM (fix u from random pairs, train only m).
 - Learned blocking: auto-discovers predicates, 96.9% F1 matching hand-tuned static blocking
