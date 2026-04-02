@@ -58,8 +58,13 @@ class CircuitBreaker:
     def _check_memory(self, stage: str) -> CircuitAction:
         try:
             rss_bytes = psutil.Process().memory_info().rss
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            return CircuitAction(action="continue")
+        except psutil.Error as exc:
+            logger.warning(
+                "Circuit breaker: cannot read memory at '%s': %s. "
+                "Memory safety checks disabled for this checkpoint.",
+                stage, exc,
+            )
+            return CircuitAction(action="continue", reason="memory monitoring unavailable")
 
         rss_mb = rss_bytes / (1024 * 1024)
 
@@ -94,7 +99,15 @@ class CircuitBreaker:
         if tracker is None:
             return CircuitAction(action="continue")
 
-        if hasattr(tracker, "budget_exhausted") and tracker.budget_exhausted:
+        if not hasattr(tracker, "budget_exhausted"):
+            logger.warning(
+                "Circuit breaker: budget_tracker at '%s' missing 'budget_exhausted'; "
+                "cost monitoring disabled",
+                stage,
+            )
+            return CircuitAction(action="continue")
+
+        if tracker.budget_exhausted:
             logger.error("Circuit breaker STOP at '%s': LLM budget exhausted", stage)
             return CircuitAction(
                 action="stop",

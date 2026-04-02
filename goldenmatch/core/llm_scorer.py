@@ -363,6 +363,11 @@ def _batch_score(
             if (bi + 1) % 10 == 0:
                 logger.info("  LLM progress: %d/%d pairs",
                             min((bi + 1) * batch_size, total_pairs), total_pairs)
+            if circuit_breaker is not None:
+                action = circuit_breaker.check("llm_scoring (sequential)")
+                if action.action == "stop":
+                    logger.warning("Circuit breaker stopped LLM scoring: %s", action.reason)
+                    return results
         return results
 
     # Concurrent path
@@ -393,12 +398,14 @@ def _batch_score(
             if completed % 10 == 0 or completed == len(futures):
                 logger.info("  LLM progress: %d/%d batches (%d pairs scored)",
                             completed, len(futures), len(results))
-
-    if circuit_breaker is not None:
-        action = circuit_breaker.check("llm_scoring")
-        if action.action == "stop":
-            logger.warning("Circuit breaker stopped LLM scoring: %s", action.reason)
-            return results
+            if circuit_breaker is not None:
+                action = circuit_breaker.check("llm_scoring")
+                if action.action == "stop":
+                    logger.warning("Circuit breaker stopped LLM scoring at batch %d/%d: %s",
+                                   completed, len(futures), action.reason)
+                    for f in futures:
+                        f.cancel()
+                    return results
 
     return results
 

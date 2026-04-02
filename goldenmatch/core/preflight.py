@@ -118,24 +118,35 @@ def _get_blocking_stats(
         # No blocking keys -- the entire dataset is one block.
         return {"__all__": df.height}
 
-    from goldenmatch.core.blocker import _build_block_key_expr
+    try:
+        from goldenmatch.core.blocker import _build_block_key_expr
+    except ImportError:
+        logger.warning("Cannot import blocker module for blocking stats")
+        return {"__all__": df.height}
 
     stats: dict[str, int] = {}
-    for key_config in config.blocking.keys:
-        block_key_expr = _build_block_key_expr(key_config)
-        grouped = (
-            df.lazy()
-            .with_columns(block_key_expr)
-            .filter(pl.col("__block_key__").is_not_null())
-            .group_by("__block_key__")
-            .agg(pl.len().alias("__count__"))
-            .collect()
-        )
-        for row in grouped.iter_rows(named=True):
-            bk = row["__block_key__"]
-            cnt = row["__count__"]
-            if cnt >= 2:
-                stats[bk] = cnt
+    for ki, key_config in enumerate(config.blocking.keys):
+        try:
+            block_key_expr = _build_block_key_expr(key_config)
+            grouped = (
+                df.lazy()
+                .with_columns(block_key_expr)
+                .filter(pl.col("__block_key__").is_not_null())
+                .group_by("__block_key__")
+                .agg(pl.len().alias("__count__"))
+                .collect()
+            )
+            for row in grouped.iter_rows(named=True):
+                bk = row["__block_key__"]
+                cnt = row["__count__"]
+                if cnt >= 2:
+                    # Namespace by key index to avoid collisions across keys
+                    stats[f"{ki}:{bk}"] = cnt
+        except Exception as exc:
+            logger.warning(
+                "Preflight: failed to compute blocking stats for key %d: %s",
+                ki, exc,
+            )
     return stats
 
 
@@ -165,16 +176,18 @@ def _extrapolate(
     # Exact comparison count from blocking stats
     total_comparisons = sum(n * (n - 1) // 2 for n in blocking_stats.values())
 
-    # Scale factor for linear extrapolation
-    if sample_rows > 0 and sample_comparisons > 0:
-        scale = total_comparisons / max(sample_comparisons, 1)
-    else:
-        scale = total_rows / max(sample_rows, 1)
+    # Scale factors: row ratio for memory (DataFrame size dominates),
+    # comparison ratio for LLM/time (scales with pair count).
+    row_scale = total_rows / max(sample_rows, 1)
+    comp_scale = total_comparisons / max(sample_comparisons, 1)
 
-    estimated_memory_mb = sample_peak_memory_mb * max(scale, 1.0)
-    estimated_llm_calls = int(sample_llm_calls * scale)
-    estimated_llm_cost = sample_llm_cost * scale
-    estimated_wall_time = sample_wall_time * max(scale, 1.0)
+    # Memory scales with row count (DataFrame overhead dominates), not comparisons.
+    # Using comparison ratio would massively overestimate since comparisons grow O(n^2)
+    # but memory for scoring is per-block (not cumulative).
+    estimated_memory_mb = sample_peak_memory_mb * max(row_scale, 1.0)
+    estimated_llm_calls = int(sample_llm_calls * comp_scale)
+    estimated_llm_cost = sample_llm_cost * comp_scale
+    estimated_wall_time = sample_wall_time * max(comp_scale, 1.0)
 
     # Determine risk level
     if policy is None:
@@ -400,9 +413,14 @@ def preflight(
         try:
             from goldenmatch.core.autoconfig import auto_configure_df
             config = auto_configure_df(df)
-        except Exception:
-            logger.warning("Preflight: auto_configure_df failed, using minimal config")
-            config = GoldenMatchConfig(output={})
+        except Exception as exc:
+            logger.error(
+                "Preflight: auto_configure_df failed; cannot produce a reliable RunPlan",
+                exc_info=True,
+            )
+            raise PreflightError(
+                f"Auto-configuration failed and no explicit config was provided: {exc}"
+            ) from exc
 
     # Attach safety policy to config
     config = config.model_copy(deep=True)
@@ -462,8 +480,11 @@ def _preflight_sampled(
     sample = _take_sample(df)
 
     # Measure the sample run
-    process = psutil.Process()
-    mem_before = process.memory_info().rss / (1024 * 1024)
+    try:
+        mem_before = psutil.Process().memory_info().rss / (1024 * 1024)
+    except psutil.Error:
+        logger.warning("Cannot measure process memory; memory projections unavailable")
+        mem_before = 0.0
     t0 = time.monotonic()
 
     sample_comparisons = 0
@@ -480,11 +501,18 @@ def _preflight_sampled(
         scored_pairs = result.get("scored_pairs", [])
         sample_comparisons = len(scored_pairs) if scored_pairs else 0
     except Exception as exc:
-        logger.warning("Preflight sample run failed: %s", exc)
-        # Fall back to blocking-stats-only estimation
+        logger.error(
+            "Preflight sample run failed — projections will be based on "
+            "blocking stats only and may be inaccurate: %s",
+            exc,
+            exc_info=True,
+        )
 
     t1 = time.monotonic()
-    mem_after = process.memory_info().rss / (1024 * 1024)
+    try:
+        mem_after = psutil.Process().memory_info().rss / (1024 * 1024)
+    except psutil.Error:
+        mem_after = mem_before
 
     sample_wall_time = t1 - t0
     sample_peak_memory_mb = max(mem_after - mem_before, 0.0)

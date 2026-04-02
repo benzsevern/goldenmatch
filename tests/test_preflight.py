@@ -4,7 +4,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from goldenmatch.config.schemas import SafetyPolicy, GoldenMatchConfig, BlockingConfig, BlockingKeyConfig, MatchkeyConfig, MatchkeyField, OutputConfig
+from goldenmatch.config.schemas import SafetyPolicy, GoldenMatchConfig, BlockingConfig, BlockingKeyConfig, MatchkeyConfig, MatchkeyField, OutputConfig, LLMScorerConfig
 from goldenmatch.core.preflight import (
     preflight,
     RunPlan,
@@ -123,6 +123,59 @@ class TestDowngrades:
         assert len(downgrades) == 0
 
 
+    def test_aggressive_tightens_llm_band(self):
+        """Aggressive mode should tighten LLM scoring band (I5)."""
+        config = GoldenMatchConfig(
+            matchkeys=[MatchkeyConfig(name="test", type="weighted", threshold=0.8,
+                fields=[MatchkeyField(field="name", scorer="ensemble", weight=1.0)])],
+            blocking=BlockingConfig(
+                keys=[BlockingKeyConfig(fields=["name"], transforms=["lowercase"])],
+                skip_oversized=True,
+            ),
+            llm_scorer=LLMScorerConfig(enabled=True, candidate_lo=0.75, candidate_hi=0.95),
+            output=OutputConfig(),
+        )
+        policy = SafetyPolicy(max_comparisons=100, mode="aggressive")
+        proj = ResourceProjection(
+            total_comparisons=1_000_000,
+            estimated_memory_mb=500,
+            estimated_llm_calls=1000,
+            estimated_llm_cost_usd=0.0,
+            estimated_wall_time_seconds=60,
+            risk_level="danger",
+        )
+        adjusted, downgrades = _apply_downgrades(config, proj, policy)
+        # Should have tightened candidate_lo
+        assert adjusted.llm_scorer.candidate_lo > 0.75
+        # Should have raised threshold
+        assert adjusted.get_matchkeys()[0].threshold > 0.8
+        # Should have multiple downgrades
+        assert len(downgrades) >= 3
+
+    def test_aggressive_raises_threshold(self):
+        """Aggressive mode should raise matchkey thresholds (I5)."""
+        config = GoldenMatchConfig(
+            matchkeys=[MatchkeyConfig(name="test", type="weighted", threshold=0.80,
+                fields=[MatchkeyField(field="name", scorer="ensemble", weight=1.0)])],
+            blocking=BlockingConfig(
+                keys=[BlockingKeyConfig(fields=["name"], transforms=["lowercase"])],
+                skip_oversized=True,
+            ),
+            output=OutputConfig(),
+        )
+        policy = SafetyPolicy(max_comparisons=100, mode="aggressive")
+        proj = ResourceProjection(
+            total_comparisons=1_000_000,
+            estimated_memory_mb=500,
+            estimated_llm_calls=0,
+            estimated_llm_cost_usd=0.0,
+            estimated_wall_time_seconds=60,
+            risk_level="danger",
+        )
+        adjusted, downgrades = _apply_downgrades(config, proj, policy)
+        assert adjusted.get_matchkeys()[0].threshold == pytest.approx(0.85)
+
+
 class TestPreflightSmallDataset:
     def test_small_df_returns_plan(self):
         df = _make_df(100)
@@ -176,6 +229,33 @@ class TestIntegration:
 
         result = gm.dedupe_df(df, safety="none")
         assert result.plan is None
+
+    def test_dedupe_df_with_plan(self):
+        """dedupe_df(plan=plan) uses plan's config, skips preflight (S3)."""
+        import goldenmatch as gm
+
+        df = pl.DataFrame({
+            "name": [f"Person{i}" for i in range(500)],
+            "email": [f"p{i}@test.com" for i in range(500)],
+        })
+
+        plan = gm.preflight(df)
+        result = gm.dedupe_df(df, plan=plan)
+        assert result.plan is plan
+
+    def test_dedupe_df_rejects_config_and_plan(self):
+        """Cannot pass both config and plan (I1)."""
+        import goldenmatch as gm
+        from goldenmatch.config.schemas import GoldenMatchConfig
+
+        df = pl.DataFrame({
+            "name": [f"Person{i}" for i in range(500)],
+            "email": [f"p{i}@test.com" for i in range(500)],
+        })
+
+        plan = gm.preflight(df)
+        with pytest.raises(ValueError, match="Cannot pass both"):
+            gm.dedupe_df(df, config=GoldenMatchConfig(output={}), plan=plan)
 
     def test_standalone_preflight(self):
         """gm.preflight() returns a RunPlan."""

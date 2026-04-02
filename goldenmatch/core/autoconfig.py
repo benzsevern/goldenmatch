@@ -918,6 +918,10 @@ def _build_blocking_from_preset(
                     skip_oversized=bp.get("skip_oversized", True),
                     keys=[BlockingKeyConfig(fields=[ann_col], transforms=["lowercase"])],
                 )
+            logger.warning(
+                "Domain preset requests ANN blocking but no text columns found; "
+                "falling back to default blocking strategy"
+            )
 
         if strategy in ("static", "multi_pass"):
             blocking = build_blocking(profiles, df, llm_provider=llm_provider)

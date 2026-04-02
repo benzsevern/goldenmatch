@@ -5,6 +5,7 @@ import pytest
 
 from goldenmatch.core.autoconfig import ColumnProfile
 from goldenmatch.core.domain_detector import detect_domain, DomainDetectionResult
+from goldenmatch.core.domain_registry import DomainRulebook
 
 
 def _make_profile(name: str, col_type: str = "string", confidence: float = 0.7) -> ColumnProfile:
@@ -32,6 +33,7 @@ class TestDetectDomain:
             _make_profile("last_name", "name"),
             _make_profile("email", "email"),
             _make_profile("phone", "phone"),
+            _make_profile("address", "address"),
         ]
         result = detect_domain(profiles)
         assert result.domain == "people"
@@ -60,3 +62,38 @@ class TestDetectDomain:
         result = detect_domain(profiles)
         assert isinstance(result, DomainDetectionResult)
         assert result.rulebook is not None or result.domain == "generic"
+
+
+class TestDetectDomainIsolated:
+    """Tests with injected rulebooks to isolate from YAML files (S4)."""
+
+    def test_with_injected_rulebooks(self):
+        rb = DomainRulebook(
+            name="test_domain",
+            signals=["alpha", "beta", "gamma"],
+            autoconfig_preset={"threshold": 0.9},
+        )
+        profiles = [_make_profile("alpha"), _make_profile("beta")]
+        result = detect_domain(profiles, rulebooks={"test": rb})
+        assert result.domain == "test_domain"
+        assert result.preset == {"threshold": 0.9}
+
+    def test_no_false_positive_on_substring(self):
+        """Signal 'mp' should NOT match column 'company' (C3 fix)."""
+        rb = DomainRulebook(
+            name="electronics",
+            signals=["mp", "ghz", "watt"],
+        )
+        profiles = [_make_profile("company"), _make_profile("employee")]
+        result = detect_domain(profiles, rulebooks={"elec": rb})
+        assert result.domain == "generic"
+
+    def test_signal_matches_underscore_separated(self):
+        """Signal 'name' should match column 'first_name'."""
+        rb = DomainRulebook(
+            name="people",
+            signals=["name", "email", "phone"],
+        )
+        profiles = [_make_profile("first_name"), _make_profile("email_address")]
+        result = detect_domain(profiles, rulebooks={"ppl": rb})
+        assert result.domain == "people"

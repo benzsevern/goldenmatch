@@ -330,6 +330,11 @@ def dedupe_df(
 
     if plan is not None:
         # User provided a pre-computed RunPlan
+        if config is not None:
+            raise ValueError(
+                "Cannot pass both 'config' and 'plan' to dedupe_df(). "
+                "Use plan= alone (it carries its own config), or config= without plan."
+            )
         config = plan.config
         run_plan = plan
     else:
@@ -353,15 +358,29 @@ def dedupe_df(
 
         # Run preflight for large datasets
         if run_preflight and safety != "none" and df.height > 10_000:
-            from goldenmatch.core.preflight import preflight as _preflight
-            run_plan = _preflight(df, config=config, safety=safety)
-            config = run_plan.config
+            try:
+                from goldenmatch.core.preflight import preflight as _preflight
+                run_plan = _preflight(df, config=config, safety=safety)
+                config = run_plan.config
+            except Exception as exc:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "Preflight analysis failed: %s. Proceeding without "
+                    "resource estimation or auto-downgrades.",
+                    exc,
+                    exc_info=True,
+                )
+                run_plan = None
 
-    # Create circuit breaker
+    # Create circuit breaker — reuse plan's safety policy if available
     if safety != "none":
         from goldenmatch.config.schemas import SafetyPolicy
         from goldenmatch.core.circuit_breaker import CircuitBreaker
-        circuit_breaker = CircuitBreaker(policy=SafetyPolicy(mode=safety))
+        if run_plan is not None and hasattr(run_plan, "config") and run_plan.config and run_plan.config.safety:
+            cb_policy = run_plan.config.safety
+        else:
+            cb_policy = SafetyPolicy(mode=safety)
+        circuit_breaker = CircuitBreaker(policy=cb_policy)
 
     result = _run_dedupe_df(df, config, source_name=source_name,
                              circuit_breaker=circuit_breaker)
