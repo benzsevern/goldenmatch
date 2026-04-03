@@ -542,6 +542,7 @@ def _build_compound_blocking(
         p for p in profiles
         if p.col_type not in ("numeric", "date", "identifier")
         and _null_rate(p.name) <= max_null_rate
+        and _check_source_overlap(df, p.name) > 0.0
     ]
     if len(candidates) < 2:
         return None
@@ -766,6 +767,44 @@ def _llm_suggest_blocking_keys(
     )
 
 
+# ── Cross-source overlap ──────────────────────────────────────────────────
+
+
+def _check_source_overlap(df: pl.DataFrame, col: str) -> float:
+    """Compute value overlap ratio for a column across sources.
+
+    Returns |intersection| / |union| of unique values per source.
+    Returns 1.0 if no __source__ column or only one source (no check needed).
+    """
+    if "__source__" not in df.columns:
+        return 1.0
+
+    sources = df["__source__"].unique().to_list()
+    if len(sources) < 2:
+        return 1.0
+
+    value_sets = []
+    for src in sources:
+        vals = set(
+            df.filter(pl.col("__source__") == src)[col]
+            .drop_nulls()
+            .cast(pl.Utf8)
+            .to_list()
+        )
+        value_sets.append(vals)
+
+    intersection = value_sets[0]
+    union = value_sets[0]
+    for vs in value_sets[1:]:
+        intersection = intersection & vs
+        union = union | vs
+
+    if not union:
+        return 1.0
+
+    return len(intersection) / len(union)
+
+
 # ── Blocking generation ────────────────────────────────────────────────────
 
 def build_blocking(
@@ -786,8 +825,24 @@ def build_blocking(
         if p.col_type in ("email", "phone", "zip", "identifier")
         and _null_rate(p.name) <= max_null_rate
         and p.cardinality_ratio < 0.95
+        and _check_source_overlap(df, p.name) > 0.0
     ]
-    name_cols = [p for p in profiles if p.col_type == "name"]
+    # Log skipped columns
+    for p in profiles:
+        if (p.col_type in ("email", "phone", "zip", "identifier")
+                and _null_rate(p.name) <= max_null_rate
+                and p.cardinality_ratio < 0.95
+                and _check_source_overlap(df, p.name) == 0.0):
+            sources = df["__source__"].unique().to_list() if "__source__" in df.columns else []
+            logger.warning(
+                "Blocking key '%s' has 0%% overlap between sources %s -- skipping",
+                p.name, ", ".join(str(s) for s in sources),
+            )
+    name_cols = [
+        p for p in profiles
+        if p.col_type == "name"
+        and _check_source_overlap(df, p.name) > 0.0
+    ]
     text_cols = [p for p in profiles if p.col_type in ("description", "string", "address")]
 
     def _max_block_size(col_name: str) -> int:
