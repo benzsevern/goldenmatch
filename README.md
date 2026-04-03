@@ -3,7 +3,7 @@
 
 **Entity resolution toolkit — deduplicate records, match across sources, and maintain golden records. Works on files or live databases.**
 
-**v1.2.7** — Auto-config cardinality guards, library comparison benchmarks. ([Changelog](#whats-new-in-v127))
+**v1.3.0** — CCMS cluster comparison, parameter sensitivity analysis. ([Changelog](#whats-new-in-v130))
 
 Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode auto-detects your data; optional LLM boost for harder datasets.
 
@@ -730,6 +730,13 @@ goldenmatch/
 | [GoldenFlow](https://github.com/benzsevern/goldenflow) | Transform & standardize data | `pip install goldenflow` |
 | [GoldenMatch](https://github.com/benzsevern/goldenmatch) | Deduplicate & match records | `pip install goldenmatch` |
 | [GoldenPipe](https://github.com/benzsevern/goldenpipe) | Orchestrate the full pipeline | `pip install goldenpipe` |
+
+## What's New in v1.3.0
+
+- **CCMS cluster comparison** -- compare two clustering outcomes without ground truth using the Case Count Metric System (Talburt et al.). Classifies each cluster as unchanged, merged, partitioned, or overlapping. Includes Talburt-Wang Index (TWI) for normalized similarity.
+- **Parameter sensitivity analysis** -- sweep threshold, blocking, or matchkey parameters across a range and compare each run against a baseline. `stability_report()` identifies optimal value ranges. Failed sweep points are logged and skipped, preserving partial results.
+- **New CLI commands** -- `goldenmatch compare-clusters` for ad-hoc comparison, `goldenmatch sensitivity` for automated parameter tuning.
+- **New Python API** -- `compare_clusters()`, `CompareResult`, `run_sensitivity()`, `SensitivityResult`, `SweepParam` exported from `goldenmatch`.
 
 ## What's New in v1.2.7
 

@@ -6,6 +6,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-04-03
+
+### Added
+- CCMS cluster comparison: `compare_clusters()` classifies each cluster from run A as unchanged, merged, partitioned, or overlapping relative to run B (based on Talburt et al., arXiv:2601.02824v1)
+- `CompareResult` and `ClusterCase` dataclasses with `summary()` method
+- Talburt-Wang Index (TWI) for normalized clustering similarity (1.0 = identical, approaches 0 for divergent outcomes)
+- Parameter sensitivity analysis: `run_sensitivity()` sweeps config parameters and compares each run against a baseline using CCMS
+- `SweepParam`, `SweepPoint`, `SensitivityResult` dataclasses with `stability_report()` for identifying optimal parameter ranges
+- Supported sweep fields: `threshold` (all fuzzy matchkeys), `matchkey.<name>.threshold` (individual), `blocking.max_block_size`
+- `--sample` option for sensitivity sweeps (random subsample for speed on large datasets)
+- Per-point error handling: failed sweep points are logged and skipped, partial results preserved
+- CLI command `goldenmatch compare-clusters` with `--details`, `--case-type` filter, `--output` JSON
+- CLI command `goldenmatch sensitivity` with `--sweep field:start:stop:step` (repeatable), `--sample`, `--output`
+- 16 new tests (10 comparison, 6 sensitivity)
+
 ## [1.2.7] - 2026-04-02
 
 ### Added

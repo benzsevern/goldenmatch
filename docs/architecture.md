@@ -14,11 +14,11 @@ GoldenMatch is organized into 11 top-level packages. Core pipeline logic lives i
 
 ```
 goldenmatch/
-  __init__.py          # 101 public exports
+  __init__.py          # 106 public exports
   _api.py              # High-level convenience functions (dedupe, match, etc.)
   client.py            # REST API client (stdlib urllib only)
 
-  cli/                 # 21 Typer CLI commands
+  cli/                 # 23 Typer CLI commands
     main.py            # App definition + command registration
     dedupe.py          # dedupe command
     match.py           # match command
@@ -68,6 +68,8 @@ goldenmatch/
     threshold.py       # suggest_threshold
     schema_match.py    # auto_map_columns
     graph_er.py        # Multi-table entity resolution
+    compare_clusters.py  # CCMS cluster comparison (unchanged/merged/partitioned/overlapping)
+    sensitivity.py     # Parameter sweep analysis using CCMS
     diff.py            # generate_diff
     rollback.py        # rollback_run
     block_analyzer.py  # analyze_blocking (blocking strategy suggestions)

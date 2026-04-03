@@ -87,7 +87,7 @@ Scale: 7,823 records/sec on a laptop (fuzzy + exact + golden).
 | [Installation](installation) | pip, apt, rpm, Docker, build from source |
 | [Quick Start](quick-start) | First dedupe in 30 seconds |
 | [Python API](python-api) | 101 exports: dedupe, match, score, explain, PPRL |
-| [CLI Reference](cli) | 21 commands with examples |
+| [CLI Reference](cli) | 23 commands with examples |
 | [Interactive TUI](tui) | 6-tab visual interface |
 | [Configuration](configuration) | YAML config with matchkeys, blocking, golden rules |
 | [Pipeline](pipeline) | 10-step pipeline architecture |
@@ -101,7 +101,7 @@ Scale: 7,823 records/sec on a laptop (fuzzy + exact + golden).
 | [DuckDB Extension](sql-duckdb) | 12 Python UDFs |
 | [REST API](rest-api) | HTTP endpoints, review queue |
 | [MCP Server](mcp) | Claude Desktop integration |
-| [Evaluation](evaluation) | Benchmarks, CI/CD quality gates |
+| [Evaluation](evaluation) | Benchmarks, CI/CD quality gates, cluster comparison |
 | [ER Agent](agent) | A2A + MCP autonomous agent, confidence gating |
 | [Architecture](architecture) | Module map, code patterns |
 | [Benchmarks](benchmarks) | Performance and accuracy numbers |

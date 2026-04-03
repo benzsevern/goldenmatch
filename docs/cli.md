@@ -6,7 +6,7 @@ nav_order: 5
 
 # CLI Reference
 
-GoldenMatch provides 21 CLI commands via `goldenmatch <command>`. All commands support `--help`.
+GoldenMatch provides 23 CLI commands via `goldenmatch <command>`. All commands support `--help`.
 
 ```bash
 pip install goldenmatch
@@ -293,6 +293,8 @@ goldenmatch watch --table customers --connection-string "$DATABASE_URL" --daemon
 | `goldenmatch schedule --every 1h FILE` | Run on a schedule |
 | `goldenmatch config save/load/list/show` | Manage config presets |
 | `goldenmatch analyze-blocking FILE -c config.yaml` | Suggest blocking strategies |
+| `goldenmatch compare-clusters A.json B.json` | Compare two clustering outcomes (CCMS) |
+| `goldenmatch sensitivity FILE -c config.yaml --sweep threshold:0.7:0.95:0.05` | Parameter sensitivity analysis |
 
 ---
 

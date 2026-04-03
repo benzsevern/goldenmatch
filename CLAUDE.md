@@ -30,7 +30,7 @@
 
 ## Testing
 - `pytest --tb=short` from project root — all tests must pass after every change
-- 1173 tests (+ 6 skipped for optional deps), run in ~50s
+- 1260 tests (+ 6 skipped for optional deps), run in ~60s
 - Coverage: 72% (with db/mcp/connectors excluded via pyproject.toml [tool.coverage.run] omit)
 - Key module coverage: scorer 87%, probabilistic 96%, pprl/autoconfig 95%, _api 85%, pipeline 82%
 - Fixtures in `tests/conftest.py`: `sample_csv`, `sample_csv_b`, `sample_parquet`
@@ -58,7 +58,7 @@
 - `pipeline.py` refactored: `_run_dedupe_pipeline()` and `_run_match_pipeline()` extracted as shared internal functions, called by both file-based and DataFrame-based entry points
 - `goldenmatch/core/` — pipeline modules (no Textual dependency)
 - `goldenmatch/tui/` — Textual TUI + MatchEngine (engine.py has no Textual dependency)
-- `goldenmatch/cli/` — Typer CLI commands (21 commands, including `unmerge`, `evaluate`, `incremental`, `pprl`, `label`)
+- `goldenmatch/cli/` — Typer CLI commands (23 commands, including `unmerge`, `evaluate`, `incremental`, `pprl`, `label`, `compare-clusters`, `sensitivity`)
 - `goldenmatch/db/` — Postgres integration (connector, sync, reconcile, clusters, ANN index)
 - `goldenmatch/api/` — REST API server (`goldenmatch serve`)
 - `goldenmatch/mcp/` — MCP server for Claude Desktop (`goldenmatch mcp-serve`)
@@ -136,6 +136,8 @@
 - DuckDB backend: `backends/duckdb_backend.py` — user-maintained DuckDB read/write. `read_table()`, `write_table()`, `list_tables()`. Optional dep.
 - Streaming: `core/streaming.py` — `StreamProcessor` for incremental record matching (immediate or micro-batch). Uses `match_one` → `add_to_cluster`.
 - Graph ER: `core/graph_er.py` — multi-table entity resolution with evidence propagation across relationships. Iterative convergence.
+- CCMS comparison: `core/compare_clusters.py` — Case Count Metric System for comparing two ER clustering outcomes without ground truth. Classifies each cluster as unchanged/merged/partitioned/overlapping, computes TWI (Talburt-Wang Index). Based on Talburt et al. (arXiv:2601.02824v1).
+- Sensitivity analysis: `core/sensitivity.py` — parameter sweep engine. `run_sensitivity()` varies threshold/blocking/matchkey params, compares each run against baseline via CCMS. `SweepParam`, `SweepPoint`, `SensitivityResult` with `stability_report()`. Per-point error handling preserves partial results.
 - Domain extraction: `core/domain.py` — auto-detects product subdomain (electronics vs software), extracts brand/model/SKU/color/specs (electronics) or name/version/edition/platform (software). Model normalization strips hyphens, region/color suffixes. Pipeline step between standardize and matchkeys.
 - LLM extraction: `core/llm_extract.py` — LLM-based feature extraction for low-confidence records. Reuses BudgetTracker. O(N) preprocessing, not O(N^2) pair scoring.
 - Domain registry: `core/domain_registry.py` — YAML-based custom domain rulebooks. Search paths: `.goldenmatch/domains/` (local), `~/.goldenmatch/domains/` (global), `goldenmatch/domains/` (built-in). MCP tools: `list_domains`, `create_domain`, `test_domain`
@@ -192,6 +194,11 @@ Hosted on Railway, registered on Smithery:
 - `llm_scorer` and `backend` kwargs applied uniformly after config resolution (not inside zero-config branch)
 
 ## Gotchas
+- Leipzig DBLP-ACM dataset: `DBLP2.csv` uses `latin-1` encoding (not UTF-8). `ACM.csv` also latin-1.
+- `recordlinkage.datasets.load_febrl3()` needs `return_links=True` to get ground truth pairs (default returns only DataFrame)
+- Auto-config fails on all standard benchmarks (Febrl, DBLP-ACM, NC Voter) — always use explicit config for non-trivial dedup. v1.2.7 cardinality guards improve but don't fully solve this.
+- Comparison benchmark scripts in `D:\show_case\golden-showcase\comparison_bench\` — GoldenMatch, Splink, Dedupe, RecordLinkage on Febrl/DBLP-ACM/NC Voter
+- `dedupe` library class is `dedupe.Dedupe` (not `dedupe.Deduper`). Empty strings cause `ZeroDivisionError` in affinegap — use single space as placeholder. Training pairs must go through `training_file` param, not `mark_pairs` directly.
 - .docx files can't be read by Read tool — use `python-docx` or zipfile+XML
 - Windows drive letter paths (C:\) break `file:source_name` CLI parsing — handle in `_parse_file_source`
 - `ignore_errors=True` needed for `pl.read_csv` on files with junk rows

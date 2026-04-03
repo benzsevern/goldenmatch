@@ -65,6 +65,8 @@ goldenmatch setup
 | `goldenmatch analyze-blocking FILE` | Analyze and suggest blocking strategies |
 | `goldenmatch label FILE --config --gt` | Interactively label pairs to build ground truth CSV |
 | `goldenmatch config save/load/list/show` | Manage config presets |
+| `goldenmatch compare-clusters A.json B.json` | Compare two clustering outcomes (CCMS) |
+| `goldenmatch sensitivity FILE --sweep ...` | Parameter sensitivity analysis |
 
 ## Key Dedupe Flags
 

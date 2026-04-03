@@ -70,6 +70,8 @@ import goldenmatch as gm
 | `gm.evaluate_pairs(predicted, ground_truth)` | Evaluate pair list vs ground truth set |
 | `gm.evaluate_clusters(clusters, ground_truth)` | Evaluate clusters vs ground truth |
 | `gm.load_ground_truth_csv(path)` | Load ground truth pairs from CSV |
+| `gm.compare_clusters(clusters_a, clusters_b)` | Compare two clustering outcomes (CCMS) |
+| `gm.run_sensitivity(file_specs, config, sweep_params)` | Parameter sensitivity sweep |
 
 ## Cluster Operations
 

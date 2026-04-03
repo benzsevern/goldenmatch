@@ -6,7 +6,7 @@ nav_order: 4
 
 # Python API
 
-GoldenMatch exports 101 symbols from a single import. Every feature is accessible via `import goldenmatch as gm`.
+GoldenMatch exports 106 symbols from a single import. Every feature is accessible via `import goldenmatch as gm`.
 
 ```python
 import goldenmatch as gm
@@ -301,6 +301,73 @@ class EvalResult:
 ```python
 gm.load_ground_truth_csv(path: str, col_a: str = "id_a", col_b: str = "id_b") -> set[tuple]
 ```
+
+### compare_clusters
+
+```python
+gm.compare_clusters(
+    clusters_a: dict[int, dict],
+    clusters_b: dict[int, dict],
+) -> CompareResult
+```
+
+Compare two clustering outcomes on the same dataset using CCMS. Classifies each cluster from A as unchanged, merged, partitioned, or overlapping relative to B.
+
+```python
+result = gm.compare_clusters(clusters_run1, clusters_run2)
+print(result.summary())  # {"unchanged": 42, "merged": 3, "twi": 0.92, ...}
+```
+
+### CompareResult
+
+```python
+@dataclass
+class CompareResult:
+    unchanged: int          # Clusters identical in both runs
+    merged: int             # Clusters absorbed into larger clusters
+    partitioned: int        # Clusters split into smaller clusters
+    overlapping: int        # Complex reorganization
+    rc: int                 # Total reference count
+    cc1: int                # Cluster count in run A
+    cc2: int                # Cluster count in run B
+    sc1: int                # Singleton count in run A
+    sc2: int                # Singleton count in run B
+    twi: float              # Talburt-Wang Index (1.0 = identical)
+    cases: list[ClusterCase]  # Per-cluster details
+
+    def summary(self) -> dict
+```
+
+### run_sensitivity
+
+```python
+gm.run_sensitivity(
+    file_specs: list,
+    config: GoldenMatchConfig,
+    sweep_params: list[SweepParam],
+    sample_size: int | None = None,
+) -> list[SensitivityResult]
+```
+
+Sweep parameters and compare each run against a baseline using CCMS.
+
+```python
+results = gm.run_sensitivity(
+    file_specs=[("data.csv", "src")],
+    config=config,
+    sweep_params=[gm.SweepParam("threshold", 0.70, 0.95, 0.05)],
+    sample_size=5000,
+)
+print(results[0].stability_report())
+```
+
+### SweepParam
+
+```python
+gm.SweepParam(field: str, start: float, stop: float, step: float)
+```
+
+Fields: `"threshold"`, `"matchkey.<name>.threshold"`, `"blocking.max_block_size"`.
 
 ---
 

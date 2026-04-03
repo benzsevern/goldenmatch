@@ -32,6 +32,8 @@ All commands registered in `goldenmatch/cli/main.py`:
 | `goldenmatch interactive` | Yes |
 | `goldenmatch profile` | Yes |
 | `goldenmatch analyze-blocking` | Yes |
+| `goldenmatch compare-clusters` | Yes |
+| `goldenmatch sensitivity` | Yes |
 | `goldenmatch config *` | Yes |
 
 CLI flags for each command are part of the stable API. New flags may be added in minor releases. Existing flags will not be removed or have their behavior changed in minor releases.
@@ -69,6 +71,8 @@ Public functions (not prefixed with `_`) in these modules:
 | `core/matchkey.py` | `compute_matchkeys()` |
 | `core/probabilistic.py` | `train_em()`, `score_probabilistic()` |
 | `core/domain_registry.py` | `discover_rulebooks()`, `load_rulebook()`, `save_rulebook()`, `match_domain()`, `extract_with_rulebook()` |
+| `core/compare_clusters.py` | `compare_clusters()`, `CompareResult`, `ClusterCase` |
+| `core/sensitivity.py` | `run_sensitivity()`, `SensitivityResult`, `SweepParam`, `SweepPoint` |
 
 ### REST API Endpoints
 

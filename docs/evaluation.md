@@ -179,6 +179,60 @@ For entity resolution:
 
 ---
 
+## Cluster comparison (CCMS)
+
+Compare two clustering outcomes on the same dataset without ground truth. Based on the Case Count Metric System (Talburt et al., arXiv:2601.02824v1).
+
+```python
+import goldenmatch as gm
+
+result = gm.compare_clusters(clusters_a, clusters_b)
+print(result.summary())
+# {"unchanged": 42, "merged": 3, "partitioned": 5, "overlapping": 1, "twi": 0.92, ...}
+```
+
+Each cluster from run A is classified into one of four cases:
+
+| Case | Meaning |
+|------|---------|
+| **Unchanged** | Identical cluster in both runs |
+| **Merged** | Run A cluster absorbed into a larger cluster in run B |
+| **Partitioned** | Run A cluster split into smaller clusters in run B |
+| **Overlapping** | Complex reorganization -- members redistributed across clusters |
+
+The **TWI (Talburt-Wang Index)** measures overall clustering similarity, normalized to [0, 1] where 1.0 means identical outcomes.
+
+```bash
+goldenmatch compare-clusters run_a.json run_b.json --details --case-type merged
+```
+
+---
+
+## Parameter sensitivity analysis
+
+Sweep a parameter across a range and compare each run against a baseline:
+
+```python
+import goldenmatch as gm
+
+results = gm.run_sensitivity(
+    file_specs=[("data.csv", "src")],
+    config=gm.load_config("config.yaml"),
+    sweep_params=[gm.SweepParam("threshold", 0.70, 0.95, 0.05)],
+    sample_size=5000,
+)
+for r in results:
+    print(r.stability_report())
+```
+
+```bash
+goldenmatch sensitivity data.csv -c config.yaml --sweep threshold:0.70:0.95:0.05 --sample 5000
+```
+
+Supported sweep fields: `threshold`, `matchkey.<name>.threshold`, `blocking.max_block_size`.
+
+---
+
 ## Benchmark evaluation tips
 
 - Always use threshold-based pair generation, NOT top-1-per-record (argmax)
