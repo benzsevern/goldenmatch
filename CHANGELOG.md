@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-04-03
+
+### Added
+- GoldenFlow integration: optional data transformation step in the dedupe pipeline (`pip install goldenmatch[transform]`)
+- `TransformConfig` Pydantic model (enabled, mode: announced/silent/disabled)
+- Pipeline step 1.4b: GoldenFlow runs after GoldenCheck, before autofix — normalizes phone numbers, dates, categoricals, unicode
+- Graceful degradation: if goldenflow crashes, logs warning and continues with untransformed data
+- Warning when config enables transforms but goldenflow is not installed
+- 8 new tests
+
 ## [1.3.0] - 2026-04-03
 
 ### Added

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "goldenmatch"
-version = "1.3.0"
+version = "1.3.1"
 description = "Entity resolution toolkit — deduplicate records, match across sources, and maintain golden records"
 readme = "README.md"
 requires-python = ">=3.11"
