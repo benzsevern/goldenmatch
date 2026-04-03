@@ -91,6 +91,7 @@
 
 ## Accuracy Strategy
 - Structured data (names, addresses, bibliographic): fuzzy matching alone → 97.2% F1. No embeddings or LLM needed.
+- Library comparison (v1.2.7): Febrl 0.971 F1 (top-2, behind Splink 0.998), DBLP-ACM 0.918 F1 (top-2, behind RecordLinkage 0.923). Most consistent performer across data types — zero training data, explicit config required.
 - Product matching (electronics/Abt-Buy): domain extraction + emb+ANN + LLM → **72.2% F1** (P=94.8%, $0.04). Domain extraction gets 393/1081 model matches for free.
 - Product matching (software/Amazon-Google): emb+ANN + LLM → **45.3% F1** (P=63.3%, $0.02). Clean emb+ANN pipeline is best — adding domain extraction/token normalization/mfr blocking adds noise and hurts F1. SOTA is ~78% (GPT-4 few-shot, Ditto fine-tuned).
 - Product matching lesson: adding candidate sources (domain extraction, token normalization, manufacturer blocking) helps electronics (Abt-Buy) but HURTS software (Amazon-Google). More pairs = more noise. For domains without precise identifiers, keep the candidate set clean and let the LLM filter.
@@ -180,6 +181,10 @@ Hosted on Railway, registered on Smithery:
 - `auto_configure(files)` delegates to `auto_configure_df` after loading files
 - Classification: date/geo name heuristics are authoritative over data profiling
 - Blocking safety: skips columns with >20% null rate, checks max block size (1000)
+- Cardinality guards (v1.2.7):
+  - Blocking: skips columns with cardinality_ratio >= 0.95 (near-unique, produces single-record blocks)
+  - Matchkeys: skips exact matchkeys for columns with cardinality_ratio < 0.01 (too few distinct values)
+  - Description columns: routes long text to fuzzy matching (token_sort) alongside embedding scorer
 - `_DATE_PATTERNS` in autoconfig.py — checked before phone/name to prevent shadowing
 - `_GEO_PATTERNS` expanded: matches city_desc, state_cd, county (not just ^city$)
 - `utf8-lossy` encoding on all CSV read paths (ingest.py, agent.py, chunked.py, smart_ingest.py, skills.py)

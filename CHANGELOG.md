@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 
 ## [Unreleased]
 
+## [1.2.7] - 2026-04-02
+
+### Added
+- Three auto-config cardinality guards to prevent failures on edge-case data:
+  - Blocking: exclude near-unique columns (cardinality_ratio >= 0.95)
+  - Matchkeys: skip exact matchkeys for low-cardinality columns (cardinality_ratio < 0.01)
+  - Description columns: route long text to fuzzy matching (token_sort) alongside embedding
+- Library comparison benchmarks: head-to-head against Splink, Dedupe, and RecordLinkage on Febrl (0.971 F1) and DBLP-ACM (0.918 F1)
+
+### Fixed
+- Auto-config no longer generates blocking keys from near-unique columns that produce single-record blocks
+- Auto-config no longer creates exact matchkeys for columns with very few distinct values (e.g., gender, status)
+- Description/long-text columns now get fuzzy fallback scoring instead of embedding-only
+
 ## [1.2.6] - 2026-04-01
 
 ### Added

@@ -50,6 +50,35 @@ Product matching benefits from domain extraction (electronics) and LLM scoring (
 
 GoldenMatch trades ~8pts of F1 on Abt-Buy for zero training labels and no GPU requirement. On DBLP-ACM, it matches within 2pts of state-of-the-art.
 
+### Library Comparison (v1.2.7)
+
+Head-to-head against Splink, Dedupe, and RecordLinkage. GoldenMatch uses explicit config with zero training data.
+
+**Febrl (5,000 synthetic PII records, 6,538 true pairs):**
+
+| Library | Precision | Recall | F1 | Time |
+|---|---|---|---|---|
+| Splink | 1.000 | 0.995 | 0.998 | 2.0s |
+| **GoldenMatch** | 1.000 | 0.943 | **0.971** | 6.8s |
+| Dedupe | 1.000 | 0.865 | 0.928 | 7.2s |
+| RecordLinkage | 0.999 | 0.733 | 0.845 | 2.2s |
+
+**DBLP-ACM (4,910 bibliographic records, 2,224 true matches):**
+
+| Library | Precision | Recall | F1 | Time |
+|---|---|---|---|---|
+| RecordLinkage | 0.888 | 0.961 | 0.923 | 13.0s |
+| **GoldenMatch** | 0.891 | 0.945 | **0.918** | 6.2s |
+| Dedupe | 0.604 | 0.936 | 0.734 | 10.5s |
+| Splink | 0.646 | 0.834 | 0.728 | 3.4s |
+
+**Key findings:**
+- GoldenMatch is the **most consistent performer** — top-2 F1 on both datasets, zero training data required
+- Splink dominates structured PII (Febrl) but struggles on non-PII bibliographic data (DBLP-ACM)
+- RecordLinkage surprisingly wins DBLP-ACM but lags significantly on PII
+- Dedupe shows strong recall but lower precision on bibliographic data
+- GoldenMatch requires explicit config for best results — auto-config is not recommended for benchmarks
+
 ### Equipment data (v1.2.6)
 
 | Dataset | Records | Strategy | Clusters | Matched | LLM Cost | Time |

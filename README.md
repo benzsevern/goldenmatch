@@ -3,7 +3,7 @@
 
 **Entity resolution toolkit — deduplicate records, match across sources, and maintain golden records. Works on files or live databases.**
 
-**v1.2.6** — Iterative LLM calibration, ANN hybrid blocking, auto-config classification fixes. ([Changelog](#whats-new-in-v126))
+**v1.2.7** — Auto-config cardinality guards, library comparison benchmarks. ([Changelog](#whats-new-in-v127))
 
 Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode auto-detects your data; optional LLM boost for harder datasets.
 
@@ -528,6 +528,61 @@ For datasets over 1M records, use `goldenmatch sync` (database mode) with increm
 
 GoldenMatch's sweet spot is **ease of use + competitive accuracy**. On bibliographic matching (DBLP-ACM), GoldenMatch hits 97.2% with zero config. On product matching (Abt-Buy), the LLM scorer reaches 81.7% — within 8pts of Ditto's 89.3%, but with zero training labels and no GPU. Ditto requires 1000+ hand-labeled pairs and a GPU.
 
+### Library Comparison (v1.2.7)
+
+Head-to-head against Splink, Dedupe, and RecordLinkage on two datasets. GoldenMatch uses explicit config, zero training data.
+
+**Febrl (5,000 synthetic PII records, 6,538 true pairs):**
+
+| Library | Precision | Recall | F1 | Time |
+|---|---|---|---|---|
+| Splink | 1.000 | 0.995 | 0.998 | 2.0s |
+| **GoldenMatch** | 1.000 | 0.943 | **0.971** | 6.8s |
+| Dedupe | 1.000 | 0.865 | 0.928 | 7.2s |
+| RecordLinkage | 0.999 | 0.733 | 0.845 | 2.2s |
+
+**DBLP-ACM (4,910 bibliographic records, 2,224 true matches):**
+
+| Library | Precision | Recall | F1 | Time |
+|---|---|---|---|---|
+| RecordLinkage | 0.888 | 0.961 | 0.923 | 13.0s |
+| **GoldenMatch** | 0.891 | 0.945 | **0.918** | 6.2s |
+| Dedupe | 0.604 | 0.936 | 0.734 | 10.5s |
+| Splink | 0.646 | 0.834 | 0.728 | 3.4s |
+
+**Key takeaway:** GoldenMatch is the most consistent performer — top-2 F1 on both datasets with zero training data. Splink dominates structured PII but struggles on non-PII. RecordLinkage wins DBLP-ACM but lags on PII.
+
+<details>
+<summary>Febrl explicit config example</summary>
+
+```python
+config = GoldenMatchConfig(
+    blocking=BlockingConfig(
+        strategy="multi_pass",
+        passes=[
+            BlockingKeyConfig(fields=["surname"], transforms=["soundex"]),
+            BlockingKeyConfig(fields=["given_name"], transforms=["soundex"]),
+            BlockingKeyConfig(fields=["postcode"], transforms=[]),
+            BlockingKeyConfig(fields=["date_of_birth"], transforms=[]),
+        ],
+        max_block_size=500, skip_oversized=True,
+    ),
+    matchkeys=[MatchkeyConfig(
+        name="person", type="weighted", threshold=0.7,
+        fields=[
+            MatchkeyField(field="given_name", scorer="jaro_winkler", weight=2.0, transforms=["lowercase", "strip"]),
+            MatchkeyField(field="surname", scorer="jaro_winkler", weight=2.0, transforms=["lowercase", "strip"]),
+            MatchkeyField(field="date_of_birth", scorer="exact", weight=1.5),
+            MatchkeyField(field="address_1", scorer="token_sort", weight=1.0, transforms=["lowercase", "strip"]),
+            MatchkeyField(field="postcode", scorer="exact", weight=0.5),
+        ],
+    )],
+)
+result = goldenmatch.dedupe_df(df, config=config)
+```
+
+</details>
+
 ## Large Dataset Mode
 
 For datasets over 1M records, use database sync mode. GoldenMatch processes records in chunks, maintains a persistent ANN index, and matches incrementally:
@@ -675,6 +730,14 @@ goldenmatch/
 | [GoldenFlow](https://github.com/benzsevern/goldenflow) | Transform & standardize data | `pip install goldenflow` |
 | [GoldenMatch](https://github.com/benzsevern/goldenmatch) | Deduplicate & match records | `pip install goldenmatch` |
 | [GoldenPipe](https://github.com/benzsevern/goldenpipe) | Orchestrate the full pipeline | `pip install goldenpipe` |
+
+## What's New in v1.2.7
+
+- **Auto-config cardinality guards** — three new guards prevent auto-config failures on edge-case data:
+  - Blocking: excludes near-unique columns (cardinality_ratio >= 0.95)
+  - Matchkeys: skips exact matchkeys for low-cardinality columns (cardinality_ratio < 0.01)
+  - Description columns: routes long text to fuzzy matching (token_sort) alongside embedding
+- **Library comparison benchmarks** — head-to-head results against Splink, Dedupe, and RecordLinkage on Febrl (0.971 F1) and DBLP-ACM (0.918 F1). GoldenMatch is the most consistent performer across data types.
 
 ## What's New in v1.2.6
 
