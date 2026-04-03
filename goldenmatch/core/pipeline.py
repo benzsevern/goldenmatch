@@ -203,6 +203,17 @@ def _run_dedupe_pipeline(
             logger.info("GoldenCheck: %d fixes applied", len(gc_fixes))
         combined_lf = combined_df_tmp.lazy()
 
+    # ── Step 1.4b: GOLDENFLOW TRANSFORM (if available) ──
+    # Runs after GoldenCheck (validates) and before autofix (remaining cleanup).
+    # Not in _run_match_pipeline -- add there if match pipeline gains a quality step.
+    if config.transform is None or config.transform.mode != "disabled":
+        from goldenmatch.core.transform import run_transform
+        combined_df_tmp = combined_lf.collect()
+        combined_df_tmp, gf_fixes = run_transform(combined_df_tmp, config.transform)
+        if gf_fixes:
+            logger.info("GoldenFlow: %d transforms applied", len(gf_fixes))
+        combined_lf = combined_df_tmp.lazy()
+
     # ── Step 1.5a: AUTO-FIX + VALIDATION ──
     if config.validation and config.validation.auto_fix:
         combined_df_tmp = combined_lf.collect()

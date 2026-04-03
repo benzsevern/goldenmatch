@@ -52,18 +52,18 @@ def run_transform(
     fixes = []
     for record in result.manifest.records:
         fixes.append({
-            "fix": f"goldenflow:{record.transform_name}",
+            "fix": f"goldenflow:{record.transform}",
             "column": record.column,
-            "rows_affected": record.rows_affected,
+            "rows_affected": record.affected_rows,
             "detail": (
-                f"{record.transform_name}: {record.rows_affected} rows"
+                f"{record.transform}: {record.affected_rows} rows"
                 + (f" (e.g., {record.sample_before[0]} -> {record.sample_after[0]})"
                    if record.sample_before and record.sample_after else "")
             ),
         })
 
     if mode == "announced" and fixes:
-        fix_types = set(record.transform_name for record in result.manifest.records)
+        fix_types = set(record.transform for record in result.manifest.records)
         print(
             f"GoldenFlow: transforming data... "
             f"{len(fixes)} transforms applied "

@@ -12,9 +12,9 @@ from goldenmatch.core.transform import run_transform
 
 @dataclass
 class _MockTransformRecord:
-    transform_name: str
+    transform: str
     column: str
-    rows_affected: int
+    affected_rows: int
     sample_before: list[str]
     sample_after: list[str]
 
@@ -77,9 +77,9 @@ def test_transform_applied_announced(capsys):
         df=transformed_df,
         manifest=_MockManifest(records=[
             _MockTransformRecord(
-                transform_name="phone_e164",
+                transform="phone_e164",
                 column="phone",
-                rows_affected=2,
+                affected_rows=2,
                 sample_before=["(555) 123-4567"],
                 sample_after=["+15551234567"],
             ),
@@ -113,9 +113,9 @@ def test_transform_applied_silent(capsys):
         df=transformed_df,
         manifest=_MockManifest(records=[
             _MockTransformRecord(
-                transform_name="whitespace_strip",
+                transform="whitespace_strip",
                 column="name",
-                rows_affected=1,
+                affected_rows=1,
                 sample_before=[" John "],
                 sample_after=["John"],
             ),
@@ -155,9 +155,9 @@ def test_manifest_conversion_no_samples():
         df=df,
         manifest=_MockManifest(records=[
             _MockTransformRecord(
-                transform_name="unicode_nfc",
+                transform="unicode_nfc",
                 column="name",
-                rows_affected=3,
+                affected_rows=3,
                 sample_before=[],
                 sample_after=[],
             ),
