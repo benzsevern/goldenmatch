@@ -74,7 +74,7 @@ def sensitivity_cmd(
             sweep_params=sweep_params,
             sample_size=sample,
         )
-    except ValueError as exc:
+    except Exception as exc:
         err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1)
 

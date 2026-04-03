@@ -107,7 +107,8 @@ def _get_current_value(field: str, config: GoldenMatchConfig) -> float:
         for mk in config.get_matchkeys():
             if mk.name == name:
                 return mk.threshold if mk.threshold is not None else 0.85
-    return 0.0
+
+    raise ValueError(f"Cannot read current value for field '{field}' -- no handler defined")
 
 
 def _apply_value(field: str, value: float, config: GoldenMatchConfig) -> None:
@@ -131,6 +132,8 @@ def _apply_value(field: str, value: float, config: GoldenMatchConfig) -> None:
             if mk.name == name:
                 mk.threshold = value
                 return
+
+    raise ValueError(f"Cannot apply sweep value for field '{field}' -- no handler defined")
 
 
 def _generate_values(param: SweepParam) -> list[float]:
@@ -218,11 +221,15 @@ def run_sensitivity(
             _apply_value(param.field, value, sweep_config)
 
             logger.info("  %s = %s", param.field, value)
-            sweep_result = run_dedupe(effective_specs, sweep_config)
-            sweep_clusters = sweep_result["clusters"]
-
-            comparison = compare_clusters(baseline_clusters, sweep_clusters)
-            points.append(SweepPoint(param_value=value, comparison=comparison))
+            try:
+                sweep_result = run_dedupe(effective_specs, sweep_config)
+                sweep_clusters = sweep_result["clusters"]
+                comparison = compare_clusters(baseline_clusters, sweep_clusters)
+                points.append(SweepPoint(param_value=value, comparison=comparison))
+            except Exception as exc:
+                logger.error(
+                    "Sweep point %s=%s failed: %s", param.field, value, exc
+                )
 
         results.append(SensitivityResult(
             param=param,

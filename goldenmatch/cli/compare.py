@@ -58,6 +58,14 @@ def compare_clusters_cmd(
     Classifies each cluster from file A into: unchanged, merged,
     partitioned, or overlapping relative to file B.
     """
+    _VALID_CASES = {"unchanged", "merged", "partitioned", "overlapping"}
+    if case_type and case_type not in _VALID_CASES:
+        err_console.print(
+            f"[red]Invalid case type '{case_type}'. "
+            f"Valid options: {', '.join(sorted(_VALID_CASES))}[/red]"
+        )
+        raise typer.Exit(1)
+
     path_a = Path(file_a)
     path_b = Path(file_b)
 
