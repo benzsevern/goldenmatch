@@ -46,7 +46,11 @@ def run_transform(
     if not enabled or mode == "disabled":
         return df, []
 
-    result = _do_transform(df)
+    try:
+        result = _do_transform(df)
+    except Exception:
+        logger.warning("GoldenFlow: transform failed, skipping", exc_info=True)
+        return df, []
 
     # Convert manifest to autofix-compatible format
     fixes = []

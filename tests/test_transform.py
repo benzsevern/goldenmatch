@@ -5,7 +5,6 @@ from unittest.mock import patch
 from dataclasses import dataclass
 
 import polars as pl
-import pytest
 
 from goldenmatch.core.transform import run_transform
 
@@ -171,3 +170,13 @@ def test_manifest_conversion_no_samples():
     assert len(fixes) == 1
     assert fixes[0]["fix"] == "goldenflow:unicode_nfc"
     assert "->" not in fixes[0]["detail"]
+
+
+def test_do_transform_exception_graceful_degradation():
+    """If goldenflow crashes, returns original df with empty fixes."""
+    df = _sample_df()
+    with patch("goldenmatch.core.transform._goldenflow_available", return_value=True), \
+         patch("goldenmatch.core.transform._do_transform", side_effect=RuntimeError("goldenflow bug")):
+        result_df, fixes = run_transform(df)
+    assert result_df.equals(df)
+    assert fixes == []
