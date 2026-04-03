@@ -114,9 +114,13 @@ def _get_current_value(field: str, config: GoldenMatchConfig) -> float:
 def _apply_value(field: str, value: float, config: GoldenMatchConfig) -> None:
     """Apply a sweep value to the config (mutates in-place)."""
     if field == "threshold":
+        applied = False
         for mk in config.get_matchkeys():
             if mk.threshold is not None:
                 mk.threshold = value
+                applied = True
+        if not applied:
+            logger.warning("No fuzzy matchkeys found to apply threshold sweep")
         return
 
     if field == "blocking.max_block_size":

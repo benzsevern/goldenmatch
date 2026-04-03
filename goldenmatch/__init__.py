@@ -170,6 +170,7 @@ from goldenmatch.core.rollback import rollback_run
 
 # ── Cluster comparison (CCMS) ──────────────────────────────────────────
 from goldenmatch.core.compare_clusters import compare_clusters, CompareResult
+from goldenmatch.core.sensitivity import run_sensitivity, SensitivityResult, SweepParam
 
 # ── Output ───────────────────────────────────────────────────────────────
 from goldenmatch.output.writer import write_output
@@ -259,6 +260,7 @@ __all__ = [
     "generate_diff", "rollback_run",
     # Cluster comparison
     "compare_clusters", "CompareResult",
+    "run_sensitivity", "SensitivityResult", "SweepParam",
     # Output
     "write_output", "generate_dedupe_report",
     # REST API Client
