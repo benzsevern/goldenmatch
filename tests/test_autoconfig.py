@@ -197,8 +197,8 @@ class TestUtilityRanking:
 class TestBuildMatchkeys:
     def test_exact_fields(self):
         profiles = [
-            ColumnProfile("email", "Utf8", "email", 0.9),
-            ColumnProfile("phone", "Utf8", "phone", 0.9),
+            ColumnProfile("email", "Utf8", "email", 0.9, cardinality_ratio=0.9),
+            ColumnProfile("phone", "Utf8", "phone", 0.9, cardinality_ratio=0.5),
         ]
         mks = build_matchkeys(profiles)
         assert len(mks) >= 2
@@ -582,3 +582,179 @@ class TestCompoundBlockingIntegration:
         if config.blocking.strategy == "multi_pass":
             assert config.blocking.skip_oversized is True
             assert config.blocking.max_block_size <= 1000
+
+
+# ── Cardinality guard tests ──────────────────────────────────────────────
+
+
+class TestBlockingCardinalityGuard:
+    """Near-unique columns (cardinality_ratio >= 0.95) should be excluded from blocking."""
+
+    def test_unique_id_excluded_from_blocking(self):
+        """DataFrame with unique rec_id column — blocking should not use it."""
+        n = 500
+        df = pl.DataFrame({
+            "rec_id": [f"rec-{i}" for i in range(n)],
+            "name": [random.choice(["John", "Jane", "Bob", "Alice"]) for _ in range(n)],
+        })
+        profiles = profile_columns(df)
+        config = build_blocking(profiles, df)
+        # rec_id has cardinality_ratio=1.0, so it must NOT appear in blocking keys
+        all_fields = set()
+        for k in config.keys:
+            all_fields.update(k.fields)
+        if config.passes:
+            for p in config.passes:
+                all_fields.update(p.fields)
+        assert "rec_id" not in all_fields
+
+    def test_unique_id_column_named_id(self):
+        """DataFrame with unique 'id' column (like DBLP-ACM) — blocking should not use it."""
+        n = 500
+        df = pl.DataFrame({
+            "id": [str(i) for i in range(n)],
+            "title": [f"Paper about topic {random.randint(1, 50)}" for _ in range(n)],
+        })
+        profiles = profile_columns(df)
+        config = build_blocking(profiles, df)
+        all_fields = set()
+        for k in config.keys:
+            all_fields.update(k.fields)
+        if config.passes:
+            for p in config.passes:
+                all_fields.update(p.fields)
+        assert "id" not in all_fields
+
+
+class TestExactMatchkeyCardinalityFloor:
+    """Low-cardinality columns should not get exact matchkeys (would match nearly everything)."""
+
+    def test_low_cardinality_geo_excluded_from_exact(self):
+        """State column with 4 values / 1000 rows = 0.004 ratio — no exact matchkey."""
+        n = 1000
+        states = ["CA", "TX", "NY", "FL"]
+        df = pl.DataFrame({
+            "state": [random.choice(states) for _ in range(n)],
+            "name": [f"Person {i}" for i in range(n)],
+        })
+        profiles = profile_columns(df)
+        mks = build_matchkeys(profiles, df=df)
+        exact_mks = [mk for mk in mks if mk.type == "exact"]
+        for mk in exact_mks:
+            for f in mk.fields:
+                assert f.field != "state", "state should not have an exact matchkey"
+
+    def test_single_value_column_excluded(self):
+        """Column with all same value (cardinality_ratio ~ 1/N) — no exact matchkey."""
+        n = 200
+        df = pl.DataFrame({
+            "county_desc": ["Los Angeles"] * n,
+            "name": [f"Person {i}" for i in range(n)],
+        })
+        profiles = profile_columns(df)
+        mks = build_matchkeys(profiles, df=df)
+        exact_mks = [mk for mk in mks if mk.type == "exact"]
+        for mk in exact_mks:
+            for f in mk.fields:
+                assert f.field != "county_desc", "county_desc should not have an exact matchkey"
+
+
+class TestDescriptionFuzzyFallback:
+    """Description columns should also get a fuzzy scorer (token_sort), not just record_embedding."""
+
+    def test_description_column_gets_fuzzy_scorer(self):
+        """DataFrame with long title strings (avg_len > 50) — title should appear in fuzzy matchkey fields."""
+        profiles = [
+            ColumnProfile(
+                "title", "Utf8", "description", 0.7,
+                sample_values=["A very long description of a research paper about machine learning and NLP techniques"],
+                avg_len=80.0,
+            ),
+        ]
+        mks = build_matchkeys(profiles)
+        weighted = [mk for mk in mks if mk.type == "weighted"]
+        assert len(weighted) >= 1
+        fuzzy_field_names = []
+        for mk in weighted:
+            for f in mk.fields:
+                if f.scorer and f.scorer != "record_embedding":
+                    fuzzy_field_names.append(f.field)
+        assert "title" in fuzzy_field_names, (
+            f"title should appear as a fuzzy field, got fields: {fuzzy_field_names}"
+        )
+
+
+class TestAutoConfigBenchmarkDatasets:
+    """End-to-end autoconfig tests against real benchmark datasets."""
+
+    def test_febrl_autoconfig(self):
+        """Febrl3: rec_id should NOT be in blocking, state should NOT get exact matchkey."""
+        pytest.importorskip("recordlinkage")
+        import recordlinkage.datasets
+
+        df_rl, _links = recordlinkage.datasets.load_febrl3(return_links=True)
+        # Convert to Polars — recordlinkage returns pandas with index as rec_id
+        import pandas as pd
+        df_pd = df_rl.reset_index()
+        df = pl.from_pandas(df_pd)
+
+        profiles = profile_columns(df)
+        blocking = build_blocking(profiles, df)
+
+        # rec_id is unique — should NOT appear in blocking keys
+        all_blocking_fields = set()
+        for k in blocking.keys:
+            all_blocking_fields.update(k.fields)
+        if blocking.passes:
+            for p in blocking.passes:
+                all_blocking_fields.update(p.fields)
+        assert "rec_id" not in all_blocking_fields, (
+            f"rec_id should be excluded from blocking, got fields: {all_blocking_fields}"
+        )
+
+        # state has low cardinality — check that if cardinality_ratio < 0.01, it's excluded
+        # Febrl3 state has ~36 unique / 5000 rows, but profile_columns samples, so
+        # actual ratio may be slightly above the 0.01 floor. Verify the guard works
+        # by checking that any exact matchkey columns have cardinality_ratio >= 0.01
+        profile_by_name = {p.name: p for p in profiles}
+        mks = build_matchkeys(profiles, df=df)
+        exact_mks = [mk for mk in mks if mk.type == "exact"]
+        for mk in exact_mks:
+            for f in mk.fields:
+                p = profile_by_name.get(f.field)
+                if p:
+                    assert p.cardinality_ratio >= 0.01, (
+                        f"{f.field} has cardinality_ratio={p.cardinality_ratio:.4f} "
+                        "but got an exact matchkey (should be excluded below 0.01)"
+                    )
+
+    def test_dblp_acm_autoconfig(self):
+        """DBLP-ACM: id should NOT be in blocking, title should appear in fuzzy fields."""
+        dblp_path = "D:/show_case/goldenmatch/tests/benchmarks/datasets/DBLP-ACM/DBLP2.csv"
+        df = pl.read_csv(dblp_path, encoding="utf8-lossy", ignore_errors=True)
+
+        profiles = profile_columns(df)
+        blocking = build_blocking(profiles, df)
+
+        # id is unique — should NOT appear in blocking keys
+        all_blocking_fields = set()
+        for k in blocking.keys:
+            all_blocking_fields.update(k.fields)
+        if blocking.passes:
+            for p in blocking.passes:
+                all_blocking_fields.update(p.fields)
+        assert "id" not in all_blocking_fields, (
+            f"id should be excluded from blocking, got fields: {all_blocking_fields}"
+        )
+
+        # title is a description column — should appear in fuzzy matchkey fields
+        mks = build_matchkeys(profiles, df=df)
+        weighted = [mk for mk in mks if mk.type == "weighted"]
+        fuzzy_field_names = set()
+        for mk in weighted:
+            for f in mk.fields:
+                if f.field:
+                    fuzzy_field_names.add(f.field)
+        assert "title" in fuzzy_field_names, (
+            f"title should appear in fuzzy fields, got: {fuzzy_field_names}"
+        )

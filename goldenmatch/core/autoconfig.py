@@ -380,6 +380,12 @@ def build_matchkeys(
             continue  # skip non-matchable columns
 
         if p.col_type == "description":
+            fuzzy_fields.append(MatchkeyField(
+                field=p.name,
+                scorer="token_sort",
+                weight=0.8,
+                transforms=["lowercase", "strip"],
+            ))
             description_columns.append(p)
             continue
 
@@ -388,6 +394,14 @@ def build_matchkeys(
             continue
 
         scorer, weight, transforms = scorer_info
+
+        if scorer == "exact" and p.cardinality_ratio < 0.01:
+            logger.info(
+                "Skipping exact matchkey for '%s' (cardinality_ratio=%.4f; "
+                "too few distinct values — would match nearly everything)",
+                p.name, p.cardinality_ratio,
+            )
+            continue
 
         # Skip exact matchkeys for large datasets — exact matchkeys do a full
         # self-join which is O(N^2) without blocking. For auto-configure, use
@@ -758,6 +772,7 @@ def build_blocking(
         p for p in profiles
         if p.col_type in ("email", "phone", "zip", "identifier")
         and _null_rate(p.name) <= max_null_rate
+        and p.cardinality_ratio < 0.95
     ]
     name_cols = [p for p in profiles if p.col_type == "name"]
     text_cols = [p for p in profiles if p.col_type in ("description", "string", "address")]
