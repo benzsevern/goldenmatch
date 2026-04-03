@@ -148,12 +148,16 @@ def _fuzzy_score_matrix(
 ) -> np.ndarray:
     """NxN fuzzy score matrix using rapidfuzz cdist or embedding cosine similarity."""
     if scorer_name == "embedding":
-        from goldenmatch.core.embedder import get_embedder
+        try:
+            from goldenmatch.core.embedder import get_embedder
 
-        embedder = get_embedder(model_name)
-        embeddings = embedder.embed_column(values, cache_key=f"_block_{id(values)}")
-        sim = embedder.cosine_similarity_matrix(embeddings)
-        return np.asarray(sim, dtype=np.float64)
+            embedder = get_embedder(model_name)
+            embeddings = embedder.embed_column(values, cache_key=f"_block_{id(values)}")
+            sim = embedder.cosine_similarity_matrix(embeddings)
+            return np.asarray(sim, dtype=np.float64)
+        except Exception:
+            logger.warning("Embedding scorer failed, falling back to token_sort", exc_info=True)
+            scorer_name = "token_sort"
 
     # Replace None with empty string for cdist (we handle nulls separately)
     clean = [v if v is not None else "" for v in values]
@@ -423,10 +427,21 @@ def find_fuzzy_matches(
         all_expensive_fields = list(fuzzy_fields) + list(record_emb_fields)
         for f_idx, f in enumerate(all_expensive_fields):
             if f.scorer == "record_embedding":
-                scores = _record_embedding_score_matrix(
-                    block_df, f.columns, model_name=f.model or "all-MiniLM-L6-v2",
-                    column_weights=f.column_weights,
-                )
+                try:
+                    scores = _record_embedding_score_matrix(
+                        block_df, f.columns, model_name=f.model or "all-MiniLM-L6-v2",
+                        column_weights=f.column_weights,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Record embedding scorer failed for columns %s, falling back to token_sort",
+                        f.columns, exc_info=True,
+                    )
+                    concat_values = []
+                    for row in block_df.to_dicts():
+                        parts = [str(row.get(c, "") or "") for c in (f.columns or [])]
+                        concat_values.append(" ".join(parts))
+                    scores = _fuzzy_score_matrix(concat_values, "token_sort")
                 fuzzy_numerator += scores * f.weight
                 fuzzy_denominator += f.weight
             else:
