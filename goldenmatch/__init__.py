@@ -168,6 +168,9 @@ from goldenmatch.core.scorer import rerank_top_pairs
 from goldenmatch.core.diff import generate_diff
 from goldenmatch.core.rollback import rollback_run
 
+# ── Cluster comparison (CCMS) ──────────────────────────────────────────
+from goldenmatch.core.compare_clusters import compare_clusters, CompareResult
+
 # ── Output ───────────────────────────────────────────────────────────────
 from goldenmatch.output.writer import write_output
 from goldenmatch.output.report import generate_dedupe_report
@@ -254,6 +257,8 @@ __all__ = [
     "rerank_top_pairs",
     # Diff / Rollback
     "generate_diff", "rollback_run",
+    # Cluster comparison
+    "compare_clusters", "CompareResult",
     # Output
     "write_output", "generate_dedupe_report",
     # REST API Client
