@@ -380,6 +380,12 @@ def build_matchkeys(
             continue  # skip non-matchable columns
 
         if p.col_type == "description":
+            fuzzy_fields.append(MatchkeyField(
+                field=p.name,
+                scorer="token_sort",
+                weight=1.5,  # higher weight ensures survival past max_fuzzy_fields truncation
+                transforms=["lowercase", "strip"],
+            ))
             description_columns.append(p)
             continue
 
@@ -388,6 +394,14 @@ def build_matchkeys(
             continue
 
         scorer, weight, transforms = scorer_info
+
+        if scorer == "exact" and p.cardinality_ratio > 0 and p.cardinality_ratio < 0.01:
+            logger.warning(
+                "Skipping exact matchkey for '%s' (cardinality_ratio=%.4f; "
+                "too few distinct values — would match nearly everything)",
+                p.name, p.cardinality_ratio,
+            )
+            continue
 
         # Skip exact matchkeys for large datasets — exact matchkeys do a full
         # self-join which is O(N^2) without blocking. For auto-configure, use
@@ -411,6 +425,19 @@ def build_matchkeys(
             exact_fields.append(mf)
         else:
             fuzzy_fields.append(mf)
+
+    # Warn if all exact-eligible columns were excluded by guards
+    _exact_eligible = [
+        p for p in profiles
+        if p.col_type not in ("numeric", "date", "identifier", "description")
+        and _SCORER_MAP.get(p.col_type, (None,))[0] == "exact"
+    ]
+    if _exact_eligible and not exact_fields:
+        logger.warning(
+            "All %d exact-eligible columns were excluded by cardinality/size guards. "
+            "Falling back to fuzzy-only matchkeys. Consider providing explicit config.",
+            len(_exact_eligible),
+        )
 
     matchkeys = []
 
@@ -758,6 +785,7 @@ def build_blocking(
         p for p in profiles
         if p.col_type in ("email", "phone", "zip", "identifier")
         and _null_rate(p.name) <= max_null_rate
+        and p.cardinality_ratio < 0.95
     ]
     name_cols = [p for p in profiles if p.col_type == "name"]
     text_cols = [p for p in profiles if p.col_type in ("description", "string", "address")]
@@ -782,7 +810,7 @@ def build_blocking(
                 keys=[BlockingKeyConfig(fields=[best.name], transforms=transforms)],
             )
         # All exact columns create oversized blocks — fall through
-        logger.info(
+        logger.warning(
             "Exact blocking columns all produce oversized blocks (>%d), "
             "falling through to name-based blocking",
             max_safe_block,
