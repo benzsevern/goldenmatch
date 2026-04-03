@@ -288,6 +288,12 @@ class QualityConfig(BaseModel):
     domain: str | None = None  # "healthcare" | "finance" | "ecommerce"
 
 
+class TransformConfig(BaseModel):
+    """GoldenFlow integration config for data transformation."""
+    enabled: bool = True       # auto-detected: True if goldenflow installed
+    mode: Literal["silent", "announced", "disabled"] = "announced"
+
+
 class StandardizationConfig(BaseModel):
     rules: dict[str, list[str]] = Field(default_factory=dict)
 
@@ -417,6 +423,7 @@ class GoldenMatchConfig(BaseModel):
     standardization: StandardizationConfig | None = None
     validation: ValidationConfig | None = None
     quality: QualityConfig | None = None
+    transform: TransformConfig | None = None
     llm_boost: bool = False
     llm_scorer: LLMScorerConfig | None = None
     domain: DomainConfig | None = None

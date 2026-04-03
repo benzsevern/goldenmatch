@@ -92,8 +92,11 @@ agent = [
 quality = [
     "goldencheck>=0.5.0",
 ]
+transform = [
+    "goldenflow>=1.0.0",
+]
 all = [
-    "goldenmatch[embeddings,llm,postgres,mcp,quality]",
+    "goldenmatch[embeddings,llm,postgres,mcp,quality,transform]",
 ]
 
 [project.scripts]
