@@ -1,6 +1,7 @@
 """Tests for GoldenFlow integration."""
 from __future__ import annotations
 
+import logging
 from unittest.mock import patch
 from dataclasses import dataclass
 
@@ -67,8 +68,8 @@ def test_enabled_false():
     assert fixes == []
 
 
-def test_transform_applied_announced(capsys):
-    """Announced mode applies transforms and prints summary."""
+def test_transform_applied_announced(caplog):
+    """Announced mode applies transforms and logs summary."""
     df = _sample_df()
     transformed_df = df.with_columns(pl.lit("+15551234567").alias("phone"))
 
@@ -86,7 +87,8 @@ def test_transform_applied_announced(capsys):
     )
 
     with patch("goldenmatch.core.transform._goldenflow_available", return_value=True), \
-         patch("goldenmatch.core.transform._do_transform", return_value=mock_result):
+         patch("goldenmatch.core.transform._do_transform", return_value=mock_result), \
+         caplog.at_level(logging.INFO, logger="goldenmatch.core.transform"):
         result_df, fixes = run_transform(df)
 
     assert result_df.equals(transformed_df)
@@ -97,13 +99,11 @@ def test_transform_applied_announced(capsys):
     assert "(555) 123-4567" in fixes[0]["detail"]
     assert "+15551234567" in fixes[0]["detail"]
 
-    captured = capsys.readouterr()
-    assert "GoldenFlow" in captured.out
-    assert "phone_e164" in captured.out
+    assert any("phone_e164" in r.message for r in caplog.records)
 
 
-def test_transform_applied_silent(capsys):
-    """Silent mode applies transforms without printing."""
+def test_transform_applied_silent(caplog):
+    """Silent mode applies transforms without logging."""
     from goldenmatch.config.schemas import TransformConfig
     df = _sample_df()
     transformed_df = df.clone()
@@ -123,12 +123,12 @@ def test_transform_applied_silent(capsys):
 
     config = TransformConfig(mode="silent")
     with patch("goldenmatch.core.transform._goldenflow_available", return_value=True), \
-         patch("goldenmatch.core.transform._do_transform", return_value=mock_result):
+         patch("goldenmatch.core.transform._do_transform", return_value=mock_result), \
+         caplog.at_level(logging.INFO, logger="goldenmatch.core.transform"):
         result_df, fixes = run_transform(df, config)
 
     assert len(fixes) == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
+    assert not any("GoldenFlow" in r.message for r in caplog.records)
 
 
 def test_empty_manifest():

@@ -13,7 +13,8 @@ def _goldenflow_available() -> bool:
     try:
         import goldenflow  # noqa: F401
         return True
-    except ImportError:
+    except ImportError as e:
+        logger.debug("goldenflow not available: %s", e)
         return False
 
 
@@ -33,6 +34,11 @@ def run_transform(
     Falls back gracefully if goldenflow is not installed.
     """
     if not _goldenflow_available():
+        if config is not None and getattr(config, "enabled", True):
+            logger.warning(
+                "GoldenFlow transforms configured but goldenflow is not installed. "
+                "Install with: pip install goldenmatch[transform]"
+            )
         return df, []
 
     # Parse config
@@ -68,12 +74,11 @@ def run_transform(
 
     if mode == "announced" and fixes:
         fix_types = set(record.transform for record in result.manifest.records)
-        print(
-            f"GoldenFlow: transforming data... "
-            f"{len(fixes)} transforms applied "
-            f"({', '.join(sorted(fix_types))})"
+        logger.info(
+            "GoldenFlow: %d transforms applied (%s)",
+            len(fixes), ", ".join(sorted(fix_types)),
         )
     elif mode == "announced":
-        print("GoldenFlow: transforming data... no transforms needed")
+        logger.info("GoldenFlow: no transforms needed")
 
     return result.df, fixes
