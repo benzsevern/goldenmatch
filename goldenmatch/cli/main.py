@@ -28,6 +28,8 @@ from goldenmatch.cli.incremental import incremental_cmd
 from goldenmatch.cli.pprl import pprl_app
 from goldenmatch.cli.label import label_cmd
 from goldenmatch.cli.agent_serve import agent_serve_cmd
+from goldenmatch.cli.compare import compare_clusters_cmd
+from goldenmatch.cli.sensitivity import sensitivity_cmd
 from goldenmatch.prefs.store import PresetStore
 
 LOGO = r"""[bold bright_yellow]
@@ -108,6 +110,8 @@ app.add_typer(pprl_app, name="pprl")
 app.command("label", help="Build ground truth by labeling record pairs interactively.")(label_cmd)
 app.command("agent-serve", help="Start the A2A agent server for AI-to-AI discovery.")(agent_serve_cmd)
 app.command("incremental", help="Match new records against an existing base dataset.")(incremental_cmd)
+app.command("compare-clusters", help="Compare two ER clustering outcomes (CCMS).")(compare_clusters_cmd)
+app.command("sensitivity", help="Analyze parameter sensitivity using CCMS comparison.")(sensitivity_cmd)
 
 
 @app.command("analyze-blocking")
