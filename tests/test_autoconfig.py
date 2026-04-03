@@ -843,3 +843,50 @@ class TestCardinalityBoundaryValues:
             if mk.type == "exact":
                 exact_fields.extend(f.field for f in mk.fields)
         assert "email" in exact_fields, "Default cardinality_ratio=0.0 should not trigger the guard"
+
+
+class TestCrossSourceOverlap:
+    """Tests for _check_source_overlap blocking guard."""
+
+    def test_zero_overlap_skips_blocking_key(self):
+        """Blocking key with zero overlap between sources should return 0.0."""
+        from goldenmatch.core.autoconfig import _check_source_overlap
+
+        df = pl.DataFrame({
+            "venue": ["VLDB", "SIGMOD", "VLDB", "Very Large Databases", "SIGMOD Conf"],
+            "__source__": ["A", "A", "A", "B", "B"],
+        })
+        overlap = _check_source_overlap(df, "venue")
+        assert overlap == 0.0
+
+    def test_full_overlap_passes(self):
+        """Blocking key with overlap should return > 0.0."""
+        from goldenmatch.core.autoconfig import _check_source_overlap
+
+        df = pl.DataFrame({
+            "year": [2020, 2021, 2022, 2020, 2021],
+            "__source__": ["A", "A", "A", "B", "B"],
+        })
+        overlap = _check_source_overlap(df, "year")
+        assert overlap > 0.0
+
+    def test_no_source_column_returns_one(self):
+        """Without __source__ column, should return 1.0 (no check)."""
+        from goldenmatch.core.autoconfig import _check_source_overlap
+
+        df = pl.DataFrame({
+            "venue": ["VLDB", "SIGMOD", "VLDB"],
+        })
+        overlap = _check_source_overlap(df, "venue")
+        assert overlap == 1.0
+
+    def test_single_source_returns_one(self):
+        """With only one source, should return 1.0."""
+        from goldenmatch.core.autoconfig import _check_source_overlap
+
+        df = pl.DataFrame({
+            "venue": ["VLDB", "SIGMOD"],
+            "__source__": ["A", "A"],
+        })
+        overlap = _check_source_overlap(df, "venue")
+        assert overlap == 1.0
