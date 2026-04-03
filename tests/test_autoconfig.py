@@ -592,6 +592,7 @@ class TestBlockingCardinalityGuard:
 
     def test_unique_id_excluded_from_blocking(self):
         """DataFrame with unique rec_id column — blocking should not use it."""
+        random.seed(42)
         n = 500
         df = pl.DataFrame({
             "rec_id": [f"rec-{i}" for i in range(n)],
@@ -610,6 +611,7 @@ class TestBlockingCardinalityGuard:
 
     def test_unique_id_column_named_id(self):
         """DataFrame with unique 'id' column (like DBLP-ACM) — blocking should not use it."""
+        random.seed(42)
         n = 500
         df = pl.DataFrame({
             "id": [str(i) for i in range(n)],
@@ -631,6 +633,7 @@ class TestExactMatchkeyCardinalityFloor:
 
     def test_low_cardinality_geo_excluded_from_exact(self):
         """State column with 4 values / 1000 rows = 0.004 ratio — no exact matchkey."""
+        random.seed(42)
         n = 1000
         states = ["CA", "TX", "NY", "FL"]
         df = pl.DataFrame({
@@ -646,6 +649,7 @@ class TestExactMatchkeyCardinalityFloor:
 
     def test_single_value_column_excluded(self):
         """Column with all same value (cardinality_ratio ~ 1/N) — no exact matchkey."""
+        random.seed(42)
         n = 200
         df = pl.DataFrame({
             "county_desc": ["Los Angeles"] * n,
@@ -730,8 +734,12 @@ class TestAutoConfigBenchmarkDatasets:
 
     def test_dblp_acm_autoconfig(self):
         """DBLP-ACM: id should NOT be in blocking, title should appear in fuzzy fields."""
-        dblp_path = "D:/show_case/goldenmatch/tests/benchmarks/datasets/DBLP-ACM/DBLP2.csv"
-        df = pl.read_csv(dblp_path, encoding="utf8-lossy", ignore_errors=True)
+        from pathlib import Path
+        _DBLP_ACM_DIR = Path(__file__).parent / "benchmarks" / "datasets" / "DBLP-ACM"
+        dblp_path = _DBLP_ACM_DIR / "DBLP2.csv"
+        if not dblp_path.exists():
+            pytest.skip("DBLP-ACM benchmark dataset not available")
+        df = pl.read_csv(str(dblp_path), encoding="utf8-lossy", ignore_errors=True)
 
         profiles = profile_columns(df)
         blocking = build_blocking(profiles, df)
@@ -758,3 +766,80 @@ class TestAutoConfigBenchmarkDatasets:
         assert "title" in fuzzy_field_names, (
             f"title should appear in fuzzy fields, got: {fuzzy_field_names}"
         )
+
+
+# -- Cardinality boundary value tests ----------------------------------------
+
+
+class TestCardinalityBoundaryValues:
+    def test_blocking_boundary_0_95_excluded(self):
+        """Column with cardinality_ratio exactly 0.95 should be excluded from blocking."""
+        random.seed(42)
+        # 95 unique values in 100 rows = 0.95
+        df = pl.DataFrame({
+            "email": [f"user{i}@test.com" for i in range(95)] + [f"user{i}@test.com" for i in range(5)],
+            "name": [random.choice(["alice", "bob", "charlie"]) for _ in range(100)],
+        })
+        profiles = profile_columns(df)
+        email_profile = next(p for p in profiles if p.name == "email")
+        assert email_profile.cardinality_ratio >= 0.95
+        config = build_blocking(profiles, df)
+        all_fields = []
+        for k in [config.keys[0]] + (config.passes or []):
+            all_fields.extend(k.fields)
+        assert "email" not in all_fields
+
+    def test_blocking_boundary_0_94_included(self):
+        """Column with cardinality_ratio 0.94 should be eligible for blocking."""
+        random.seed(42)
+        # 47 unique values in 50 rows = 0.94
+        df = pl.DataFrame({
+            "email": [f"user{i}@test.com" for i in range(47)] + [f"user{i % 47}@test.com" for i in range(3)],
+            "name": [random.choice(["alice", "bob", "charlie"]) for _ in range(50)],
+        })
+        profiles = profile_columns(df)
+        email_profile = next(p for p in profiles if p.name == "email")
+        assert email_profile.cardinality_ratio < 0.95
+        # email should now be eligible (though may or may not be selected depending on block size)
+
+    def test_matchkey_boundary_0_01_excluded(self):
+        """Column with cardinality_ratio < 0.01 should be excluded from exact matchkeys."""
+        random.seed(42)
+        profiles = [
+            ColumnProfile("state", "Utf8", "geo", 0.9, cardinality_ratio=0.009),
+            ColumnProfile("name", "Utf8", "name", 0.9, cardinality_ratio=0.5),
+        ]
+        matchkeys = build_matchkeys(profiles)
+        exact_fields = []
+        for mk in matchkeys:
+            if mk.type == "exact":
+                exact_fields.extend(f.field for f in mk.fields)
+        assert "state" not in exact_fields
+
+    def test_matchkey_boundary_0_01_included(self):
+        """Column with cardinality_ratio exactly 0.01 should be included in exact matchkeys."""
+        random.seed(42)
+        profiles = [
+            ColumnProfile("state", "Utf8", "geo", 0.9, cardinality_ratio=0.01),
+            ColumnProfile("name", "Utf8", "name", 0.9, cardinality_ratio=0.5),
+        ]
+        matchkeys = build_matchkeys(profiles)
+        exact_fields = []
+        for mk in matchkeys:
+            if mk.type == "exact":
+                exact_fields.extend(f.field for f in mk.fields)
+        assert "state" in exact_fields
+
+    def test_matchkey_default_cardinality_not_affected(self):
+        """Profiles with default cardinality_ratio=0.0 should NOT be affected by the guard."""
+        random.seed(42)
+        profiles = [
+            ColumnProfile("email", "Utf8", "email", 0.9),  # cardinality_ratio defaults to 0.0
+            ColumnProfile("name", "Utf8", "name", 0.9),
+        ]
+        matchkeys = build_matchkeys(profiles)
+        exact_fields = []
+        for mk in matchkeys:
+            if mk.type == "exact":
+                exact_fields.extend(f.field for f in mk.fields)
+        assert "email" in exact_fields, "Default cardinality_ratio=0.0 should not trigger the guard"
