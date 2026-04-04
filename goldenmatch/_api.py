@@ -293,16 +293,20 @@ def dedupe_df(
     """
     from goldenmatch.core.pipeline import run_dedupe_df
 
+    _auto_config = False
+    _auto_config_provider = None
+
     if isinstance(config, str):
         config = load_config(config)
     elif config is None:
         if exact or fuzzy:
             config = _build_config(exact, fuzzy, blocking, threshold, llm_scorer, backend)
         else:
-            # Zero-config: auto-detect column types and build matchkeys
-            from goldenmatch.core.autoconfig import auto_configure_df
-            provider = _detect_llm_provider() if llm_scorer else None
-            config = auto_configure_df(df, llm_provider=provider)
+            # Zero-config: defer auto-config to inside pipeline (after GoldenCheck/GoldenFlow)
+            from goldenmatch.config.schemas import GoldenMatchConfig
+            config = GoldenMatchConfig()
+            _auto_config = True
+            _auto_config_provider = _detect_llm_provider() if llm_scorer else None
 
     # Apply overrides uniformly regardless of config source
     if backend and hasattr(config, "backend"):
@@ -311,7 +315,11 @@ def dedupe_df(
         from goldenmatch.config.schemas import LLMScorerConfig
         config.llm_scorer = LLMScorerConfig(enabled=True)
 
-    result = run_dedupe_df(df, config, source_name=source_name)
+    result = run_dedupe_df(
+        df, config, source_name=source_name,
+        auto_config=_auto_config,
+        auto_config_llm_provider=_auto_config_provider,
+    )
 
     return DedupeResult(
         golden=result.get("golden"),
