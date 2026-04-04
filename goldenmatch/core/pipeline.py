@@ -188,6 +188,8 @@ def _run_dedupe_pipeline(
     llm_retrain: bool = False,
     llm_provider: str | None = None,
     llm_max_labels: int = 500,
+    auto_config: bool = False,
+    auto_config_llm_provider: str | None = None,
 ) -> dict:
     """Shared dedupe pipeline logic (post-ingest).
 
@@ -219,6 +221,19 @@ def _run_dedupe_pipeline(
         combined_df_tmp = combined_lf.collect()
         combined_df_tmp, fix_log = auto_fix_dataframe(combined_df_tmp)
         logger.info("Auto-fix applied: %d fix type(s)", len(fix_log))
+        combined_lf = combined_df_tmp.lazy()
+
+    # ── Step 1.5b: AUTO-CONFIG ON CLEANED DATA (if zero-config) ──
+    if auto_config:
+        from goldenmatch.core.autoconfig import auto_configure_df
+        combined_df_tmp = combined_lf.collect()
+        auto_cfg = auto_configure_df(combined_df_tmp, llm_provider=auto_config_llm_provider)
+        config.matchkeys = auto_cfg.matchkeys
+        config.match_settings = auto_cfg.match_settings
+        config.blocking = auto_cfg.blocking
+        config.golden_rules = auto_cfg.golden_rules
+        matchkeys = config.get_matchkeys()
+        logger.info("Auto-configured from cleaned data: %d matchkeys", len(matchkeys))
         combined_lf = combined_df_tmp.lazy()
 
     if config.validation and config.validation.rules:
@@ -526,22 +541,27 @@ def run_dedupe_df(
     output_dupes: bool = False,
     output_unique: bool = False,
     output_report: bool = False,
+    auto_config: bool = False,
+    auto_config_llm_provider: str | None = None,
 ) -> dict:
     """Run dedupe pipeline on a DataFrame directly (no file I/O)."""
     # Cast all columns to string to prevent schema mismatch errors when
     # mixed-type columns (e.g. birth_year inferred as i64 in some rows,
     # str in others) reach blocking/scoring operations.
     df = df.cast({col: pl.Utf8 for col in df.columns if not col.startswith("__")})
-    matchkeys = config.get_matchkeys()
+    matchkeys = [] if auto_config else config.get_matchkeys()
     lf = df.lazy()
-    required = _get_required_columns(config)
-    validate_columns(lf, required)
+    if not auto_config:
+        required = _get_required_columns(config)
+        validate_columns(lf, required)
     lf = lf.with_columns(pl.lit(source_name).alias("__source__"))
     lf = _add_row_ids(lf, offset=0)
     combined_lf = lf.collect().lazy()
     return _run_dedupe_pipeline(combined_lf, config, matchkeys,
                                 output_golden, output_clusters,
-                                output_dupes, output_unique, output_report)
+                                output_dupes, output_unique, output_report,
+                                auto_config=auto_config,
+                                auto_config_llm_provider=auto_config_llm_provider)
 
 
 def run_match(
