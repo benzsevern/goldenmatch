@@ -890,3 +890,85 @@ class TestCrossSourceOverlap:
         })
         overlap = _check_source_overlap(df, "venue")
         assert overlap == 1.0
+
+
+class TestDomainAwareAutoConfig:
+    """Tests for domain-aware auto-config."""
+
+    def test_high_confidence_domain_extracts_and_generates_matchkeys(self):
+        """Electronics-like data should trigger extraction and domain matchkeys."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+
+        df = pl.DataFrame({
+            "title": [
+                "Sony WH-1000XM5 Wireless Headphones Black",
+                "Sony WH-1000XM5 Wireless Headphones Silver",
+                "Samsung Galaxy S24 Ultra 256GB Phantom Black",
+                "Apple iPhone 15 Pro Max 512GB Natural Titanium",
+                "Apple iPhone 15 Pro Max 512GB Blue Titanium",
+            ],
+            "brand": ["Sony", "Sony", "Samsung", "Apple", "Apple"],
+            "price": [348.0, 348.0, 1199.0, 1399.0, 1399.0],
+        })
+
+        config = auto_configure_df(df)
+        all_fields = []
+        for mk in config.get_matchkeys():
+            all_fields.extend(f.field for f in mk.fields if f.field)
+
+        domain_fields = [f for f in all_fields if f and f.startswith("__")]
+        assert len(domain_fields) > 0, f"Expected domain fields in matchkeys, got: {all_fields}"
+        assert any("brand" in f for f in domain_fields), f"Expected __brand__ field, got: {domain_fields}"
+
+    def test_low_confidence_no_extraction(self):
+        """Ambiguous data should not trigger domain extraction."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+
+        df = pl.DataFrame({
+            "col_a": ["foo", "bar", "baz"],
+            "col_b": ["x", "y", "z"],
+            "col_c": [1, 2, 3],
+        })
+
+        config = auto_configure_df(df)
+        all_fields = []
+        for mk in config.get_matchkeys():
+            all_fields.extend(f.field for f in mk.fields if f.field)
+
+        domain_fields = [f for f in all_fields if f and f.startswith("__")]
+        assert len(domain_fields) == 0
+
+    def test_manual_domain_config_overrides(self):
+        """When domain_config is provided, auto-config skips domain detection."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+        from goldenmatch.config.schemas import DomainConfig
+        from unittest.mock import patch
+
+        df = pl.DataFrame({
+            "brand": ["Sony", "Samsung", "Apple"],
+            "model": ["XM5", "S24", "iPhone15"],
+        })
+
+        with patch("goldenmatch.core.domain.detect_domain") as mock_detect:
+            config = auto_configure_df(df, domain_config=DomainConfig(enabled=False))
+
+        # detect_domain should NOT have been called
+        mock_detect.assert_not_called()
+
+    def test_unknown_domain_normal_behavior(self):
+        """Unknown domain should produce normal auto-config (no extraction)."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+
+        df = pl.DataFrame({
+            "name": ["John Smith", "Jane Doe", "Bob Wilson"],
+            "email": ["john@test.com", "jane@test.com", "bob@test.com"],
+        })
+
+        config = auto_configure_df(df)
+        all_fields = []
+        for mk in config.get_matchkeys():
+            all_fields.extend(f.field for f in mk.fields if f.field)
+
+        domain_fields = [f for f in all_fields if f and f.startswith("__")]
+        assert len(domain_fields) == 0
+        assert len(config.get_matchkeys()) > 0
