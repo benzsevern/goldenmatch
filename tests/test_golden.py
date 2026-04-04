@@ -4,7 +4,7 @@ import polars as pl
 import pytest
 
 from goldenmatch.config.schemas import GoldenFieldRule, GoldenRulesConfig
-from goldenmatch.core.golden import merge_field, build_golden_record
+from goldenmatch.core.golden import merge_field, build_golden_record, build_golden_record_with_provenance, GoldenRecordResult
 
 
 class TestMergeFieldMostComplete:
@@ -12,13 +12,13 @@ class TestMergeFieldMostComplete:
 
     def test_longest_string_wins(self):
         rule = GoldenFieldRule(strategy="most_complete")
-        val, conf = merge_field(["Jo", "John", "Jon"], rule)
+        val, conf, _idx = merge_field(["Jo", "John", "Jon"], rule)
         assert val == "John"
         assert conf == 1.0
 
     def test_tied_length(self):
         rule = GoldenFieldRule(strategy="most_complete")
-        val, conf = merge_field(["abc", "xyz"], rule)
+        val, conf, _idx = merge_field(["abc", "xyz"], rule)
         assert val in ("abc", "xyz")
         assert conf == 0.7
 
@@ -28,13 +28,13 @@ class TestMergeFieldMajorityVote:
 
     def test_majority_wins(self):
         rule = GoldenFieldRule(strategy="majority_vote")
-        val, conf = merge_field(["A", "B", "A", "A"], rule)
+        val, conf, _idx = merge_field(["A", "B", "A", "A"], rule)
         assert val == "A"
         assert conf == pytest.approx(3 / 4)
 
     def test_tie_picks_one(self):
         rule = GoldenFieldRule(strategy="majority_vote")
-        val, conf = merge_field(["A", "B"], rule)
+        val, conf, _idx = merge_field(["A", "B"], rule)
         assert val in ("A", "B")
         assert conf == pytest.approx(0.5)
 
@@ -47,7 +47,7 @@ class TestMergeFieldSourcePriority:
             strategy="source_priority",
             source_priority=["src_a", "src_b"],
         )
-        val, conf = merge_field(
+        val, conf, _idx = merge_field(
             ["v_a", "v_b"],
             rule,
             sources=["src_a", "src_b"],
@@ -60,7 +60,7 @@ class TestMergeFieldSourcePriority:
             strategy="source_priority",
             source_priority=["src_a", "src_b", "src_c"],
         )
-        val, conf = merge_field(
+        val, conf, _idx = merge_field(
             [None, "v_b", "v_c"],
             rule,
             sources=["src_a", "src_b", "src_c"],
@@ -76,7 +76,7 @@ class TestMergeFieldSourcePriority:
         )
         vals = [None] * 11 + ["found", "other"]
         sources = ["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "s12"]
-        val, conf = merge_field(vals, rule, sources=sources)
+        val, conf, _idx = merge_field(vals, rule, sources=sources)
         assert val == "found"
         assert conf == pytest.approx(0.1)
 
@@ -86,7 +86,7 @@ class TestMergeFieldFirstNonNull:
 
     def test_first_value(self):
         rule = GoldenFieldRule(strategy="first_non_null")
-        val, conf = merge_field([None, "hello", "world"], rule)
+        val, conf, _idx = merge_field([None, "hello", "world"], rule)
         assert val == "hello"
         assert conf == 0.6
 
@@ -96,7 +96,7 @@ class TestMergeFieldAllAgree:
 
     def test_all_identical(self):
         rule = GoldenFieldRule(strategy="majority_vote")
-        val, conf = merge_field(["same", "same", "same"], rule)
+        val, conf, _idx = merge_field(["same", "same", "same"], rule)
         assert val == "same"
         assert conf == 1.0
 
@@ -106,13 +106,13 @@ class TestMergeFieldAllNull:
 
     def test_all_none(self):
         rule = GoldenFieldRule(strategy="most_complete")
-        val, conf = merge_field([None, None], rule)
+        val, conf, _idx = merge_field([None, None], rule)
         assert val is None
         assert conf == 0.0
 
     def test_empty_list(self):
         rule = GoldenFieldRule(strategy="most_complete")
-        val, conf = merge_field([], rule)
+        val, conf, _idx = merge_field([], rule)
         assert val is None
         assert conf == 0.0
 
@@ -148,3 +148,40 @@ class TestBuildGoldenRecord:
         # golden confidence is mean of individual confidences
         assert "__golden_confidence__" in result
         assert 0.0 < result["__golden_confidence__"] <= 1.0
+
+
+def test_provenance_structure():
+    """build_golden_record_with_provenance returns GoldenRecordResult with provenance."""
+    df = pl.DataFrame({
+        "__row_id__": [1, 2],
+        "__cluster_id__": [1, 1],
+        "name": ["Alice", "Alice"],
+        "email": ["a@test.com", "alice@test.com"],
+    })
+    rules = GoldenRulesConfig(default_strategy="most_complete")
+    clusters = {1: {"members": [1, 2], "size": 2, "cluster_quality": "strong", "confidence": 0.9}}
+    result = build_golden_record_with_provenance(df, rules, clusters)
+    assert isinstance(result, GoldenRecordResult)
+    assert isinstance(result.df, pl.DataFrame)
+    assert len(result.provenance) == 1
+    prov = result.provenance[0]
+    assert prov.cluster_id == 1
+    assert prov.cluster_quality == "strong"
+    assert "name" in prov.fields
+    assert "email" in prov.fields
+    assert prov.fields["name"].strategy == "most_complete"
+    assert prov.fields["name"].source_row_id in [1, 2]
+    assert len(prov.fields["name"].candidates) == 2
+
+
+def test_provenance_df_matches_golden_record():
+    """GoldenRecordResult.df matches build_golden_record output."""
+    df = pl.DataFrame({
+        "__row_id__": [1, 2],
+        "name": ["Alice", "Bob"],
+    })
+    rules = GoldenRulesConfig(default_strategy="most_complete")
+    clusters = {1: {"members": [1, 2], "size": 2, "cluster_quality": "strong", "confidence": 0.9}}
+    old = build_golden_record(df, rules)
+    result = build_golden_record_with_provenance(df, rules, clusters)
+    assert result.df["name"][0] == old["name"]["value"]
