@@ -109,10 +109,17 @@ def build_lineage(
     return lineage
 
 
+def _serialize_provenance(provenance: list) -> list[dict]:
+    """Serialize ClusterProvenance dataclasses to dicts."""
+    from dataclasses import asdict
+    return [asdict(p) for p in provenance]
+
+
 def save_lineage(
     lineage: list[dict],
     output_dir: str | Path,
     run_name: str,
+    golden_provenance: list | None = None,
 ) -> Path:
     """Save lineage to a JSON sidecar file.
 
@@ -134,6 +141,8 @@ def save_lineage(
         "total_pairs": len(lineage),
         "pairs": lineage,
     }
+    if golden_provenance:
+        data["golden_records"] = _serialize_provenance(golden_provenance)
     path.write_text(json.dumps(data, default=str, indent=2), encoding="utf-8")
     logger.info("Saved lineage for %d pairs to %s", len(lineage), path)
     return path
@@ -147,6 +156,7 @@ def save_lineage_streaming(
     output_dir: str | Path,
     run_name: str,
     natural_language: bool = False,
+    golden_provenance: list | None = None,
 ) -> Path:
     """Save lineage with streaming -- writes pairs incrementally to disk.
 
@@ -236,7 +246,11 @@ def save_lineage_streaming(
             f.write("    " + json.dumps(record, default=str))
             written += 1
 
-        f.write('\n  ]\n}\n')
+        f.write('\n  ]')
+        if golden_provenance:
+            f.write(',\n  "golden_records": ')
+            f.write(json.dumps(_serialize_provenance(golden_provenance), default=str, indent=2))
+        f.write('\n}\n')
 
     logger.info("Streamed lineage for %d pairs to %s", written, path)
     return path
