@@ -71,6 +71,7 @@
 - Config: Pydantic models in `config/schemas.py`, YAML loading in `config/loader.py`
 - `config/schemas.py` has `MemoryConfig` (enabled, backend, path, trust, learning) and `LearningConfig` (threshold_min_corrections, weights_min_corrections). `GoldenMatchConfig.memory` is optional
 - `config/loader.py` normalizes golden_rules and standardization sections from flat YAML
+- `GoldenRulesConfig` fields: `auto_split: bool = True` (auto-split oversized clusters via MST), `quality_weighting: bool = True` (use GoldenCheck quality scores in survivorship, no-op without GoldenCheck), `weak_cluster_threshold: float = 0.3` (edge gap threshold for confidence downgrade)
 
 ## Performance
 - Exact matching uses Polars self-join (not Python group_by + combinations)
@@ -112,8 +113,11 @@
 - `GoldenMatchConfig.get_matchkeys()` returns matchkeys from either top-level or match_settings
 - Matchkey type field: use `mk.type` (not `mk.comparison`) after validation
 - Scorer returns `list[tuple[int, int, float]]` — (row_id_a, row_id_b, score)
-- `build_clusters` returns `dict[int, dict]` with keys: members, size, oversized, pair_scores, confidence, bottleneck_pair
+- Pair confidence IS the match score (0.0-1.0) — no separate confidence field
+- `build_clusters` returns `dict[int, dict]` with keys: members, size, oversized, pair_scores, confidence, bottleneck_pair, cluster_quality
+- `cluster_quality` field: `"strong"` (normal), `"weak"` (confidence downgraded), `"split"` (auto-split from oversized)
 - `confidence` = 0.4*min_edge + 0.3*avg_edge + 0.3*connectivity; `bottleneck_pair` = weakest link (id_a, id_b)
+- Oversized clusters are auto-split via MST (minimum spanning tree) — weakest MST edge removed to guarantee disconnection
 - `unmerge_record(record_id, clusters)` removes a record from its cluster, re-clusters remaining via stored pair_scores
 - `unmerge_cluster(cluster_id, clusters)` shatters a cluster into singletons
 - TUI has 6 tabs: Data, Config, Matches, Golden, Boost, Export (key 1-6)
