@@ -203,6 +203,10 @@ Hosted on Railway, registered on Smithery:
 - Windows drive letter paths (C:\) break `file:source_name` CLI parsing — handle in `_parse_file_source`
 - `ignore_errors=True` needed for `pl.read_csv` on files with junk rows
 - Textual version 8.x installed (despite `>=1.0` pin) — API is stable
+- Polars DLL hangs: kill zombie python with `powershell.exe -Command "Get-Process python -ErrorAction SilentlyContinue | Stop-Process -Force"` (bash `$_` gets mangled by extglob — must use powershell.exe)
+- `test_embedder.py` and `test_llm_boost.py` segfault on this machine (torch access violation) — embedding is always via Vertex AI, skip these locally
+- Run core tests without torch: `pytest tests/test_cluster.py tests/test_golden.py tests/test_lineage.py tests/test_config.py tests/test_pipeline.py`
+- Ruff auto-fix can cascade-delete test functions when removing mid-file imports — always put imports at top of test files
 - gcloud CLI sometimes hangs on Windows — try with `timeout 30 gcloud ...` first, fall back to REST API if it hangs. User ADC at `~/AppData/Roaming/gcloud/application_default_credentials.json`
 - Vertex AI service account needs `roles/aiplatform.user` for embeddings — grant via `gcloud projects add-iam-policy-binding`. IAM changes take 1-2 minutes to propagate.
 - Vertex AI `text-embedding-004` does NOT support fine-tuning — only inference. Use Colab GPU or local CPU for model training.
