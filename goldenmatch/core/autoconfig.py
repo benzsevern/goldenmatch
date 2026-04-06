@@ -923,6 +923,48 @@ def build_blocking(
     if name_cols:
         pattern_names = [p for p in name_cols if _classify_by_name(p.name) == "name"]
         best_name = (pattern_names[0] if pattern_names else name_cols[0]).name
+
+        # Check for geo columns to compound with name — prevents cross-region
+        # false positives (e.g., same hospital name in different states)
+        geo_cols = [
+            p for p in profiles
+            if p.col_type == "geo"
+            and _null_rate(p.name) <= max_null_rate
+        ]
+        best_geo = None
+        if geo_cols:
+            # Pick the geo column that reduces max block size the most
+            geo_results: list[tuple[ColumnProfile, int]] = []
+            for g in geo_cols:
+                try:
+                    max_block = df.group_by([g.name, best_name]).len().get_column("len").max()
+                    if max_block is not None:
+                        geo_results.append((g, max_block))
+                except Exception:
+                    continue
+            if geo_results:
+                geo_results.sort(key=lambda x: x[1])
+                candidate, candidate_block = geo_results[0]
+                if candidate_block <= max_safe_block:
+                    best_geo = candidate.name
+                    logger.info(
+                        "Geo-compound blocking: [%s, %s] -> max_block=%d",
+                        best_geo, best_name, candidate_block,
+                    )
+
+        if best_geo:
+            return BlockingConfig(
+                keys=[BlockingKeyConfig(fields=[best_geo, best_name], transforms=["lowercase", "strip"])],
+                strategy="multi_pass",
+                passes=[
+                    BlockingKeyConfig(fields=[best_geo, best_name], transforms=["lowercase", "strip"]),
+                    BlockingKeyConfig(fields=[best_geo, best_name], transforms=["lowercase", "substring:0:5"]),
+                    BlockingKeyConfig(fields=[best_name], transforms=["lowercase", "soundex"]),
+                ],
+                max_block_size=max_safe_block,
+                skip_oversized=True,
+            )
+
         return BlockingConfig(
             keys=[BlockingKeyConfig(fields=[best_name], transforms=["lowercase", "soundex"])],
             strategy="multi_pass",
