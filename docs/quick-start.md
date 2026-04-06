@@ -188,3 +188,5 @@ goldenmatch evaluate data.csv --config config.yaml --gt gt.csv --min-f1 0.90
 | All 21 CLI commands | [CLI Reference](cli) |
 | Interactive TUI walkthrough | [TUI](tui) |
 | Complete YAML config reference | [Configuration](configuration) |
+| Use from Claude Desktop (30 MCP tools) | [MCP Server](mcp) |
+| Build AI agents that deduplicate (A2A) | [ER Agent](agent) |

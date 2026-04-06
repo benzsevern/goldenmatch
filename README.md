@@ -1,11 +1,14 @@
 <!-- mcp-name: io.github.benzsevern/goldenmatch -->
 # GoldenMatch
 
-**Entity resolution toolkit — deduplicate records, match across sources, and maintain golden records. Works on files or live databases.**
+**Find duplicate records in 30 seconds. No rules to write, no models to train.**
 
-**v1.4.0** — Scoring quality, smart auto-config, LLM auto-enablement. ([Changelog](#whats-new-in-v140))
+![GoldenMatch Demo](docs/screenshots/demo.svg)
 
-Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode auto-detects your data; optional LLM boost for harder datasets.
+```bash
+pip install goldenmatch
+goldenmatch dedupe customers.csv
+```
 
 [![PyPI](https://img.shields.io/pypi/v/goldenmatch?color=d4a017)](https://pypi.org/project/goldenmatch/)
 [![CI](https://github.com/benzsevern/goldenmatch/actions/workflows/ci.yml/badge.svg)](https://github.com/benzsevern/goldenmatch/actions/workflows/ci.yml)
@@ -17,70 +20,78 @@ Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode
 [![DQBench ER](https://img.shields.io/badge/DQBench%20ER-95.30-gold)](https://github.com/benzsevern/dqbench)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/benzsevern/goldenmatch/blob/main/scripts/gpu_colab_notebook.ipynb)
 
-### See it in action
+---
 
-![GoldenMatch Demo](docs/screenshots/demo.svg)
+## Why GoldenMatch?
 
-```bash
-pip install goldenmatch
-goldenmatch demo
-```
+- **Zero-config** — auto-detects columns, picks scorers, and runs. No training data needed
+- **97.2% F1** on DBLP-ACM out of the box. [DQBench ER score: 95.30](https://github.com/benzsevern/dqbench)
+- **Privacy-preserving** — match across organizations without sharing raw data (PPRL, 92.4% F1)
+- **30 MCP tools** — use from Claude Desktop, Claude Code, or any AI assistant ([Smithery](https://smithery.ai/servers/benzsevern/goldenmatch))
+- **Production-ready** — Postgres sync, daemon mode, lineage tracking, review queues
+
+### Choose your path
+
+| I want to... | Go here |
+|--------------|---------|
+| Deduplicate a CSV right now | [Quick Start](https://benzsevern.github.io/goldenmatch/quick-start) |
+| Use from Claude Desktop / AI assistant | [MCP Server](https://benzsevern.github.io/goldenmatch/mcp) |
+| Build AI agents that deduplicate | [ER Agent (A2A)](https://benzsevern.github.io/goldenmatch/agent) |
+| Write Python code | [Python API](https://benzsevern.github.io/goldenmatch/python-api) |
+| Use the interactive TUI | [TUI Guide](https://benzsevern.github.io/goldenmatch/tui) |
 
 ---
 
-## Features
+<details>
+<summary><strong>All features</strong> (click to expand)</summary>
 
-- **Zero-config** — `goldenmatch dedupe file.csv` auto-detects columns, picks scorers, runs automatically
-- **Gold-themed TUI** — interactive interface with keyboard shortcuts, live threshold tuning, setup wizard
+### Matching
 - **10+ scoring methods** — exact, Jaro-Winkler, Levenshtein, token sort, soundex, ensemble, embedding, record embedding, dice, jaccard + plugin extensible
 - **8+ blocking strategies** — static, adaptive, sorted neighborhood, multi-pass, ANN, ann_pairs, canopy, **learned** (data-driven predicate selection)
-- **Fellegi-Sunter probabilistic matching** — EM-trained m/u probabilities, automatic threshold estimation, comparison vectors with 2/3-level agreement
-- **Vertex AI embeddings** — 85%+ F1 accuracy with no GPU needed (Google Cloud managed API)
-- **Database sync** — incremental Postgres matching with persistent ANN index and golden record versioning
-- **REST API + MCP Server** — real-time matching via HTTP or Claude Desktop (30 tools: match, unmerge, explain, config advisor, data quality, transforms, etc.)
-- **Review queue** — REST endpoint surfaces borderline pairs for data steward approval/rejection
-- **Lineage tracking** — every merge decision saved to a JSON sidecar with per-field score breakdown and golden record provenance
-- **Daemon mode** — `goldenmatch watch --daemon` runs as a service with health endpoint and PID file
-- **Anomaly detection** — flag fake emails, placeholder data, suspicious records
-- **GoldenCheck integration** — `pip install goldenmatch[quality]` adds enhanced data quality scanning before matching (encoding, Unicode, format validation, domain-aware types)
-- **Merge preview + undo** — see what will change before writing, rollback any run or unmerge individual records
-- **Active learning boost** — label 10 borderline pairs in the TUI, instantly retrain a classifier for 99% accuracy
-- **Cluster quality scoring** — clusters labeled `strong`/`weak`/`split` with confidence downgrade for weak clusters; oversized clusters auto-split via MST (minimum spanning tree)
-- **Single-record matching** — `match_one` primitive for streaming: embed, query ANN, score, return matches
-- **Privacy-preserving matching** — bloom filter transforms + Dice/Jaccard scoring for fuzzy matching on encrypted PII
-- **PPRL multi-party linkage** -- match records across organizations without sharing raw data. Auto-configured bloom filters achieve 92.4% F1 on FEBRL4. Trusted third party and SMC modes.
-- **PPRL auto-configuration** -- zero-config PPRL that profiles your data and picks optimal fields, bloom filter parameters, and threshold automatically
-- **Before/after dashboard** — shareable HTML showing data transformation with charts
-- **Schema-free matching** — auto-maps columns between different schemas (full_name -> first_name + last_name)
-- **Cloud storage** — read directly from S3, GCS, or Azure Blob
-- **API connector** — pull from Salesforce, HubSpot, or any REST/GraphQL API
-- **Scheduled runs** — cron-like scheduling with run history
-- **LLM scorer with budget controls** — GPT-4o-mini scores borderline pairs, boosting product matching from 44.5% to **66.3% F1** (precision 35%→95%) for just $0.04. Budget caps, model tiering, graceful degradation
-- **LLM boost** — optional Claude/GPT-4 labeling + fine-tuning for harder datasets
-- **Golden records** — 5 merge strategies (most_complete, majority_vote, source_priority, most_recent, first_non_null) with optional quality-weighted survivorship from GoldenCheck
-- **Field-level provenance** — `build_golden_record_with_provenance()` tracks which source row contributed each field, what strategy was used, and what candidates existed
-- **Parallel fuzzy scoring** — blocks scored concurrently via thread pool with intra-field early termination
+- **Fellegi-Sunter probabilistic matching** — EM-trained m/u probabilities, automatic threshold estimation
+- **LLM scorer with budget controls** — GPT-4o-mini scores borderline pairs for just $0.04. Budget caps, model tiering, graceful degradation
 - **Cross-encoder reranking** — re-score borderline pairs with a pre-trained cross-encoder for higher precision
-- **Auto-select blocking** — histogram analysis picks the best blocking key automatically
-- **Dynamic block splitting** — oversized blocks auto-split by highest-cardinality column (zero config)
-- **Large dataset mode** — chunked processing for files that don't fit in memory
-- **Plugin architecture** — extend with custom scorers, transforms, connectors, and golden strategies via pip-installable plugins
-- **Enterprise connectors** — Snowflake, Databricks, BigQuery, HubSpot, Salesforce (optional deps)
+- **Schema-free matching** — auto-maps columns between different schemas (full_name -> first_name + last_name)
+
+### Data Quality
+- **GoldenCheck integration** — `pip install goldenmatch[quality]` adds data quality scanning (encoding, Unicode, format validation)
+- **GoldenFlow transforms** — `pip install goldenmatch[transform]` normalizes phone numbers, dates, categorical spelling
+- **Anomaly detection** — flag fake emails, placeholder data, suspicious records
+
+### Golden Records
+- **5 merge strategies** — most_complete, majority_vote, source_priority, most_recent, first_non_null
+- **Quality-weighted survivorship** — fields scored by source quality from GoldenCheck
+- **Field-level provenance** — tracks which source row contributed each field
+- **Cluster quality scoring** — clusters labeled `strong`/`weak`/`split`; oversized clusters auto-split via MST
+
+### Privacy
+- **PPRL multi-party linkage** — match across organizations without sharing raw data (92.4% F1 on FEBRL4)
+- **PPRL auto-configuration** — profiles your data and picks optimal fields, bloom filter parameters, and threshold
+
+### Integration
+- **REST API + MCP Server** — 30 tools for matching, explaining, reviewing, data quality, and transforms
+- **A2A Agent** — 10 skills for AI-to-AI autonomous entity resolution
+- **Database sync** — incremental Postgres matching with persistent ANN index
+- **Enterprise connectors** — Snowflake, Databricks, BigQuery, HubSpot, Salesforce
 - **DuckDB backend** — out-of-core processing for 10M+ records without Spark
+- **Ray distributed backend** — scale to 50M+ records with `pip install goldenmatch[ray]`
+- **dbt integration** — `dbt-goldenmatch` package for DuckDB-based ER in dbt pipelines
+
+### Developer Experience
+- **Gold-themed TUI** — interactive interface with keyboard shortcuts, live threshold tuning
+- **Active learning boost** — label 10 borderline pairs in the TUI, retrain a classifier for 99% accuracy
+- **Review queue** — REST endpoint surfaces borderline pairs for data steward approval
+- **Merge preview + undo** — rollback any run or unmerge individual records
+- **Lineage tracking** — every merge decision saved with per-field score breakdown
 - **Natural language explainability** — template-based per-pair and per-cluster explanations at zero LLM cost
+- **Evaluation CLI** — `goldenmatch evaluate` reports precision/recall/F1 against ground truth
+- **7 domain packs** — electronics, software, healthcare, financial, real estate, people, retail
+- **Plugin architecture** — extend with custom scorers, transforms, connectors via pip
 - **Streaming / CDC mode** — incremental record matching with micro-batch or immediate processing
-- **Multi-table graph ER** — match across entity types with cross-relationship evidence propagation
-- **7 domain packs** — pre-built YAML rulebooks for electronics, software, healthcare, financial, real estate, people, retail
-- **Evaluation CLI** — `goldenmatch evaluate` reports precision/recall/F1 against ground truth CSV
-- **Incremental matching** — `goldenmatch incremental` matches new CSV records against an existing base dataset
-- **GitHub Actions "Try It"** — zero-install demo via `workflow_dispatch` (paste a CSV URL, get results)
-- **Codespaces ready** — one-click dev environment with `.devcontainer` config
-- **Ray distributed backend** -- scale to 10M+ records with `pip install goldenmatch[ray]` and `--backend ray`. Zero config locally, Ray cluster for 50M+
-- **Ground truth builder** -- `goldenmatch label` shows pairs interactively, type y/n/s to build ground truth CSV for accuracy measurement
-- **dbt integration** — `dbt-goldenmatch` package for DuckDB-based entity resolution in dbt pipelines
-- **Iterative LLM calibration** — learns optimal threshold from ~200 sampled pairs instead of scoring all candidates
-- **ANN hybrid blocking** — oversized blocks fall back to embedding-based sub-blocking
-- **Auto-config classification fixes** — ID/price patterns, utility-based field ranking, LLM-assisted classification
+- **GitHub Actions "Try It"** — zero-install demo via `workflow_dispatch`
+- **Codespaces ready** — one-click dev environment
+
+</details>
 
 ## Installation
 

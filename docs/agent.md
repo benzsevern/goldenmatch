@@ -10,14 +10,28 @@ GoldenMatch exposes itself as an autonomous entity resolution agent that other A
 
 An agent says "deduplicate this data" and GoldenMatch handles strategy selection, config generation, pipeline execution, and result explanation -- all without human configuration.
 
+> **Just want to use from Claude Desktop?** See the [MCP Server](mcp) page instead -- it's simpler for human-in-the-loop workflows.
+
+---
+
+## What is A2A?
+
+**A2A (Agent-to-Agent)** is an open protocol for AI systems to discover and invoke each other. Think of it as DNS + HTTP for AI agents:
+
+1. An agent discovers GoldenMatch at `/.well-known/agent.json` (like a business card)
+2. The agent card lists **skills** (capabilities) with input/output schemas
+3. The calling agent sends a task, GoldenMatch processes it, returns structured results
+
+A2A is supported by LangChain, CrewAI, AutoGen, and other agent frameworks. Use A2A when you're building **agent-to-agent workflows** where no human is in the loop.
+
 ---
 
 ## Two Protocols
 
-| Protocol | Port | Best For |
-|----------|------|----------|
-| **A2A** (Agent-to-Agent) | 8200 | AI agent frameworks (LangChain, CrewAI, AutoGen) |
-| **MCP** (Model Context Protocol) | stdio | Claude Desktop, Cursor, Windsurf |
+| Protocol | Port | Best For | When to Use |
+|----------|------|----------|-------------|
+| **A2A** (Agent-to-Agent) | 8200 | AI agent frameworks (LangChain, CrewAI, AutoGen) | Agent-to-agent automation, no human in the loop |
+| **MCP** (Model Context Protocol) | stdio | Claude Desktop, Cursor, Windsurf | Human-in-the-loop, interactive AI assistants |
 
 ---
 
@@ -234,3 +248,14 @@ Full card at: `http://localhost:8200/.well-known/agent.json`
 ## Authentication
 
 Set `GOLDENMATCH_AGENT_TOKEN` env var for bearer token auth. If not set, no auth required (suitable for local use).
+
+---
+
+## See also
+
+| Topic | Link |
+|-------|------|
+| MCP Server (Claude Desktop) | [MCP Server](mcp) |
+| Quick start with Python/CLI | [Quick Start](quick-start) |
+| Full Python API (101 exports) | [Python API](python-api) |
+| Configuration reference | [Configuration](configuration) |
