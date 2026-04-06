@@ -34,11 +34,11 @@ def test_agent_card_has_required_fields():
     assert card["authentication"]["schemes"] == ["bearer"]
 
 
-def test_agent_card_has_8_skills():
+def test_agent_card_has_10_skills():
     from goldenmatch.a2a.server import build_agent_card
 
     card = build_agent_card("http://localhost:8080")
-    assert len(card["skills"]) == 8
+    assert len(card["skills"]) == 10
 
 
 def test_agent_card_skills_have_modes():
@@ -142,3 +142,108 @@ def test_dispatch_unknown_skill():
 
     with pytest.raises(ValueError, match="Unknown skill"):
         dispatch_skill("nonexistent_skill", {})
+
+
+def test_agent_card_has_quality_and_transform_skills():
+    from goldenmatch.a2a.server import build_agent_card
+
+    card = build_agent_card("http://localhost:8080")
+    skill_ids = {s["id"] for s in card["skills"]}
+    assert "quality" in skill_ids
+    assert "transform" in skill_ids
+
+
+def test_dispatch_quality_without_goldencheck(tmp_path):
+    """quality skill returns error when goldencheck is not installed."""
+    import polars as pl
+    from unittest.mock import patch
+    from goldenmatch.a2a.skills import dispatch_skill
+
+    csv_path = tmp_path / "data.csv"
+    pl.DataFrame({"name": ["Alice"]}).write_csv(str(csv_path))
+
+    with patch("goldenmatch.core.quality._goldencheck_available", return_value=False):
+        result = dispatch_skill("quality", {"file_path": str(csv_path)})
+    assert "error" in result
+    assert "goldencheck" in result["error"].lower()
+
+
+def test_dispatch_transform_without_goldenflow(tmp_path):
+    """transform skill returns error when goldenflow is not installed."""
+    import polars as pl
+    from unittest.mock import patch
+    from goldenmatch.a2a.skills import dispatch_skill
+
+    csv_path = tmp_path / "data.csv"
+    pl.DataFrame({"name": ["Alice"]}).write_csv(str(csv_path))
+
+    with patch("goldenmatch.core.transform._goldenflow_available", return_value=False):
+        result = dispatch_skill("transform", {"file_path": str(csv_path)})
+    assert "error" in result
+    assert "goldenflow" in result["error"].lower()
+
+
+# ── MCP agent tools: quality & transforms ───────────────────────────────────
+
+
+def test_mcp_scan_quality_tool_registered():
+    """scan_quality tool is in the AGENT_TOOLS list."""
+    from goldenmatch.mcp.agent_tools import AGENT_TOOLS
+
+    names = {t.name for t in AGENT_TOOLS}
+    assert "scan_quality" in names
+    assert "fix_quality" in names
+    assert "run_transforms" in names
+
+
+def test_mcp_scan_quality_without_goldencheck(tmp_path):
+    """scan_quality returns error when goldencheck is not installed."""
+    import polars as pl
+    from unittest.mock import patch
+    from goldenmatch.mcp.agent_tools import handle_agent_tool
+
+    csv_path = tmp_path / "data.csv"
+    pl.DataFrame({"name": ["Alice"]}).write_csv(str(csv_path))
+
+    with patch("goldenmatch.core.quality._goldencheck_available", return_value=False):
+        result = handle_agent_tool("scan_quality", {"file_path": str(csv_path)})
+
+    text = result[0].text
+    parsed = json.loads(text)
+    assert "error" in parsed
+    assert "goldencheck" in parsed["error"].lower()
+
+
+def test_mcp_fix_quality_without_goldencheck(tmp_path):
+    """fix_quality returns error when goldencheck is not installed."""
+    import polars as pl
+    from unittest.mock import patch
+    from goldenmatch.mcp.agent_tools import handle_agent_tool
+
+    csv_path = tmp_path / "data.csv"
+    pl.DataFrame({"name": ["Alice"]}).write_csv(str(csv_path))
+
+    with patch("goldenmatch.core.quality._goldencheck_available", return_value=False):
+        result = handle_agent_tool("fix_quality", {"file_path": str(csv_path)})
+
+    text = result[0].text
+    parsed = json.loads(text)
+    assert "error" in parsed
+
+
+def test_mcp_run_transforms_without_goldenflow(tmp_path):
+    """run_transforms returns error when goldenflow is not installed."""
+    import polars as pl
+    from unittest.mock import patch
+    from goldenmatch.mcp.agent_tools import handle_agent_tool
+
+    csv_path = tmp_path / "data.csv"
+    pl.DataFrame({"name": ["Alice"]}).write_csv(str(csv_path))
+
+    with patch("goldenmatch.core.transform._goldenflow_available", return_value=False):
+        result = handle_agent_tool("run_transforms", {"file_path": str(csv_path)})
+
+    text = result[0].text
+    parsed = json.loads(text)
+    assert "error" in parsed
+    assert "goldenflow" in parsed["error"].lower()

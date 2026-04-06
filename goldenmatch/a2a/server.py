@@ -74,6 +74,20 @@ _SKILLS = [
         "inputModes": ["application/json"],
         "outputModes": ["application/json"],
     },
+    {
+        "id": "quality",
+        "name": "Quality",
+        "description": "Scan and fix data quality issues (encoding, Unicode, format violations) using GoldenCheck.",
+        "inputModes": ["application/json"],
+        "outputModes": ["application/json"],
+    },
+    {
+        "id": "transform",
+        "name": "Transform",
+        "description": "Normalize data formats (phone E.164, dates ISO, categorical spelling, Unicode) using GoldenFlow.",
+        "inputModes": ["application/json"],
+        "outputModes": ["application/json"],
+    },
 ]
 
 

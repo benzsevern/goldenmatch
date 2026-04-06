@@ -20,7 +20,7 @@ def dispatch_skill(skill_id: str, params: dict) -> dict:
     ----------
     skill_id : str
         One of: analyze_data, configure, deduplicate, match, explain,
-        review, compare_strategies, pprl.
+        review, compare_strategies, pprl, quality, transform.
     params : dict
         Skill-specific parameters.
 
@@ -98,6 +98,58 @@ def dispatch_skill(skill_id: str, params: dict) -> dict:
             fields=params.get("fields", []),
         )
         return _serialise_result({"result": result})
+
+    if skill_id == "quality":
+        import polars as pl
+        from goldenmatch.core.quality import _goldencheck_available, run_quality_check
+        from goldenmatch.config.schemas import QualityConfig
+
+        if not _goldencheck_available():
+            return {"error": "goldencheck not installed. pip install goldenmatch[quality]"}
+
+        df = pl.read_csv(
+            params["file_path"], encoding="utf8-lossy", ignore_errors=True,
+        )
+        fix_mode = params.get("fix_mode", "safe")
+        domain = params.get("domain")
+        qc = QualityConfig(mode="silent", fix_mode=fix_mode, domain=domain)
+        fixed_df, fixes = run_quality_check(df, qc)
+
+        output_path = params.get("output_path")
+        if output_path:
+            fixed_df.write_csv(output_path)
+
+        return {
+            "total_records": fixed_df.height,
+            "fixes_applied": len(fixes),
+            "fixes": fixes,
+            "output_path": output_path,
+        }
+
+    if skill_id == "transform":
+        import polars as pl
+        from goldenmatch.core.transform import _goldenflow_available, run_transform
+        from goldenmatch.config.schemas import TransformConfig
+
+        if not _goldenflow_available():
+            return {"error": "goldenflow not installed. pip install goldenmatch[transform]"}
+
+        df = pl.read_csv(
+            params["file_path"], encoding="utf8-lossy", ignore_errors=True,
+        )
+        tc = TransformConfig(mode="silent")
+        transformed_df, fixes = run_transform(df, tc)
+
+        output_path = params.get("output_path")
+        if output_path:
+            transformed_df.write_csv(output_path)
+
+        return {
+            "total_records": transformed_df.height,
+            "transforms_applied": len(fixes),
+            "transforms": fixes,
+            "output_path": output_path,
+        }
 
     raise ValueError(f"Unknown skill: {skill_id}")
 
