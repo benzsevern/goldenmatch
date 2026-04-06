@@ -348,6 +348,25 @@ _SCORER_MAP = {
     "string": ("token_sort", 0.5, ["lowercase", "strip"]),
 }
 
+# Domain-extracted column scorer mapping.
+# These columns are added by extract_features() and start with __.
+_DOMAIN_SCORER_MAP = {
+    # Electronics
+    "__brand__": ("exact", 0.8, ["lowercase", "strip"]),
+    "__model__": ("exact", 1.0, ["strip"]),
+    "__model_norm__": ("exact", 1.0, []),
+    "__color__": ("exact", 0.2, ["lowercase"]),
+    "__specs__": ("token_sort", 0.3, ["strip"]),
+    # Software
+    "__sw_name__": ("token_sort", 1.0, ["lowercase", "strip"]),
+    "__sw_version__": ("exact", 0.5, ["strip"]),
+    "__sw_edition__": ("exact", 0.3, ["lowercase"]),
+    "__sw_platform__": ("exact", 0.3, ["lowercase"]),
+    "__sw_part_num__": ("exact", 1.0, ["strip"]),
+    # Bibliographic
+    "__title_key__": ("exact", 0.8, ["lowercase"]),
+}
+
 
 def _adaptive_threshold(fields: list[MatchkeyField]) -> float:
     """Compute threshold based on field types in the matchkey."""
@@ -951,7 +970,7 @@ def select_model(row_count: int, has_embedding_columns: bool, threshold: int = 5
 
 # ── Main entry point ──────────────────────────────────────────────────────
 
-def auto_configure_df(df: pl.DataFrame, llm_provider: str | None = None) -> GoldenMatchConfig:
+def auto_configure_df(df: pl.DataFrame, llm_provider: str | None = None, domain_config=None) -> GoldenMatchConfig:
     """Auto-generate a GoldenMatchConfig from a DataFrame.
 
     Profiles columns by name heuristics and data sampling, then builds
@@ -975,8 +994,78 @@ def auto_configure_df(df: pl.DataFrame, llm_provider: str | None = None) -> Gold
         {p.name: p.col_type for p in profiles},
     )
 
+    # ── Domain detection + conditional extraction ──
+    extracted_columns = []
+
+    if domain_config is not None:
+        # Manual override: skip auto-detection
+        logger.info("Domain config provided manually, skipping auto-detection")
+    else:
+        from goldenmatch.core.domain import detect_domain, extract_features
+
+        user_cols = [c for c in df.columns if not c.startswith("__")]
+        domain_profile = detect_domain(user_cols)
+
+        if domain_profile.confidence > 0.7:
+            original_cols = set(df.columns)
+            # extract_features requires __row_id__ column
+            if "__row_id__" not in df.columns:
+                df = df.with_row_index("__row_id__")
+            df, _low_conf_ids = extract_features(df, domain_profile)
+            extracted_columns = [c for c in df.columns if c.startswith("__") and c not in original_cols]
+            logger.info(
+                "Domain '%s' detected (confidence=%.2f), extracted %d feature columns",
+                domain_profile.name, domain_profile.confidence, len(extracted_columns),
+            )
+        else:
+            logger.info(
+                "Domain '%s' (confidence=%.2f) below threshold, skipping extraction",
+                domain_profile.name, domain_profile.confidence,
+            )
+
     # Build matchkeys
     matchkeys = build_matchkeys(profiles, df=df)
+
+    # ── Add domain-extracted fields to matchkeys ──
+    if extracted_columns:
+        domain_exact = []
+        domain_fuzzy = []
+        for col in extracted_columns:
+            if col not in _DOMAIN_SCORER_MAP:
+                continue
+            scorer, weight, transforms = _DOMAIN_SCORER_MAP[col]
+            null_rate = df[col].null_count() / df.height if df.height > 0 else 0
+            cardinality_ratio = df[col].n_unique() / df.height if df.height > 0 else 0
+            if null_rate > 0.5:
+                continue
+            if scorer == "exact" and cardinality_ratio < 0.01:
+                continue
+            mf = MatchkeyField(field=col, scorer=scorer, weight=weight, transforms=transforms)
+            if scorer == "exact":
+                domain_exact.append(mf)
+            else:
+                domain_fuzzy.append(mf)
+
+        # Add domain exact matchkeys
+        for f in domain_exact:
+            matchkeys.append(MatchkeyConfig(
+                name=f"domain_exact_{f.field.strip('_')}",
+                type="exact",
+                fields=[MatchkeyField(field=f.field, transforms=f.transforms)],
+            ))
+
+        # Add domain fuzzy fields to existing weighted matchkey (or create one)
+        if domain_fuzzy:
+            weighted = [mk for mk in matchkeys if mk.type == "weighted"]
+            if weighted:
+                weighted[0].fields.extend(domain_fuzzy)
+            else:
+                matchkeys.append(MatchkeyConfig(
+                    name="domain_fuzzy",
+                    type="weighted",
+                    threshold=0.80,
+                    fields=domain_fuzzy,
+                ))
 
     # Check if embeddings are needed
     has_embeddings = any(
@@ -992,6 +1081,24 @@ def auto_configure_df(df: pl.DataFrame, llm_provider: str | None = None) -> Gold
             for f in mk.fields:
                 if f.scorer in ("embedding", "record_embedding") and not f.model:
                     f.model = model
+
+    # ── Add domain columns to blocking candidate profiles ──
+    if extracted_columns:
+        for col in extracted_columns:
+            if col not in _DOMAIN_SCORER_MAP:
+                continue
+            scorer, _weight, _transforms = _DOMAIN_SCORER_MAP[col]
+            if scorer != "exact":
+                continue
+            null_rate = df[col].null_count() / df.height if df.height > 0 else 0
+            cardinality_ratio = df[col].n_unique() / df.height if df.height > 0 else 0
+            if null_rate > 0.5:
+                continue
+            profiles.append(ColumnProfile(
+                name=col, dtype="Utf8", col_type="email",
+                confidence=0.9, null_rate=null_rate,
+                cardinality_ratio=cardinality_ratio, avg_len=0,
+            ))
 
     # Build blocking (required for weighted/probabilistic matchkeys)
     has_fuzzy = any(mk.type in ("weighted", "probabilistic") for mk in matchkeys)
