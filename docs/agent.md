@@ -52,7 +52,7 @@ Add to `claude_desktop_config.json`:
 
 ---
 
-## Agent Capabilities (8 Skills)
+## Agent Capabilities (10 Skills)
 
 | Skill | What It Does |
 |-------|-------------|
@@ -64,6 +64,8 @@ Add to `claude_desktop_config.json`:
 | `review` | Present borderline matches for approval |
 | `compare_strategies` | Run multiple approaches, report metrics |
 | `pprl` | Privacy-preserving mode for sensitive data |
+| `quality` | Scan and fix data quality issues (encoding, Unicode, format violations) using GoldenCheck |
+| `transform` | Normalize data formats (phone E.164, dates ISO, categorical spelling) using GoldenFlow |
 
 ---
 
@@ -185,7 +187,7 @@ matches = session.match_sources("new_customers.csv", "master.csv")
 
 ---
 
-## MCP Tools (10 Agent-Level)
+## MCP Tools (13 Agent-Level)
 
 | Tool | Description |
 |------|-------------|
@@ -199,6 +201,9 @@ matches = session.match_sources("new_customers.csv", "master.csv")
 | `agent_approve_reject` | Process review decisions |
 | `agent_compare_strategies` | Compare ER approaches |
 | `suggest_pprl` | Check if PPRL is needed |
+| `scan_quality` | Run GoldenCheck data quality scan, return issues without fixing |
+| `fix_quality` | Run GoldenCheck scan and apply fixes (safe or moderate mode) |
+| `run_transforms` | Run GoldenFlow transforms (phone E.164, dates ISO, Unicode) |
 
 These are additive -- existing MCP tools (`suggest_config`, `list_domains`, etc.) continue to work.
 
