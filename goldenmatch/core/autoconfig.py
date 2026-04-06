@@ -938,7 +938,8 @@ def build_blocking(
             for g in geo_cols:
                 try:
                     max_block = df.group_by([g.name, best_name]).len().get_column("len").max()
-                    geo_results.append((g, max_block))
+                    if max_block is not None:
+                        geo_results.append((g, max_block))
                 except Exception:
                     continue
             if geo_results:
