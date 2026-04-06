@@ -410,33 +410,7 @@ def _dispatch(name: str, args: dict, session_cls: type) -> dict:
 
         df = pl.read_csv(args["file_path"], encoding="utf8-lossy", ignore_errors=True)
         qc = QualityConfig(mode="silent", fix_mode="none", domain=args.get("domain"))
-        _, _ = run_quality_check(df, qc)
-
-        # Re-run scan to capture findings for the response
-        from goldencheck.engine.scanner import scan_file
-        from goldencheck.engine.confidence import apply_confidence_downgrade
-        import tempfile
-        from pathlib import Path as _Path
-
-        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
-            df.write_csv(tmp.name)
-            tmp_path = _Path(tmp.name)
-        try:
-            findings, _ = scan_file(tmp_path, domain=args.get("domain"))
-            findings = apply_confidence_downgrade(findings, llm_boost=False)
-        finally:
-            tmp_path.unlink(missing_ok=True)
-
-        issues = []
-        for f in findings:
-            issues.append({
-                "rule": f.rule_id,
-                "severity": f.severity.value if hasattr(f.severity, "value") else str(f.severity),
-                "column": f.column,
-                "message": f.message,
-                "rows_affected": f.rows_affected,
-                "confidence": round(f.confidence, 2) if hasattr(f, "confidence") else None,
-            })
+        _, issues = run_quality_check(df, qc)
 
         return {
             "file": args["file_path"],
