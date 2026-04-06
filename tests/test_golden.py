@@ -185,3 +185,43 @@ def test_provenance_df_matches_golden_record():
     old = build_golden_record(df, rules)
     result = build_golden_record_with_provenance(df, rules, clusters)
     assert result.df["name"][0] == old["name"]["value"]
+
+
+# --- Quality-weighted strategy tests ---
+
+
+def test_most_complete_quality_tiebreak():
+    """Quality breaks ties in most_complete strategy."""
+    df = pl.DataFrame({"__row_id__": [1, 2], "name": ["Alice", "Bobby"]})  # Same length
+    rules = GoldenRulesConfig(default_strategy="most_complete")
+    quality = {(1, "name"): 0.5, (2, "name"): 0.9}
+    result = build_golden_record(df, rules, quality_scores=quality)
+    assert result["name"]["value"] == "Bobby"
+
+
+def test_majority_vote_quality_weighted():
+    """Quality weights affect majority vote outcome."""
+    df = pl.DataFrame({"__row_id__": [1, 2, 3], "status": ["active", "active", "inactive"]})
+    rules = GoldenRulesConfig(default_strategy="majority_vote")
+    quality = {(1, "status"): 0.1, (2, "status"): 0.1, (3, "status"): 0.9}
+    result = build_golden_record(df, rules, quality_scores=quality)
+    assert result["status"]["value"] == "inactive"
+
+
+def test_first_non_null_quality_ordering():
+    """first_non_null picks highest quality source first."""
+    df = pl.DataFrame({"__row_id__": [1, 2, 3], "phone": [None, "+15551234567", "+15559876543"]})
+    rules = GoldenRulesConfig(default_strategy="first_non_null")
+    quality = {(2, "phone"): 0.3, (3, "phone"): 0.9}
+    result = build_golden_record(df, rules, quality_scores=quality)
+    assert result["phone"]["value"] == "+15559876543"
+
+
+def test_backward_compat_no_quality_scores():
+    """quality_scores=None produces identical output to omitting it."""
+    df = pl.DataFrame({"__row_id__": [1, 2], "name": ["Alice", "Bob"]})
+    rules = GoldenRulesConfig(default_strategy="most_complete")
+    result_default = build_golden_record(df, rules)
+    result_none = build_golden_record(df, rules, quality_scores=None)
+    assert result_default["name"]["value"] == result_none["name"]["value"]
+    assert abs(result_default["name"]["confidence"] - result_none["name"]["confidence"]) < 0.0001

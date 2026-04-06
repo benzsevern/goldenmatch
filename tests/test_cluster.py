@@ -1,7 +1,7 @@
 """Tests for goldenmatch clustering."""
 
 
-from goldenmatch.core.cluster import UnionFind, build_clusters
+from goldenmatch.core.cluster import UnionFind, build_clusters, split_oversized_cluster
 
 
 class TestUnionFind:
@@ -152,3 +152,46 @@ def test_cluster_quality_split_precedence():
     for cinfo in clusters.values():
         if cinfo["size"] > 1:
             assert cinfo["cluster_quality"] in ("strong", "split")
+
+
+# --- split_oversized_cluster unit tests ---
+
+
+def test_split_single_member():
+    """Single member cluster returns unchanged."""
+    result = split_oversized_cluster([5], {})
+    assert len(result) == 1
+    assert result[0]["members"] == [5]
+
+
+def test_split_no_pairs():
+    """No pairs returns original members as one cluster."""
+    result = split_oversized_cluster([1, 2], {})
+    assert len(result) == 1
+
+
+def test_split_two_nodes():
+    """Two nodes with one edge splits into two singletons."""
+    result = split_oversized_cluster([0, 1], {(0, 1): 0.8})
+    assert len(result) == 2
+    member_sets = [set(c["members"]) for c in result]
+    assert {0} in member_sets
+    assert {1} in member_sets
+
+
+def test_split_chain():
+    """Chain splits at weakest MST edge."""
+    pair_scores = {(0, 1): 0.9, (1, 2): 0.5, (2, 3): 0.8}
+    result = split_oversized_cluster([0, 1, 2, 3], pair_scores)
+    assert len(result) == 2
+    member_sets = [set(c["members"]) for c in result]
+    assert {0, 1} in member_sets
+    assert {2, 3} in member_sets
+
+
+def test_was_split_not_in_output():
+    """_was_split sentinel must not leak into final cluster dicts."""
+    pairs = [(0, 1, 0.9), (1, 2, 0.5), (2, 3, 0.8)]
+    clusters = build_clusters(pairs, [0, 1, 2, 3], max_cluster_size=2)
+    for cinfo in clusters.values():
+        assert "_was_split" not in cinfo

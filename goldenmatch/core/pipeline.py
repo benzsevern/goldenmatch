@@ -415,10 +415,18 @@ def _run_dedupe_pipeline(
     # ── Step 4: CLUSTER ──
     all_ids = collected_df["__row_id__"].to_list()
     max_cluster_size = 100
-    if config.golden_rules and hasattr(config.golden_rules, "max_cluster_size"):
-        max_cluster_size = config.golden_rules.max_cluster_size
+    weak_threshold = 0.3
+    if config.golden_rules:
+        if hasattr(config.golden_rules, "max_cluster_size"):
+            max_cluster_size = config.golden_rules.max_cluster_size
+        if hasattr(config.golden_rules, "weak_cluster_threshold"):
+            weak_threshold = config.golden_rules.weak_cluster_threshold
 
-    clusters = build_clusters(all_pairs, all_ids, max_cluster_size=max_cluster_size)
+    clusters = build_clusters(
+        all_pairs, all_ids,
+        max_cluster_size=max_cluster_size,
+        weak_cluster_threshold=weak_threshold,
+    )
 
     # ── Step 5: GOLDEN ──
     golden_records = []

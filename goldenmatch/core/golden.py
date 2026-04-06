@@ -47,7 +47,7 @@ def merge_field(
     sources: list[str] | None = None,
     dates: list | None = None,
     quality_weights: list[float] | None = None,
-) -> tuple:
+) -> tuple[object, float, int | None]:
     """Merge a list of values using the given rule's strategy.
 
     Returns (value, confidence, source_index) where source_index is the
@@ -88,7 +88,7 @@ def _most_complete(non_null: list[tuple[int, object]], quality_weights: list[flo
     # Tie-break by quality weight if available
     if quality_weights is not None:
         best = max(longest, key=lambda x: quality_weights[x[0]] if x[0] < len(quality_weights) else 1.0)
-        conf = 0.7 * quality_weights[best[0]] if best[0] < len(quality_weights) else 0.7
+        conf = min(1.0, 0.7 * quality_weights[best[0]]) if best[0] < len(quality_weights) else 0.7
         return (best[2], conf, best[0])
     return (longest[0][2], 0.7, longest[0][0])
 
@@ -234,11 +234,11 @@ def build_golden_record_with_provenance(
         cinfo = clusters.get(cid, {})
         row_ids = cluster_df["__row_id__"].to_list() if "__row_id__" in cluster_df.columns else list(range(len(cluster_df)))
 
-        # Build golden record (reuse existing function)
-        golden = build_golden_record(cluster_df, rules, quality_scores=quality_scores)
-
-        # Build provenance by re-running merge_field to get source_index
+        # Build golden record + provenance in a single pass (no double merge_field call)
         field_provenance = {}
+        golden_row = {"__cluster_id__": cid}
+        confidences = []
+
         for col in cluster_df.columns:
             if _is_internal(col):
                 continue
@@ -260,6 +260,7 @@ def build_golden_record_with_provenance(
                 weights = [quality_scores.get((rid, col), 1.0) for rid in row_ids]
 
             val, conf, src_idx = merge_field(values, field_rule, sources=sources, dates=dates, quality_weights=weights)
+            confidences.append(conf)
 
             source_row_id = row_ids[src_idx] if src_idx is not None and src_idx < len(row_ids) else row_ids[0]
 
@@ -275,14 +276,9 @@ def build_golden_record_with_provenance(
                 confidence=conf,
                 candidates=candidates,
             )
+            golden_row[col] = val
 
-        # Build golden row dict for DataFrame
-        golden_row = {"__cluster_id__": cid}
-        for col, info in golden.items():
-            if col == "__golden_confidence__":
-                golden_row[col] = info
-            else:
-                golden_row[col] = info["value"]
+        golden_row["__golden_confidence__"] = sum(confidences) / len(confidences) if confidences else 0.0
         golden_rows.append(golden_row)
 
         provenance_list.append(ClusterProvenance(

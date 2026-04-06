@@ -117,10 +117,11 @@ def build_clusters(
     all_ids: list[int],
     max_cluster_size: int = 100,
     weak_cluster_threshold: float = 0.3,
+    auto_split: bool = True,
 ) -> dict[int, dict]:
     """Build clusters from scored pairs using Union-Find.
 
-    Auto-splits oversized clusters via MST. Assigns cluster_quality
+    Auto-splits oversized clusters via MST (when auto_split=True). Assigns cluster_quality
     ("strong", "weak", "split") and downgrades confidence for weak clusters.
     """
     uf = UnionFind()
@@ -155,8 +156,8 @@ def build_clusters(
         cinfo["confidence"] = conf["confidence"]
         cinfo["bottleneck_pair"] = conf["bottleneck_pair"]
 
-    # Auto-split oversized clusters
-    to_split = [cid for cid, c in result.items() if c["oversized"]]
+    # Auto-split oversized clusters (when enabled)
+    to_split = [cid for cid, c in result.items() if c["oversized"]] if auto_split else []
     while to_split:
         cid = to_split.pop()
         cinfo = result.pop(cid)
@@ -185,6 +186,7 @@ def build_clusters(
                 cinfo["cluster_quality"] = "strong"
         else:
             cinfo["cluster_quality"] = "strong"
+        cinfo.pop("_was_split", None)
 
     return result
 
@@ -407,6 +409,9 @@ def unmerge_record(
         "size": 1,
         "oversized": False,
         "pair_scores": {},
+        "confidence": 1.0,
+        "bottleneck_pair": None,
+        "cluster_quality": "strong",
     }
     next_cid += 1
 
@@ -447,6 +452,9 @@ def unmerge_cluster(
             "size": 1,
             "oversized": False,
             "pair_scores": {},
+            "confidence": 1.0,
+            "bottleneck_pair": None,
+            "cluster_quality": "strong",
         }
         next_cid += 1
 
