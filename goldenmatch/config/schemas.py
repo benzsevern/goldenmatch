@@ -429,6 +429,7 @@ class GoldenMatchConfig(BaseModel):
     transform: TransformConfig | None = None
     llm_boost: bool = False
     llm_scorer: LLMScorerConfig | None = None
+    llm_auto: bool = False
     domain: DomainConfig | None = None
     backend: str | None = None  # None (default Polars), "ray", "duckdb"
     memory: MemoryConfig | None = None
