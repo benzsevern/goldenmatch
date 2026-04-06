@@ -256,6 +256,11 @@ def add_to_cluster(
 
     Returns:
         Updated clusters dict.
+
+    Note:
+        This function flags oversized clusters but does NOT auto-split them.
+        Callers (e.g., StreamProcessor) should call split_oversized_cluster()
+        after add_to_cluster() if auto-splitting is desired.
     """
     if not matches:
         next_cid = max(clusters.keys(), default=0) + 1

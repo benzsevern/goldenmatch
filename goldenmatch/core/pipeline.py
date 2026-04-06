@@ -416,16 +416,20 @@ def _run_dedupe_pipeline(
     all_ids = collected_df["__row_id__"].to_list()
     max_cluster_size = 100
     weak_threshold = 0.3
+    auto_split = True
     if config.golden_rules:
         if hasattr(config.golden_rules, "max_cluster_size"):
             max_cluster_size = config.golden_rules.max_cluster_size
         if hasattr(config.golden_rules, "weak_cluster_threshold"):
             weak_threshold = config.golden_rules.weak_cluster_threshold
+        if hasattr(config.golden_rules, "auto_split"):
+            auto_split = config.golden_rules.auto_split
 
     clusters = build_clusters(
         all_pairs, all_ids,
         max_cluster_size=max_cluster_size,
         weak_cluster_threshold=weak_threshold,
+        auto_split=auto_split,
     )
 
     # ── Step 5: GOLDEN ──
