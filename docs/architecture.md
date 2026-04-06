@@ -70,6 +70,8 @@ goldenmatch/
     graph_er.py        # Multi-table entity resolution
     compare_clusters.py  # CCMS cluster comparison (unchanged/merged/partitioned/overlapping)
     sensitivity.py     # Parameter sweep analysis using CCMS
+    transform.py       # GoldenFlow integration (optional data transformation)
+    quality.py         # GoldenCheck integration (optional data validation)
     diff.py            # generate_diff
     rollback.py        # rollback_run
     block_analyzer.py  # analyze_blocking (blocking strategy suggestions)

@@ -3,7 +3,7 @@
 
 **Entity resolution toolkit — deduplicate records, match across sources, and maintain golden records. Works on files or live databases.**
 
-**v1.3.0** — CCMS cluster comparison, parameter sensitivity analysis. ([Changelog](#whats-new-in-v130))
+**v1.4.0** — Scoring quality, smart auto-config, LLM auto-enablement. ([Changelog](#whats-new-in-v140))
 
 Built with Polars, RapidFuzz, sentence-transformers, and FAISS. Zero-config mode auto-detects your data; optional LLM boost for harder datasets.
 
@@ -734,6 +734,13 @@ goldenmatch/
 | [GoldenFlow](https://github.com/benzsevern/goldenflow) | Transform & standardize data | `pip install goldenflow` |
 | [GoldenMatch](https://github.com/benzsevern/goldenmatch) | Deduplicate & match records | `pip install goldenmatch` |
 | [GoldenPipe](https://github.com/benzsevern/goldenpipe) | Orchestrate the full pipeline | `pip install goldenpipe` |
+
+## What's New in v1.4.0
+
+- **Scoring & survivorship quality** -- MST-based cluster auto-splitting at weakest edges, cluster quality labels (strong/weak/split), quality-weighted survivorship strategies using GoldenCheck scores, field-level provenance tracking.
+- **Smart auto-config** -- auto-config now profiles cleaned data (after GoldenCheck/GoldenFlow), detects data domains and extracts identifiers, selects learned blocking for large datasets, enables reranking for multi-field matchkeys, adjusts thresholds from data quality.
+- **GoldenFlow integration** -- optional data transformation step in the pipeline. Phone normalization, date standardization, categorical correction. `pip install goldenmatch[transform]`.
+- **`llm_auto` flag** -- `dedupe_df(df, llm_auto=True)` auto-enables LLM scorer ($0.05 budget cap) and memory store when API key detected.
 
 ## What's New in v1.3.0
 

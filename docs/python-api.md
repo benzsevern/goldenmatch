@@ -54,6 +54,7 @@ gm.dedupe_df(
     blocking: list[str] | None = None,
     threshold: float | None = None,
     llm_scorer: bool = False,
+    llm_auto: bool = False,
     backend: str | None = None,
     source_name: str = "dataframe",
 ) -> DedupeResult

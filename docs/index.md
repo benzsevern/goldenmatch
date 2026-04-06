@@ -13,7 +13,7 @@ nav_order: 1
 [![Tests](https://github.com/benzsevern/goldenmatch/actions/workflows/ci.yml/badge.svg)](https://github.com/benzsevern/goldenmatch/actions)
 [![Python](https://img.shields.io/pypi/pyversions/goldenmatch)](https://pypi.org/project/goldenmatch/)
 [![Coverage](https://img.shields.io/badge/coverage-72%25-yellow)](https://github.com/benzsevern/goldenmatch)
-[![Tests](https://img.shields.io/badge/tests-1070%20passing-brightgreen)](https://github.com/benzsevern/goldenmatch)
+[![Tests](https://img.shields.io/badge/tests-1300%2B%20passing-brightgreen)](https://github.com/benzsevern/goldenmatch)
 
 ---
 

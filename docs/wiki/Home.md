@@ -72,6 +72,7 @@ goldenmatch setup
 
 | Flag | Description |
 |------|-------------|
+| `--llm-auto` | Auto-enable LLM scorer + memory when API key available |
 | `--anomalies` | Detect fake/suspicious records |
 | `--preview` | Show what will change before writing |
 | `--diff` / `--diff-html` | Before/after change report |

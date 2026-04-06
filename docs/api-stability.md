@@ -73,6 +73,9 @@ Public functions (not prefixed with `_`) in these modules:
 | `core/domain_registry.py` | `discover_rulebooks()`, `load_rulebook()`, `save_rulebook()`, `match_domain()`, `extract_with_rulebook()` |
 | `core/compare_clusters.py` | `compare_clusters()`, `CompareResult`, `ClusterCase` |
 | `core/sensitivity.py` | `run_sensitivity()`, `SensitivityResult`, `SweepParam`, `SweepPoint` |
+| `core/transform.py` | `run_transform()` |
+| `core/quality.py` | `run_quality_check()` |
+| `core/golden.py` | `build_golden_record()`, `build_golden_record_with_provenance()` |
 
 ### REST API Endpoints
 
