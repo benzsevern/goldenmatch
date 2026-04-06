@@ -12,10 +12,13 @@ import polars as pl
 from goldenmatch.config.schemas import (
     BlockingConfig,
     BlockingKeyConfig,
+    BudgetConfig,
     GoldenMatchConfig,
     GoldenRulesConfig,
+    LLMScorerConfig,
     MatchkeyConfig,
     MatchkeyField,
+    MemoryConfig,
     OutputConfig,
 )
 from goldenmatch.core.profiler import _guess_type
@@ -970,7 +973,7 @@ def select_model(row_count: int, has_embedding_columns: bool, threshold: int = 5
 
 # ── Main entry point ──────────────────────────────────────────────────────
 
-def auto_configure_df(df: pl.DataFrame, llm_provider: str | None = None, domain_config=None) -> GoldenMatchConfig:
+def auto_configure_df(df: pl.DataFrame, llm_provider: str | None = None, domain_config=None, llm_auto: bool = False) -> GoldenMatchConfig:
     """Auto-generate a GoldenMatchConfig from a DataFrame.
 
     Profiles columns by name heuristics and data sampling, then builds
@@ -1104,12 +1107,36 @@ def auto_configure_df(df: pl.DataFrame, llm_provider: str | None = None, domain_
     has_fuzzy = any(mk.type in ("weighted", "probabilistic") for mk in matchkeys)
     blocking = build_blocking(profiles, df, llm_provider=llm_provider) if has_fuzzy else None
 
+    # ── LLM auto-config ──
+    llm_scorer_config = None
+    if llm_auto:
+        import os
+        provider = None
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            provider = "anthropic"
+        elif os.environ.get("OPENAI_API_KEY"):
+            provider = "openai"
+
+        if provider:
+            llm_scorer_config = LLMScorerConfig(
+                enabled=True,
+                candidate_lo=0.60,
+                candidate_hi=0.90,
+                auto_threshold=0.90,
+                budget=BudgetConfig(max_cost_usd=0.05),
+            )
+            logger.info("LLM scorer auto-enabled (provider=%s, budget=$0.05)", provider)
+        else:
+            logger.info("llm_auto=True but no API key found (OPENAI_API_KEY or ANTHROPIC_API_KEY)")
+
     # Build config
     config = GoldenMatchConfig(
         matchkeys=matchkeys,
         blocking=blocking,
         golden_rules=GoldenRulesConfig(default_strategy="most_complete"),
         output=OutputConfig(),
+        llm_scorer=llm_scorer_config,
+        memory=MemoryConfig(enabled=True),
     )
 
     return config

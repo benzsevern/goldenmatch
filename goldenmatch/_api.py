@@ -269,6 +269,7 @@ def dedupe_df(
     blocking: list[str] | None = None,
     threshold: float | None = None,
     llm_scorer: bool = False,
+    llm_auto: bool = False,
     backend: str | None = None,
     source_name: str = "dataframe",
 ) -> DedupeResult:
@@ -304,7 +305,7 @@ def dedupe_df(
         else:
             # Zero-config: defer auto-config to inside pipeline (after GoldenCheck/GoldenFlow)
             from goldenmatch.config.schemas import GoldenMatchConfig
-            config = GoldenMatchConfig()
+            config = GoldenMatchConfig(llm_auto=llm_auto)
             _auto_config = True
             _auto_config_provider = _detect_llm_provider() if llm_scorer else None
 
