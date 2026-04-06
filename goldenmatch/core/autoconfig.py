@@ -1104,6 +1104,41 @@ def auto_configure_df(df: pl.DataFrame, llm_provider: str | None = None, domain_
     has_fuzzy = any(mk.type in ("weighted", "probabilistic") for mk in matchkeys)
     blocking = build_blocking(profiles, df, llm_provider=llm_provider) if has_fuzzy else None
 
+    # ── Data-driven strategy selection ──
+
+    # 1. Learned blocking for large datasets
+    if blocking is not None and total_rows >= 5000:
+        blocking.strategy = "learned"
+        blocking.learned_sample_size = 5000
+        blocking.learned_min_recall = 0.95
+        blocking.skip_oversized = True
+        logger.info("Upgraded to learned blocking (dataset has %d rows)", total_rows)
+
+    # 2. Reranking for multi-field matchkeys
+    for mk in matchkeys:
+        if mk.type == "weighted" and len(mk.fields) >= 3:
+            mk.rerank = True
+            logger.info("Enabled reranking for matchkey '%s' (%d fields)", mk.name, len(mk.fields))
+
+    # 3. Adaptive threshold from data quality
+    for mk in matchkeys:
+        if mk.type == "weighted" and mk.threshold is not None:
+            fuzzy_field_names = {f.field for f in mk.fields if f.field}
+            fuzzy_profiles = [p for p in profiles if p.name in fuzzy_field_names]
+            if fuzzy_profiles:
+                avg_null = sum(p.null_rate for p in fuzzy_profiles) / len(fuzzy_profiles)
+                avg_len = sum(p.avg_len for p in fuzzy_profiles) / len(fuzzy_profiles)
+                original = mk.threshold
+                if avg_null > 0.15:
+                    mk.threshold = max(mk.threshold - 0.05, 0.50)
+                elif avg_len < 5:
+                    mk.threshold = min(mk.threshold + 0.05, 0.95)
+                if mk.threshold != original:
+                    logger.info(
+                        "Adjusted threshold for '%s': %.2f -> %.2f (avg_null=%.2f, avg_len=%.1f)",
+                        mk.name, original, mk.threshold, avg_null, avg_len,
+                    )
+
     # Build config
     config = GoldenMatchConfig(
         matchkeys=matchkeys,

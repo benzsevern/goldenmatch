@@ -972,3 +972,81 @@ class TestDomainAwareAutoConfig:
         domain_fields = [f for f in all_fields if f and f.startswith("__")]
         assert len(domain_fields) == 0
         assert len(config.get_matchkeys()) > 0
+
+
+class TestDataDrivenStrategy:
+    """Tests for data-driven strategy selection in auto-config."""
+
+    def test_learned_blocking_large_dataset(self):
+        """Datasets >= 5000 rows should get learned blocking."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+
+        df = pl.DataFrame({
+            "name": [f"Person {i}" for i in range(5000)],
+            "city": [f"City {i % 100}" for i in range(5000)],
+        })
+
+        config = auto_configure_df(df)
+        assert config.blocking is not None
+        assert config.blocking.strategy == "learned"
+        assert config.blocking.learned_min_recall == 0.95
+
+    def test_static_blocking_small_dataset(self):
+        """Datasets < 5000 rows should keep static blocking."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+
+        df = pl.DataFrame({
+            "name": ["John Smith", "Jane Doe", "Bob Wilson"],
+            "city": ["NYC", "LA", "Chicago"],
+        })
+
+        config = auto_configure_df(df)
+        assert config.blocking is not None
+        assert config.blocking.strategy != "learned"
+
+    def test_reranking_enabled_three_plus_fields(self):
+        """Weighted matchkey with 3+ fields should enable reranking."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+
+        df = pl.DataFrame({
+            "first_name": ["John", "Jane", "Bob", "Alice"],
+            "last_name": ["Smith", "Doe", "Wilson", "Brown"],
+            "address": ["123 Main St", "456 Oak Ave", "789 Pine Rd", "321 Elm Blvd"],
+            "city": ["NYC", "LA", "Chicago", "Houston"],
+        })
+
+        config = auto_configure_df(df)
+        weighted_mks = [mk for mk in config.get_matchkeys() if mk.type == "weighted"]
+        assert len(weighted_mks) > 0, "Expected at least one weighted matchkey"
+        multi_field = [mk for mk in weighted_mks if len(mk.fields) >= 3]
+        if multi_field:
+            assert multi_field[0].rerank is True
+
+    def test_threshold_lowered_high_null_rate(self):
+        """High null rate across fuzzy fields should lower threshold."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+
+        names = ["John Smith", "Jane Doe", None, "Bob Wilson", None,
+                 "Alice Brown", None, "Eve Davis"]
+        cities = ["New York City", "Los Angeles", "Chicago Metro", "Houston Area",
+                  "Phoenix Valley", "Philadelphia", "Dallas Fort Worth", "Denver Metro"]
+        df = pl.DataFrame({"name": names, "city": cities})
+
+        config = auto_configure_df(df)
+        weighted_mks = [mk for mk in config.get_matchkeys() if mk.type == "weighted"]
+        assert len(weighted_mks) > 0, "Expected at least one weighted matchkey"
+        assert weighted_mks[0].threshold <= 0.80
+
+    def test_threshold_raised_short_strings(self):
+        """Short string fields should raise threshold."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+
+        df = pl.DataFrame({
+            "first_name": ["Al", "Bo", "Ed", "Jo", "Mo"],
+            "last_name": ["Li", "Wu", "Xu", "Ye", "Hu"],
+        })
+
+        config = auto_configure_df(df)
+        weighted_mks = [mk for mk in config.get_matchkeys() if mk.type == "weighted"]
+        assert len(weighted_mks) > 0, "Expected at least one weighted matchkey"
+        assert weighted_mks[0].threshold >= 0.80
