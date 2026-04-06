@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 
 ## [Unreleased]
 
+### Added
+- **MST-based cluster auto-splitting** — oversized clusters automatically split at weakest MST edge; recursive until all sub-clusters fit
+- **Cluster quality labels** — `cluster_quality` field: `"strong"`, `"weak"` (confidence 0.7x), `"split"` (auto-split)
+- **Quality-weighted survivorship** — all 5 merge strategies accept optional quality weights from GoldenCheck
+- **Field-level provenance** — `build_golden_record_with_provenance()` tracks source row, strategy, confidence, and candidates per field
+- **Lineage golden_records** — provenance serialized in lineage JSON sidecar
+- New config: `auto_split`, `quality_weighting`, `weak_cluster_threshold` in `GoldenRulesConfig`
+
+### Fixed
+- `unmerge_record`/`unmerge_cluster` singletons now include `cluster_quality`, `confidence`, `bottleneck_pair`
+- `_most_complete` confidence clamped to max 1.0 when quality weights present
+- Pipeline wires `weak_cluster_threshold` from config
+
 ## [1.3.2] - 2026-04-03
 
 ### Fixed

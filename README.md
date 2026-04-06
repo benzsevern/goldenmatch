@@ -39,13 +39,13 @@ goldenmatch demo
 - **Database sync** — incremental Postgres matching with persistent ANN index and golden record versioning
 - **REST API + MCP Server** — real-time matching via HTTP or Claude Desktop (27 tools: match, unmerge, explain, config advisor, etc.)
 - **Review queue** — REST endpoint surfaces borderline pairs for data steward approval/rejection
-- **Lineage tracking** — every merge decision saved to a JSON sidecar with per-field score breakdown
+- **Lineage tracking** — every merge decision saved to a JSON sidecar with per-field score breakdown and golden record provenance
 - **Daemon mode** — `goldenmatch watch --daemon` runs as a service with health endpoint and PID file
 - **Anomaly detection** — flag fake emails, placeholder data, suspicious records
 - **GoldenCheck integration** — `pip install goldenmatch[quality]` adds enhanced data quality scanning before matching (encoding, Unicode, format validation, domain-aware types)
 - **Merge preview + undo** — see what will change before writing, rollback any run or unmerge individual records
 - **Active learning boost** — label 10 borderline pairs in the TUI, instantly retrain a classifier for 99% accuracy
-- **Cluster confidence scoring** — weakly-connected clusters flagged with bottleneck pair identification
+- **Cluster quality scoring** — clusters labeled `strong`/`weak`/`split` with confidence downgrade for weak clusters; oversized clusters auto-split via MST (minimum spanning tree)
 - **Single-record matching** — `match_one` primitive for streaming: embed, query ANN, score, return matches
 - **Privacy-preserving matching** — bloom filter transforms + Dice/Jaccard scoring for fuzzy matching on encrypted PII
 - **PPRL multi-party linkage** -- match records across organizations without sharing raw data. Auto-configured bloom filters achieve 92.4% F1 on FEBRL4. Trusted third party and SMC modes.
@@ -57,7 +57,8 @@ goldenmatch demo
 - **Scheduled runs** — cron-like scheduling with run history
 - **LLM scorer with budget controls** — GPT-4o-mini scores borderline pairs, boosting product matching from 44.5% to **66.3% F1** (precision 35%→95%) for just $0.04. Budget caps, model tiering, graceful degradation
 - **LLM boost** — optional Claude/GPT-4 labeling + fine-tuning for harder datasets
-- **Golden records** — 5 merge strategies (most_complete, majority_vote, source_priority, most_recent, first_non_null)
+- **Golden records** — 5 merge strategies (most_complete, majority_vote, source_priority, most_recent, first_non_null) with optional quality-weighted survivorship from GoldenCheck
+- **Field-level provenance** — `build_golden_record_with_provenance()` tracks which source row contributed each field, what strategy was used, and what candidates existed
 - **Parallel fuzzy scoring** — blocks scored concurrently via thread pool with intra-field early termination
 - **Cross-encoder reranking** — re-score borderline pairs with a pre-trained cross-encoder for higher precision
 - **Auto-select blocking** — histogram analysis picks the best blocking key automatically
@@ -308,9 +309,9 @@ Files/DB → Ingest → Standardize → Block → Score → Cluster → Golden R
 2. **Standardize** — configurable per-column transforms
 3. **Block** — reduce comparison space (multi-pass, ANN, canopy, etc.)
 4. **Score** — compare record pairs with appropriate scorer
-5. **Cluster** — group matches via Union-Find
-6. **Golden** — merge each cluster into one canonical record
-7. **Output** — files (CSV/Parquet) or database tables
+5. **Cluster** — group matches via Union-Find; auto-split oversized clusters via MST; assign quality labels (`strong`/`weak`/`split`)
+6. **Golden** — merge each cluster into one canonical record using quality-weighted survivorship (5 strategies); track field-level provenance
+7. **Output** — files (CSV/Parquet) or database tables + lineage JSON sidecar with provenance
 
 ## Config Reference
 
@@ -366,6 +367,9 @@ blocking:
 
 golden_rules:
   default_strategy: most_complete
+  auto_split: true                  # Auto-split oversized clusters via MST
+  quality_weighting: true           # Use GoldenCheck quality scores in survivorship
+  weak_cluster_threshold: 0.3       # Edge gap threshold for confidence downgrade
   field_rules:
     email: { strategy: majority_vote }
     first_name: { strategy: source_priority, source_priority: [crm, marketing] }

@@ -1,6 +1,6 @@
 # GoldenMatch
 
-> Entity resolution toolkit — deduplicate records and match across datasets using fuzzy, probabilistic, and LLM-powered scoring.
+> Entity resolution toolkit — deduplicate records and match across datasets using fuzzy, probabilistic, and LLM-powered scoring. MST cluster auto-splitting, quality-weighted survivorship, field-level provenance.
 
 ## Interfaces
 - MCP Server: `goldenmatch mcp-serve` (10 tools: analyze, configure, deduplicate, match, explain, review, compare strategies, PPRL)
