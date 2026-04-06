@@ -245,6 +245,9 @@ class GoldenRulesConfig(BaseModel):
     default: GoldenFieldRule | None = None
     field_rules: dict[str, GoldenFieldRule] = Field(default_factory=dict)
     max_cluster_size: int = 100
+    auto_split: bool = True
+    quality_weighting: bool = True
+    weak_cluster_threshold: float = 0.3
 
     @model_validator(mode="after")
     def _validate_default(self) -> "GoldenRulesConfig":

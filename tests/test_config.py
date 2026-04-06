@@ -386,3 +386,12 @@ class TestLoadConfig:
         path.write_text(": : : not valid yaml [[[")
         with pytest.raises(ValueError):
             load_config(path)
+
+
+def test_golden_rules_cluster_quality_defaults():
+    """New cluster quality config fields have correct defaults."""
+    from goldenmatch.config.schemas import GoldenRulesConfig
+    config = GoldenRulesConfig(default_strategy="most_complete")
+    assert config.auto_split is True
+    assert config.quality_weighting is True
+    assert config.weak_cluster_threshold == 0.3
