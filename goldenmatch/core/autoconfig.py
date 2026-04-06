@@ -1131,7 +1131,7 @@ def auto_configure_df(df: pl.DataFrame, llm_provider: str | None = None, domain_
                 original = mk.threshold
                 if avg_null > 0.15:
                     mk.threshold = max(mk.threshold - 0.05, 0.50)
-                if avg_len < 5:
+                elif avg_len < 5:
                     mk.threshold = min(mk.threshold + 0.05, 0.95)
                 if mk.threshold != original:
                     logger.info(

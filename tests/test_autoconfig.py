@@ -1017,10 +1017,10 @@ class TestDataDrivenStrategy:
 
         config = auto_configure_df(df)
         weighted_mks = [mk for mk in config.get_matchkeys() if mk.type == "weighted"]
-        if weighted_mks:
-            for mk in weighted_mks:
-                if len(mk.fields) >= 3:
-                    assert mk.rerank is True
+        assert len(weighted_mks) > 0, "Expected at least one weighted matchkey"
+        multi_field = [mk for mk in weighted_mks if len(mk.fields) >= 3]
+        if multi_field:
+            assert multi_field[0].rerank is True
 
     def test_threshold_lowered_high_null_rate(self):
         """High null rate across fuzzy fields should lower threshold."""
@@ -1034,8 +1034,8 @@ class TestDataDrivenStrategy:
 
         config = auto_configure_df(df)
         weighted_mks = [mk for mk in config.get_matchkeys() if mk.type == "weighted"]
-        if weighted_mks:
-            assert weighted_mks[0].threshold <= 0.80
+        assert len(weighted_mks) > 0, "Expected at least one weighted matchkey"
+        assert weighted_mks[0].threshold <= 0.80
 
     def test_threshold_raised_short_strings(self):
         """Short string fields should raise threshold."""
@@ -1048,5 +1048,5 @@ class TestDataDrivenStrategy:
 
         config = auto_configure_df(df)
         weighted_mks = [mk for mk in config.get_matchkeys() if mk.type == "weighted"]
-        if weighted_mks:
-            assert weighted_mks[0].threshold >= 0.80
+        assert len(weighted_mks) > 0, "Expected at least one weighted matchkey"
+        assert weighted_mks[0].threshold >= 0.80
