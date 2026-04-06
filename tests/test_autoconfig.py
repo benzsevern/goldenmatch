@@ -274,6 +274,54 @@ class TestBuildBlocking:
         blocking = build_blocking(profiles, df)
         assert blocking.strategy == "canopy"
 
+    def test_name_with_geo_compounds_blocking(self):
+        """When geo columns exist, name-based blocking should compound with geo."""
+        profiles = [
+            ColumnProfile("facility_name", "Utf8", "name", 0.9, cardinality_ratio=0.8),
+            ColumnProfile("state", "Utf8", "geo", 0.9, cardinality_ratio=0.01),
+            ColumnProfile("address", "Utf8", "address", 0.7, cardinality_ratio=0.9),
+        ]
+        # Create data where name-only blocking produces large blocks
+        # but state+name produces small blocks
+        states = ["AL", "CA", "NY", "TX", "FL"]
+        names = ["MEMORIAL HOSPITAL", "COMMUNITY HOSPITAL", "ST LUKES"]
+        rows = []
+        for s in states:
+            for n in names:
+                rows.append({"facility_name": n, "state": s, "address": f"123 {s} ST"})
+        df = pl.DataFrame(rows)
+        blocking = build_blocking(profiles, df)
+        # Primary key should include both geo and name
+        primary_fields = blocking.keys[0].fields
+        assert "state" in primary_fields, f"Expected 'state' in blocking keys, got {primary_fields}"
+        assert "facility_name" in primary_fields
+
+    def test_name_without_geo_stays_name_only(self):
+        """Without geo columns, name-based blocking should remain name-only."""
+        profiles = [
+            ColumnProfile("name", "Utf8", "name", 0.9),
+            ColumnProfile("description", "Utf8", "description", 0.7),
+        ]
+        df = pl.DataFrame({"name": ["John", "Jane", "Bob"], "description": ["a", "b", "c"]})
+        blocking = build_blocking(profiles, df)
+        assert blocking.strategy == "multi_pass"
+        assert blocking.keys[0].fields == ["name"]
+
+    def test_geo_compound_high_null_geo_skipped(self):
+        """Geo columns with >20% nulls should not be used for compound blocking."""
+        profiles = [
+            ColumnProfile("name", "Utf8", "name", 0.9),
+            ColumnProfile("state", "Utf8", "geo", 0.9, null_rate=0.3),
+        ]
+        # 40% nulls in state column
+        df = pl.DataFrame({
+            "name": ["John", "Jane", "Bob", "Alice", "Eve"],
+            "state": ["AL", "CA", None, None, "NY"],
+        })
+        blocking = build_blocking(profiles, df)
+        # Should fall back to name-only since geo has high null rate
+        assert blocking.keys[0].fields == ["name"]
+
 
 class TestSelectModel:
     def test_no_embeddings(self):
