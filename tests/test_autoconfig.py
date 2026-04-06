@@ -972,3 +972,87 @@ class TestDomainAwareAutoConfig:
         domain_fields = [f for f in all_fields if f and f.startswith("__")]
         assert len(domain_fields) == 0
         assert len(config.get_matchkeys()) > 0
+
+
+class TestLLMMemoryAutoEnablement:
+    """Tests for LLM + memory auto-enablement in auto-config."""
+
+    def test_llm_auto_with_api_key(self):
+        """When llm_auto=True and API key available, LLM scorer is configured."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+        from unittest.mock import patch
+
+        df = pl.DataFrame({
+            "name": ["John Smith", "Jane Doe", "Bob Wilson"],
+            "email": ["john@test.com", "jane@test.com", "bob@test.com"],
+        })
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test-fake-key"}):
+            config = auto_configure_df(df, llm_auto=True)
+
+        assert config.llm_scorer is not None
+        assert config.llm_scorer.enabled is True
+        assert config.llm_scorer.budget is not None
+        assert config.llm_scorer.budget.max_cost_usd == 0.05
+
+    def test_llm_auto_without_api_key(self):
+        """When llm_auto=True but no API key, LLM scorer stays None."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+        from unittest.mock import patch
+        import os
+
+        df = pl.DataFrame({
+            "name": ["John Smith", "Jane Doe", "Bob Wilson"],
+            "email": ["john@test.com", "jane@test.com", "bob@test.com"],
+        })
+
+        env_remove = {k: "" for k in ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]}
+        with patch.dict("os.environ", env_remove):
+            os.environ.pop("OPENAI_API_KEY", None)
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+            config = auto_configure_df(df, llm_auto=True)
+
+        assert config.llm_scorer is None
+
+    def test_llm_auto_off_default(self):
+        """When llm_auto=False (default), LLM scorer is never set."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+        from unittest.mock import patch
+
+        df = pl.DataFrame({
+            "name": ["John Smith", "Jane Doe", "Bob Wilson"],
+            "email": ["john@test.com", "jane@test.com", "bob@test.com"],
+        })
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test-fake-key"}):
+            config = auto_configure_df(df, llm_auto=False)
+
+        assert config.llm_scorer is None
+
+    def test_memory_enabled_with_llm_auto(self):
+        """Memory store enabled when llm_auto=True."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+        from unittest.mock import patch
+
+        df = pl.DataFrame({
+            "name": ["John Smith", "Jane Doe", "Bob Wilson"],
+            "email": ["john@test.com", "jane@test.com", "bob@test.com"],
+        })
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test-fake-key"}):
+            config = auto_configure_df(df, llm_auto=True)
+
+        assert config.memory is not None
+        assert config.memory.enabled is True
+
+    def test_memory_not_enabled_by_default(self):
+        """Memory store not enabled in default zero-config mode."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+
+        df = pl.DataFrame({
+            "name": ["John Smith", "Jane Doe", "Bob Wilson"],
+            "email": ["john@test.com", "jane@test.com", "bob@test.com"],
+        })
+
+        config = auto_configure_df(df)
+        assert config.memory is None

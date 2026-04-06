@@ -227,11 +227,17 @@ def _run_dedupe_pipeline(
     if auto_config:
         from goldenmatch.core.autoconfig import auto_configure_df
         combined_df_tmp = combined_lf.collect()
-        auto_cfg = auto_configure_df(combined_df_tmp, llm_provider=auto_config_llm_provider)
+        auto_cfg = auto_configure_df(
+            combined_df_tmp,
+            llm_provider=auto_config_llm_provider,
+            llm_auto=config.llm_auto,
+        )
         config.matchkeys = auto_cfg.matchkeys
         config.match_settings = auto_cfg.match_settings
         config.blocking = auto_cfg.blocking
         config.golden_rules = auto_cfg.golden_rules
+        config.llm_scorer = auto_cfg.llm_scorer
+        config.memory = auto_cfg.memory
         matchkeys = config.get_matchkeys()
         logger.info("Auto-configured from cleaned data: %d matchkeys", len(matchkeys))
         combined_lf = combined_df_tmp.lazy()
