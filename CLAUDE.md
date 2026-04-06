@@ -52,8 +52,13 @@
 - `goldenmatch/core/agent.py` -- AgentSession, profile_for_agent, select_strategy, build_alternatives. Autonomous ER: profiles data -> detects domain -> selects strategy -> runs pipeline -> returns reasoning
 - `goldenmatch/core/review_queue.py` -- ReviewQueue (memory/SQLite/Postgres backends), ReviewItem, gate_pairs(). Confidence gating: >0.95 auto-merge, 0.75-0.95 review, <0.75 reject
 - `goldenmatch/core/memory/` -- Learning Memory: persistent corrections + rule learning. `store.py` (MemoryStore, SQLite/Postgres CRUD, trust-based upsert), `corrections.py` (apply_corrections with dual-hash staleness detection), `learner.py` (MemoryLearner, threshold tuning from 10+ corrections). Config: `MemoryConfig` in schemas.py, optional `memory:` YAML section
-- `goldenmatch/a2a/` -- A2A protocol server (aiohttp). Agent card at `/.well-known/agent.json`, 8 skills, task lifecycle, SSE streaming. CLI: `goldenmatch agent-serve --port 8200`
-- `goldenmatch/mcp/agent_tools.py` -- 10 agent-level MCP tools (additive to existing). Each creates own AgentSession (no shared global state)
+- `goldenmatch/a2a/` -- A2A protocol server (aiohttp). Agent card at `/.well-known/agent.json`, 10 skills, task lifecycle, SSE streaming. CLI: `goldenmatch agent-serve --port 8200`
+- `goldenmatch/mcp/agent_tools.py` -- 13 agent-level MCP tools (additive to existing). Each creates own AgentSession (no shared global state)
+- Adding MCP tools: add Tool to `AGENT_TOOLS` in `mcp/agent_tools.py`, add dispatch handler in `_dispatch()`, update server card tool count in `mcp/server.py` (line ~1002)
+- Adding A2A skills: add entry to `_SKILLS` in `a2a/server.py`, add dispatch handler in `a2a/skills.py`, update `test_agent_card_has_N_skills` assertion in `tests/test_a2a.py`
+- MCP/A2A handlers must validate `file_path` param, catch `FileNotFoundError` on `pl.read_csv`, and wrap `write_csv(output_path)` in try/except to preserve results on write failure
+- `run_transform(strict=True)` re-raises exceptions instead of silently returning unmodified data — use from MCP/A2A handlers where callers explicitly requested transforms
+- `_scan_only()` in `quality.py` returns serialized findings dicts (not empty list) so MCP tools can inspect them without reaching into goldencheck internals
 - `_api.py` has DataFrame entry points: `dedupe_df()`, `match_df()`, `score_strings()`, `score_pair_df()`, `explain_pair_df()` -- used by SQL extensions
 - `pipeline.py` refactored: `_run_dedupe_pipeline()` and `_run_match_pipeline()` extracted as shared internal functions, called by both file-based and DataFrame-based entry points
 - `goldenmatch/core/` — pipeline modules (no Textual dependency)

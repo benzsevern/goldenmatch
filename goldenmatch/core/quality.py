@@ -71,7 +71,10 @@ def _scan_only(
         findings, _ = scan_file(tmp_path, domain=domain)
         findings = apply_confidence_downgrade(findings, llm_boost=False)
     finally:
-        tmp_path.unlink(missing_ok=True)
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            logger.debug("Could not delete temp file %s", tmp_path)
 
     errors = sum(1 for f in findings if f.severity == Severity.ERROR)
     warnings = sum(1 for f in findings if f.severity == Severity.WARNING)
@@ -82,7 +85,19 @@ def _scan_only(
             len(findings), errors, warnings,
         )
 
-    return df, []
+    # Return findings as dicts so callers (MCP tools) can inspect them
+    issues = []
+    for f in findings:
+        issues.append({
+            "rule": f.rule_id,
+            "severity": f.severity.value if hasattr(f.severity, "value") else str(f.severity),
+            "column": f.column,
+            "message": f.message,
+            "rows_affected": f.rows_affected,
+            "confidence": round(f.confidence, 2) if hasattr(f, "confidence") else None,
+        })
+
+    return df, issues
 
 
 def _scan_and_fix(
@@ -104,7 +119,10 @@ def _scan_and_fix(
         findings, _ = scan_file(tmp_path, domain=domain)
         findings = apply_confidence_downgrade(findings, llm_boost=False)
     finally:
-        tmp_path.unlink(missing_ok=True)
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            logger.debug("Could not delete temp file %s", tmp_path)
 
     # Apply fixes
     fixed_df, report = apply_fixes(df, findings, mode=fix_mode)

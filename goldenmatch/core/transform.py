@@ -27,11 +27,20 @@ def _do_transform(df: pl.DataFrame):
 def run_transform(
     df: pl.DataFrame,
     config=None,
+    *,
+    strict: bool = False,
 ) -> tuple[pl.DataFrame, list[dict]]:
     """Run GoldenFlow transform if available.
 
     Returns (transformed_df, list_of_fixes) matching autofix format.
     Falls back gracefully if goldenflow is not installed.
+
+    Parameters
+    ----------
+    strict : bool
+        If True, re-raise exceptions instead of silently returning
+        unmodified data. Use from MCP/A2A handlers where callers
+        explicitly requested transforms.
     """
     if not _goldenflow_available():
         if config is not None and getattr(config, "enabled", True):
@@ -56,6 +65,8 @@ def run_transform(
         result = _do_transform(df)
     except Exception:
         logger.warning("GoldenFlow: transform failed, skipping", exc_info=True)
+        if strict:
+            raise
         return df, []
 
     # Convert manifest to autofix-compatible format

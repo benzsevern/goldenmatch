@@ -20,7 +20,7 @@ def dispatch_skill(skill_id: str, params: dict) -> dict:
     ----------
     skill_id : str
         One of: analyze_data, configure, deduplicate, match, explain,
-        review, compare_strategies, pprl.
+        review, compare_strategies, pprl, quality, transform.
     params : dict
         Skill-specific parameters.
 
@@ -99,6 +99,90 @@ def dispatch_skill(skill_id: str, params: dict) -> dict:
         )
         return _serialise_result({"result": result})
 
+    if skill_id == "quality":
+        import polars as pl
+        from goldenmatch.core.quality import _goldencheck_available, run_quality_check
+        from goldenmatch.config.schemas import QualityConfig
+
+        if not _goldencheck_available():
+            return {"error": "goldencheck not installed. pip install goldenmatch[quality]"}
+
+        file_path = params.get("file_path")
+        if not file_path:
+            return {"error": "Missing required parameter: file_path"}
+
+        try:
+            df = pl.read_csv(file_path, encoding="utf8-lossy", ignore_errors=True)
+        except FileNotFoundError:
+            return {"error": f"File not found: {file_path}"}
+        except Exception as exc:
+            return {"error": f"Could not read CSV '{file_path}': {exc}"}
+
+        fix_mode = params.get("fix_mode", "safe")
+        domain = params.get("domain")
+        qc = QualityConfig(mode="silent", fix_mode=fix_mode, domain=domain)
+        fixed_df, fixes = run_quality_check(df, qc)
+
+        output_path = params.get("output_path")
+        write_error = None
+        if output_path:
+            try:
+                fixed_df.write_csv(output_path)
+            except Exception as exc:
+                write_error = f"Results computed but failed to write to '{output_path}': {exc}"
+                output_path = None
+
+        result = {
+            "total_records": fixed_df.height,
+            "fixes_applied": len(fixes),
+            "fixes": fixes,
+            "output_path": output_path,
+        }
+        if write_error:
+            result["write_error"] = write_error
+        return result
+
+    if skill_id == "transform":
+        import polars as pl
+        from goldenmatch.core.transform import _goldenflow_available, run_transform
+        from goldenmatch.config.schemas import TransformConfig
+
+        if not _goldenflow_available():
+            return {"error": "goldenflow not installed. pip install goldenmatch[transform]"}
+
+        file_path = params.get("file_path")
+        if not file_path:
+            return {"error": "Missing required parameter: file_path"}
+
+        try:
+            df = pl.read_csv(file_path, encoding="utf8-lossy", ignore_errors=True)
+        except FileNotFoundError:
+            return {"error": f"File not found: {file_path}"}
+        except Exception as exc:
+            return {"error": f"Could not read CSV '{file_path}': {exc}"}
+
+        tc = TransformConfig(mode="silent")
+        transformed_df, fixes = run_transform(df, tc, strict=True)
+
+        output_path = params.get("output_path")
+        write_error = None
+        if output_path:
+            try:
+                transformed_df.write_csv(output_path)
+            except Exception as exc:
+                write_error = f"Results computed but failed to write to '{output_path}': {exc}"
+                output_path = None
+
+        result = {
+            "total_records": transformed_df.height,
+            "transforms_applied": len(fixes),
+            "transforms": fixes,
+            "output_path": output_path,
+        }
+        if write_error:
+            result["write_error"] = write_error
+        return result
+
     raise ValueError(f"Unknown skill: {skill_id}")
 
 
@@ -113,7 +197,7 @@ def _serialise_result(obj: Any) -> dict:
                 if isinstance(v, pl.DataFrame):
                     out[k] = {"rows": v.height, "columns": v.columns}
                     continue
-            except Exception:
+            except ImportError:
                 pass
             if isinstance(v, dict):
                 out[k] = _serialise_result(v)

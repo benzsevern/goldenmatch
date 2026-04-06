@@ -6,6 +6,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-04-06
+
+### Added
+- **MCP tools for data quality** — `scan_quality` (scan without fixing), `fix_quality` (scan + apply fixes with safe/moderate mode), `run_transforms` (GoldenFlow phone/date/Unicode normalization). All 3 tools validate file paths, handle write failures gracefully, and include logging
+- **A2A skills for data quality** — `quality` (scan + fix via GoldenCheck) and `transform` (normalize via GoldenFlow) skills added to the Agent-to-Agent protocol
+- `run_transform(strict=True)` parameter — MCP/A2A handlers surface transform failures instead of silently returning unmodified data
+- `_scan_only()` now returns serialized findings so MCP tools can inspect quality issues without duplicating the scan
+- 10 new tests: happy-path coverage with mocked deps, file validation, write failure handling
+
+### Fixed
+- Eliminated redundant double-scan in `scan_quality` MCP handler (was scanning data twice and reaching into goldencheck internals)
+- Temp file cleanup handles `PermissionError` on Windows (file locks no longer leak orphaned temp files)
+- `_serialise_result` exception clause narrowed from `Exception` to `ImportError`
+- `fix_quality` test assertion strengthened to check error message content
+
 ## [1.4.0] - 2026-04-06
 
 ### Added

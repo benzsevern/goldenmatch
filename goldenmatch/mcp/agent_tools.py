@@ -139,6 +139,83 @@ AGENT_TOOLS = [
             "required": ["file_path"],
         },
     ),
+    Tool(
+        name="scan_quality",
+        description=(
+            "Run GoldenCheck data quality scan on a CSV file. "
+            "Returns issues found (encoding errors, Unicode problems, format violations) "
+            "without applying fixes. Requires goldencheck: pip install goldenmatch[quality]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the CSV file to scan",
+                },
+                "domain": {
+                    "type": "string",
+                    "description": "Optional domain hint (healthcare, finance, ecommerce)",
+                },
+            },
+            "required": ["file_path"],
+        },
+    ),
+    Tool(
+        name="fix_quality",
+        description=(
+            "Run GoldenCheck scan and apply fixes to a CSV file. "
+            "Returns the fixed data summary and a manifest of all fixes applied. "
+            "Requires goldencheck: pip install goldenmatch[quality]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the CSV file to fix",
+                },
+                "fix_mode": {
+                    "type": "string",
+                    "enum": ["safe", "moderate"],
+                    "description": "Fix aggressiveness: safe (conservative) or moderate (balanced). Default: safe",
+                    "default": "safe",
+                },
+                "domain": {
+                    "type": "string",
+                    "description": "Optional domain hint (healthcare, finance, ecommerce)",
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": "Optional path to save the fixed CSV. If omitted, returns summary only.",
+                },
+            },
+            "required": ["file_path"],
+        },
+    ),
+    Tool(
+        name="run_transforms",
+        description=(
+            "Run GoldenFlow data transforms on a CSV file. "
+            "Normalizes phone numbers (E.164), dates (ISO), categorical spelling, "
+            "and Unicode issues. Returns a manifest of transforms applied. "
+            "Requires goldenflow: pip install goldenmatch[transform]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the CSV file to transform",
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": "Optional path to save the transformed CSV. If omitted, returns summary only.",
+                },
+            },
+            "required": ["file_path"],
+        },
+    ),
 ]
 
 _AGENT_TOOL_NAMES = frozenset(t.name for t in AGENT_TOOLS)
@@ -320,5 +397,133 @@ def _dispatch(name: str, args: dict, session_cls: type) -> dict:
                 else "Standard matching is safe for this data. PPRL is optional."
             ),
         }
+
+    if name == "scan_quality":
+        import polars as pl
+        from goldenmatch.core.quality import _goldencheck_available, run_quality_check
+        from goldenmatch.config.schemas import QualityConfig
+
+        if not _goldencheck_available():
+            return {
+                "error": "goldencheck is not installed. Install with: pip install goldenmatch[quality]",
+            }
+
+        file_path = args.get("file_path")
+        if not file_path:
+            return {"error": "Missing required parameter: file_path"}
+
+        try:
+            df = pl.read_csv(file_path, encoding="utf8-lossy", ignore_errors=True)
+        except FileNotFoundError:
+            return {"error": f"File not found: {file_path}"}
+        except Exception as exc:
+            return {"error": f"Could not read CSV '{file_path}': {exc}"}
+
+        logger.info("scan_quality: scanning %s (%d records)", file_path, df.height)
+        qc = QualityConfig(mode="silent", fix_mode="none", domain=args.get("domain"))
+        _, issues = run_quality_check(df, qc)
+        logger.info("scan_quality: found %d issues", len(issues))
+
+        return {
+            "file": file_path,
+            "total_records": df.height,
+            "issues_found": len(issues),
+            "issues": issues,
+        }
+
+    if name == "fix_quality":
+        import polars as pl
+        from goldenmatch.core.quality import _goldencheck_available, run_quality_check
+        from goldenmatch.config.schemas import QualityConfig
+
+        if not _goldencheck_available():
+            return {
+                "error": "goldencheck is not installed. Install with: pip install goldenmatch[quality]",
+            }
+
+        file_path = args.get("file_path")
+        if not file_path:
+            return {"error": "Missing required parameter: file_path"}
+
+        try:
+            df = pl.read_csv(file_path, encoding="utf8-lossy", ignore_errors=True)
+        except FileNotFoundError:
+            return {"error": f"File not found: {file_path}"}
+        except Exception as exc:
+            return {"error": f"Could not read CSV '{file_path}': {exc}"}
+
+        fix_mode = args.get("fix_mode", "safe")
+        domain = args.get("domain")
+        logger.info("fix_quality: fixing %s (mode=%s)", file_path, fix_mode)
+        qc = QualityConfig(mode="silent", fix_mode=fix_mode, domain=domain)
+        fixed_df, fixes = run_quality_check(df, qc)
+        logger.info("fix_quality: %d fixes applied", len(fixes))
+
+        output_path = args.get("output_path")
+        write_error = None
+        if output_path:
+            try:
+                fixed_df.write_csv(output_path)
+            except Exception as exc:
+                write_error = f"Results computed but failed to write to '{output_path}': {exc}"
+                output_path = None
+
+        result = {
+            "file": file_path,
+            "fix_mode": fix_mode,
+            "total_records": fixed_df.height,
+            "fixes_applied": len(fixes),
+            "fixes": fixes,
+            "output_path": output_path,
+        }
+        if write_error:
+            result["write_error"] = write_error
+        return result
+
+    if name == "run_transforms":
+        import polars as pl
+        from goldenmatch.core.transform import _goldenflow_available, run_transform
+        from goldenmatch.config.schemas import TransformConfig
+
+        if not _goldenflow_available():
+            return {
+                "error": "goldenflow is not installed. Install with: pip install goldenmatch[transform]",
+            }
+
+        file_path = args.get("file_path")
+        if not file_path:
+            return {"error": "Missing required parameter: file_path"}
+
+        try:
+            df = pl.read_csv(file_path, encoding="utf8-lossy", ignore_errors=True)
+        except FileNotFoundError:
+            return {"error": f"File not found: {file_path}"}
+        except Exception as exc:
+            return {"error": f"Could not read CSV '{file_path}': {exc}"}
+
+        logger.info("run_transforms: transforming %s (%d records)", file_path, df.height)
+        tc = TransformConfig(mode="silent")
+        transformed_df, fixes = run_transform(df, tc, strict=True)
+        logger.info("run_transforms: %d transforms applied", len(fixes))
+
+        output_path = args.get("output_path")
+        write_error = None
+        if output_path:
+            try:
+                transformed_df.write_csv(output_path)
+            except Exception as exc:
+                write_error = f"Results computed but failed to write to '{output_path}': {exc}"
+                output_path = None
+
+        result = {
+            "file": file_path,
+            "total_records": transformed_df.height,
+            "transforms_applied": len(fixes),
+            "transforms": fixes,
+            "output_path": output_path,
+        }
+        if write_error:
+            result["write_error"] = write_error
+        return result
 
     return {"error": f"Unknown agent tool: {name}"}

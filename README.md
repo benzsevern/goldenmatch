@@ -37,7 +37,7 @@ goldenmatch demo
 - **Fellegi-Sunter probabilistic matching** — EM-trained m/u probabilities, automatic threshold estimation, comparison vectors with 2/3-level agreement
 - **Vertex AI embeddings** — 85%+ F1 accuracy with no GPU needed (Google Cloud managed API)
 - **Database sync** — incremental Postgres matching with persistent ANN index and golden record versioning
-- **REST API + MCP Server** — real-time matching via HTTP or Claude Desktop (27 tools: match, unmerge, explain, config advisor, etc.)
+- **REST API + MCP Server** — real-time matching via HTTP or Claude Desktop (30 tools: match, unmerge, explain, config advisor, data quality, transforms, etc.)
 - **Review queue** — REST endpoint surfaces borderline pairs for data steward approval/rejection
 - **Lineage tracking** — every merge decision saved to a JSON sidecar with per-field score breakdown and golden record provenance
 - **Daemon mode** — `goldenmatch watch --daemon` runs as a service with health endpoint and PID file
@@ -254,7 +254,7 @@ Guides you through GPU mode selection, Vertex AI / Colab / local GPU configurati
 | Privacy-preserving (PPRL) | Built-in (92.4% F1) | No | No | No | No |
 | Interactive TUI | Yes | No | No | No | No |
 | Golden record synthesis | 5 strategies | No | No | No | No |
-| MCP server (AI integration) | Yes (27 tools) | No | No | No | No |
+| MCP server (AI integration) | Yes (30 tools) | No | No | No | No |
 | Database sync | Postgres + DuckDB | No | No | No | Spark/DuckDB |
 | Single `pip install` | Yes | Yes | Yes | No (Java/Spark) | Yes |
 | Polars-native | Yes | No (pandas) | No (pandas) | No (Spark) | Yes (DuckDB) |
@@ -698,7 +698,7 @@ pip install goldenmatch[mcp]
 goldenmatch mcp-serve data.csv
 ```
 
-27 tools available: deduplicate files, match records, explain decisions, review borderline pairs, privacy-preserving linkage, configure rules, and synthesize golden records.
+30 tools available: deduplicate files, match records, explain decisions, review borderline pairs, privacy-preserving linkage, configure rules, scan data quality, run transforms, and synthesize golden records.
 
 ## Architecture
 
