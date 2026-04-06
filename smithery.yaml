@@ -62,3 +62,10 @@ tools:
     description: Compare ER strategies on your data with optional ground truth.
   - name: suggest_pprl
     description: Check if data needs privacy-preserving matching.
+  # Quality & Transform tools (3)
+  - name: scan_quality
+    description: Run GoldenCheck data quality scan -- returns issues without fixing. Requires goldencheck.
+  - name: fix_quality
+    description: Scan and apply data quality fixes (safe or moderate mode). Requires goldencheck.
+  - name: run_transforms
+    description: Run GoldenFlow transforms -- phone E.164, dates ISO, Unicode normalization. Requires goldenflow.

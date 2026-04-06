@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.benzsevern/goldenmatch",
   "title": "GoldenMatch",
-  "description": "Entity resolution toolkit — deduplicate, match records, golden records, PPRL",
-  "version": "1.2.2",
+  "description": "Entity resolution toolkit — deduplicate records, match across datasets, and create golden records using fuzzy, probabilistic, and LLM-powered scoring. 30 MCP tools. DQBench ER: 95.30.",
+  "version": "1.4.1",
   "repository": {
     "url": "https://github.com/benzsevern/goldenmatch.git",
     "source": "github"
@@ -12,7 +12,7 @@
     {
       "registryType": "pypi",
       "identifier": "goldenmatch",
-      "version": "1.2.2",
+      "version": "1.4.1",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

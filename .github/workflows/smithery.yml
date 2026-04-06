@@ -1,0 +1,30 @@
+name: Publish to Smithery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'goldenmatch/mcp/**'
+      - 'smithery.yaml'
+      - 'server.json'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Smithery CLI
+        run: npm install -g @smithery/cli
+
+      - name: Publish to Smithery
+        env:
+          SMITHERY_API_KEY: ${{ secrets.SMITHERY_API_KEY }}
+        run: smithery mcp publish --name benzsevern/goldenmatch
