@@ -269,6 +269,7 @@ def dedupe_df(
     blocking: list[str] | None = None,
     threshold: float | None = None,
     llm_scorer: bool = False,
+    llm_auto: bool = False,
     backend: str | None = None,
     source_name: str = "dataframe",
 ) -> DedupeResult:
@@ -314,6 +315,8 @@ def dedupe_df(
     if llm_scorer and hasattr(config, "llm_scorer"):
         from goldenmatch.config.schemas import LLMScorerConfig
         config.llm_scorer = LLMScorerConfig(enabled=True)
+    if llm_auto and hasattr(config, "llm_auto"):
+        config.llm_auto = llm_auto
 
     result = run_dedupe_df(
         df, config, source_name=source_name,

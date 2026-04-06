@@ -1050,3 +1050,51 @@ class TestDataDrivenStrategy:
         weighted_mks = [mk for mk in config.get_matchkeys() if mk.type == "weighted"]
         assert len(weighted_mks) > 0, "Expected at least one weighted matchkey"
         assert weighted_mks[0].threshold >= 0.80
+
+
+class TestLLMMemoryAutoEnablement:
+    """Tests for LLM + memory auto-enablement."""
+
+    def test_llm_auto_with_api_key(self):
+        from goldenmatch.core.autoconfig import auto_configure_df
+        from unittest.mock import patch
+        df = pl.DataFrame({"name": ["John", "Jane", "Bob"], "email": ["a@t.com", "b@t.com", "c@t.com"]})
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-fake"}):
+            config = auto_configure_df(df, llm_auto=True)
+        assert config.llm_scorer is not None
+        assert config.llm_scorer.enabled is True
+        assert config.llm_scorer.budget.max_cost_usd == 0.05
+
+    def test_llm_auto_no_key(self):
+        from goldenmatch.core.autoconfig import auto_configure_df
+        from unittest.mock import patch
+        import os
+        df = pl.DataFrame({"name": ["John", "Jane", "Bob"], "email": ["a@t.com", "b@t.com", "c@t.com"]})
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "", "ANTHROPIC_API_KEY": ""}):
+            os.environ.pop("OPENAI_API_KEY", None)
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+            config = auto_configure_df(df, llm_auto=True)
+        assert config.llm_scorer is None
+
+    def test_llm_auto_off(self):
+        from goldenmatch.core.autoconfig import auto_configure_df
+        from unittest.mock import patch
+        df = pl.DataFrame({"name": ["John", "Jane", "Bob"], "email": ["a@t.com", "b@t.com", "c@t.com"]})
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-fake"}):
+            config = auto_configure_df(df, llm_auto=False)
+        assert config.llm_scorer is None
+
+    def test_memory_with_llm_auto(self):
+        from goldenmatch.core.autoconfig import auto_configure_df
+        from unittest.mock import patch
+        df = pl.DataFrame({"name": ["John", "Jane", "Bob"], "email": ["a@t.com", "b@t.com", "c@t.com"]})
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-fake"}):
+            config = auto_configure_df(df, llm_auto=True)
+        assert config.memory is not None
+        assert config.memory.enabled is True
+
+    def test_memory_off_by_default(self):
+        from goldenmatch.core.autoconfig import auto_configure_df
+        df = pl.DataFrame({"name": ["John", "Jane", "Bob"], "email": ["a@t.com", "b@t.com", "c@t.com"]})
+        config = auto_configure_df(df)
+        assert config.memory is None
