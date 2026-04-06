@@ -67,14 +67,14 @@ class TestBuildClusters:
         # pair_scores should contain the pairs
         assert (1, 2) in cluster_with_1["pair_scores"] or (2, 1) in cluster_with_1["pair_scores"]
 
-    def test_oversized_flagging(self):
-        """Clusters exceeding max_cluster_size are flagged."""
+    def test_oversized_auto_split(self):
+        """Clusters exceeding max_cluster_size are auto-split."""
         pairs = [(1, 2, 0.9), (2, 3, 0.9)]
         all_ids = [1, 2, 3]
         result = build_clusters(pairs, all_ids, max_cluster_size=2)
-        # Single cluster of size 3 exceeds max of 2
-        cluster = list(result.values())[0]
-        assert cluster["oversized"] is True
+        # Cluster of 3 was split — no cluster should exceed size 2
+        for cluster in result.values():
+            assert cluster["size"] <= 2
 
     def test_no_pairs_all_singletons(self):
         """No pairs means all IDs become singleton clusters."""
@@ -109,3 +109,46 @@ class TestBuildClusters:
         result = build_clusters(pairs, all_ids)
         cluster_with_all = [c for c in result.values() if c["size"] == 3][0]
         assert cluster_with_all["members"] == [1, 3, 5]
+
+
+def test_auto_split_oversized():
+    """build_clusters auto-splits oversized clusters."""
+    # Chain: 0-1(0.9) - 1-2(0.5) - 2-3(0.8), max_cluster_size=2
+    pairs = [(0, 1, 0.9), (1, 2, 0.5), (2, 3, 0.8)]
+    clusters = build_clusters(pairs, [0, 1, 2, 3], max_cluster_size=2)
+    for cinfo in clusters.values():
+        assert cinfo["size"] <= 2
+
+
+def test_split_recursive_oversized():
+    """build_clusters recursively splits clusters exceeding max_cluster_size."""
+    pairs = [(0, 1, 0.9), (1, 2, 0.5), (2, 3, 0.8), (3, 4, 0.7), (4, 5, 0.6)]
+    all_ids = list(range(6))
+    clusters = build_clusters(pairs, all_ids, max_cluster_size=3)
+    for cinfo in clusters.values():
+        assert cinfo["size"] <= 3
+
+
+def test_cluster_quality_strong():
+    """Clusters with tight edges get quality='strong'."""
+    pairs = [(0, 1, 0.95), (1, 2, 0.90), (0, 2, 0.92)]
+    clusters = build_clusters(pairs, [0, 1, 2])
+    cinfo = list(clusters.values())[0]
+    assert cinfo["cluster_quality"] == "strong"
+
+
+def test_cluster_quality_weak():
+    """Clusters with large edge gap get quality='weak'."""
+    pairs = [(0, 1, 0.95), (1, 2, 0.85), (0, 2, 0.40)]
+    clusters = build_clusters(pairs, [0, 1, 2])
+    cinfo = list(clusters.values())[0]
+    assert cinfo["cluster_quality"] == "weak"
+
+
+def test_cluster_quality_split_precedence():
+    """Split clusters get quality='split' even if also weak."""
+    pairs = [(0, 1, 0.9), (1, 2, 0.3), (2, 3, 0.9)]
+    clusters = build_clusters(pairs, [0, 1, 2, 3], max_cluster_size=2)
+    for cinfo in clusters.values():
+        if cinfo["size"] > 1:
+            assert cinfo["cluster_quality"] in ("strong", "split")

@@ -3,7 +3,6 @@
 import json
 
 import polars as pl
-import pytest
 
 from goldenmatch.core.golden import ClusterProvenance, FieldProvenance
 

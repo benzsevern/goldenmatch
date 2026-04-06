@@ -58,21 +58,70 @@ class UnionFind:
         return list(groups.values())
 
 
+def _build_mst(
+    members: list[int], pair_scores: dict[tuple[int, int], float],
+) -> list[tuple[int, int, float]]:
+    """Build max-weight spanning tree using Kruskal's algorithm."""
+    edges = [(a, b, s) for (a, b), s in pair_scores.items()]
+    edges.sort(key=lambda e: e[2], reverse=True)
+    uf = UnionFind()
+    uf.add_many(members)
+    mst: list[tuple[int, int, float]] = []
+    for a, b, s in edges:
+        if uf.find(a) != uf.find(b):
+            uf.union(a, b)
+            mst.append((a, b, s))
+            if len(mst) == len(members) - 1:
+                break
+    return mst
+
+
+def split_oversized_cluster(
+    members: list[int], pair_scores: dict[tuple[int, int], float],
+) -> list[dict]:
+    """Split a cluster by removing the weakest MST edge."""
+    if len(members) <= 1 or not pair_scores:
+        return [{"members": sorted(members), "size": len(members),
+                 "oversized": False, "pair_scores": pair_scores}]
+
+    mst = _build_mst(members, pair_scores)
+    if not mst:
+        return [{"members": sorted(members), "size": len(members),
+                 "oversized": False, "pair_scores": pair_scores}]
+
+    weakest = min(mst, key=lambda e: e[2])
+    remaining = [(a, b, s) for a, b, s in mst if (a, b, s) != weakest]
+
+    uf = UnionFind()
+    uf.add_many(members)
+    for a, b, _s in remaining:
+        uf.union(a, b)
+
+    result = []
+    for sc_members in uf.get_clusters():
+        sc_list = sorted(sc_members)
+        sc_pairs = {(a, b): s for (a, b), s in pair_scores.items()
+                    if a in sc_members and b in sc_members}
+        size = len(sc_list)
+        conf = compute_cluster_confidence(sc_pairs, size)
+        result.append({
+            "members": sc_list, "size": size, "oversized": False,
+            "pair_scores": sc_pairs, "confidence": conf["confidence"],
+            "bottleneck_pair": conf["bottleneck_pair"],
+        })
+    return result
+
+
 def build_clusters(
     pairs: list[tuple[int, int, float]],
     all_ids: list[int],
     max_cluster_size: int = 100,
+    weak_cluster_threshold: float = 0.3,
 ) -> dict[int, dict]:
     """Build clusters from scored pairs using Union-Find.
 
-    Args:
-        pairs: List of (id_a, id_b, score) tuples.
-        all_ids: All record IDs (ensures singletons are included).
-        max_cluster_size: Clusters exceeding this size are flagged as oversized.
-
-    Returns:
-        Dict mapping monotonic cluster ID (starting at 1) to cluster info dict
-        with keys: members, size, oversized, pair_scores.
+    Auto-splits oversized clusters via MST. Assigns cluster_quality
+    ("strong", "weak", "split") and downgrades confidence for weak clusters.
     """
     uf = UnionFind()
     uf.add_many(all_ids)
@@ -81,14 +130,12 @@ def build_clusters(
 
     clusters = uf.get_clusters()
 
-    # Build member-to-cluster-id mapping for fast pair assignment
     member_to_cid: dict[int, int] = {}
     sorted_clusters = sorted(clusters, key=lambda s: min(s))
     for cluster_id, members in enumerate(sorted_clusters, start=1):
         for m in members:
             member_to_cid[m] = cluster_id
 
-    # Build result with empty pair_scores first
     result: dict[int, dict] = {}
     for cluster_id, members in enumerate(sorted_clusters, start=1):
         size = len(members)
@@ -99,16 +146,45 @@ def build_clusters(
             "pair_scores": {},
         }
 
-    # Populate pair_scores in a single pass over pairs
     for id_a, id_b, score in pairs:
         cid = member_to_cid[id_a]
         result[cid]["pair_scores"][(id_a, id_b)] = score
 
-    # Compute confidence for each cluster
     for cid, cinfo in result.items():
         conf = compute_cluster_confidence(cinfo["pair_scores"], cinfo["size"])
         cinfo["confidence"] = conf["confidence"]
         cinfo["bottleneck_pair"] = conf["bottleneck_pair"]
+
+    # Auto-split oversized clusters
+    to_split = [cid for cid, c in result.items() if c["oversized"]]
+    while to_split:
+        cid = to_split.pop()
+        cinfo = result.pop(cid)
+        sub_clusters = split_oversized_cluster(cinfo["members"], cinfo["pair_scores"])
+        next_cid = max(result.keys(), default=0) + 1
+        for sc in sub_clusters:
+            sc["oversized"] = sc["size"] > max_cluster_size
+            sc["_was_split"] = True
+            result[next_cid] = sc
+            if sc["oversized"]:
+                to_split.append(next_cid)
+            next_cid += 1
+
+    # Assign cluster_quality and apply confidence downgrade
+    for cid, cinfo in result.items():
+        if cinfo.get("_was_split"):
+            cinfo["cluster_quality"] = "split"
+        elif cinfo["size"] > 1 and cinfo.get("pair_scores"):
+            scores = list(cinfo["pair_scores"].values())
+            min_edge = min(scores)
+            avg_edge = sum(scores) / len(scores)
+            if avg_edge - min_edge > weak_cluster_threshold:
+                cinfo["cluster_quality"] = "weak"
+                cinfo["confidence"] *= 0.7
+            else:
+                cinfo["cluster_quality"] = "strong"
+        else:
+            cinfo["cluster_quality"] = "strong"
 
     return result
 
@@ -162,6 +238,7 @@ def add_to_cluster(
     record_id: int,
     matches: list[tuple[int, float]],
     clusters: dict[int, dict],
+    max_cluster_size: int = 100,
 ) -> dict[int, dict]:
     """Add a new record to existing clusters based on matches.
 
@@ -173,6 +250,7 @@ def add_to_cluster(
         record_id: The new record's ID.
         matches: List of (matched_row_id, score) tuples.
         clusters: Current cluster dict (modified in-place).
+        max_cluster_size: Threshold for oversized flagging.
 
     Returns:
         Updated clusters dict.
@@ -186,6 +264,7 @@ def add_to_cluster(
             "pair_scores": {},
             "confidence": 1.0,
             "bottleneck_pair": None,
+            "cluster_quality": "strong",
         }
         return clusters
 
@@ -202,7 +281,6 @@ def add_to_cluster(
             matched_cids.add(cid)
 
     if not matched_cids:
-        # Matched records not in any cluster (shouldn't happen, but handle gracefully)
         next_cid = max(clusters.keys(), default=0) + 1
         clusters[next_cid] = {
             "members": [record_id],
@@ -211,22 +289,23 @@ def add_to_cluster(
             "pair_scores": {},
             "confidence": 1.0,
             "bottleneck_pair": None,
+            "cluster_quality": "strong",
         }
         return clusters
 
     if len(matched_cids) == 1:
-        # Join existing cluster
         cid = matched_cids.pop()
         cinfo = clusters[cid]
         cinfo["members"] = sorted(cinfo["members"] + [record_id])
         cinfo["size"] += 1
+        cinfo["oversized"] = cinfo["size"] > max_cluster_size
         for matched_id, score in matches:
             if member_to_cid.get(matched_id) == cid:
                 cinfo["pair_scores"][(min(record_id, matched_id), max(record_id, matched_id))] = score
-        # Recompute confidence
         conf = compute_cluster_confidence(cinfo["pair_scores"], cinfo["size"])
         cinfo["confidence"] = conf["confidence"]
         cinfo["bottleneck_pair"] = conf["bottleneck_pair"]
+        cinfo["cluster_quality"] = cinfo.get("cluster_quality", "strong")
         return clusters
 
     # Multiple clusters — merge them all with the new record
@@ -249,10 +328,11 @@ def add_to_cluster(
     clusters[next_cid] = {
         "members": sorted(merged_members),
         "size": size,
-        "oversized": size > 100,
+        "oversized": size > max_cluster_size,
         "pair_scores": merged_pairs,
         "confidence": conf["confidence"],
         "bottleneck_pair": conf["bottleneck_pair"],
+        "cluster_quality": "strong",
     }
 
     return clusters
