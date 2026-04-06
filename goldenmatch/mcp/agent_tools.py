@@ -408,12 +408,24 @@ def _dispatch(name: str, args: dict, session_cls: type) -> dict:
                 "error": "goldencheck is not installed. Install with: pip install goldenmatch[quality]",
             }
 
-        df = pl.read_csv(args["file_path"], encoding="utf8-lossy", ignore_errors=True)
+        file_path = args.get("file_path")
+        if not file_path:
+            return {"error": "Missing required parameter: file_path"}
+
+        try:
+            df = pl.read_csv(file_path, encoding="utf8-lossy", ignore_errors=True)
+        except FileNotFoundError:
+            return {"error": f"File not found: {file_path}"}
+        except Exception as exc:
+            return {"error": f"Could not read CSV '{file_path}': {exc}"}
+
+        logger.info("scan_quality: scanning %s (%d records)", file_path, df.height)
         qc = QualityConfig(mode="silent", fix_mode="none", domain=args.get("domain"))
         _, issues = run_quality_check(df, qc)
+        logger.info("scan_quality: found %d issues", len(issues))
 
         return {
-            "file": args["file_path"],
+            "file": file_path,
             "total_records": df.height,
             "issues_found": len(issues),
             "issues": issues,
@@ -429,24 +441,44 @@ def _dispatch(name: str, args: dict, session_cls: type) -> dict:
                 "error": "goldencheck is not installed. Install with: pip install goldenmatch[quality]",
             }
 
-        df = pl.read_csv(args["file_path"], encoding="utf8-lossy", ignore_errors=True)
+        file_path = args.get("file_path")
+        if not file_path:
+            return {"error": "Missing required parameter: file_path"}
+
+        try:
+            df = pl.read_csv(file_path, encoding="utf8-lossy", ignore_errors=True)
+        except FileNotFoundError:
+            return {"error": f"File not found: {file_path}"}
+        except Exception as exc:
+            return {"error": f"Could not read CSV '{file_path}': {exc}"}
+
         fix_mode = args.get("fix_mode", "safe")
         domain = args.get("domain")
+        logger.info("fix_quality: fixing %s (mode=%s)", file_path, fix_mode)
         qc = QualityConfig(mode="silent", fix_mode=fix_mode, domain=domain)
         fixed_df, fixes = run_quality_check(df, qc)
+        logger.info("fix_quality: %d fixes applied", len(fixes))
 
         output_path = args.get("output_path")
+        write_error = None
         if output_path:
-            fixed_df.write_csv(output_path)
+            try:
+                fixed_df.write_csv(output_path)
+            except Exception as exc:
+                write_error = f"Results computed but failed to write to '{output_path}': {exc}"
+                output_path = None
 
-        return {
-            "file": args["file_path"],
+        result = {
+            "file": file_path,
             "fix_mode": fix_mode,
             "total_records": fixed_df.height,
             "fixes_applied": len(fixes),
             "fixes": fixes,
             "output_path": output_path,
         }
+        if write_error:
+            result["write_error"] = write_error
+        return result
 
     if name == "run_transforms":
         import polars as pl
@@ -458,20 +490,40 @@ def _dispatch(name: str, args: dict, session_cls: type) -> dict:
                 "error": "goldenflow is not installed. Install with: pip install goldenmatch[transform]",
             }
 
-        df = pl.read_csv(args["file_path"], encoding="utf8-lossy", ignore_errors=True)
+        file_path = args.get("file_path")
+        if not file_path:
+            return {"error": "Missing required parameter: file_path"}
+
+        try:
+            df = pl.read_csv(file_path, encoding="utf8-lossy", ignore_errors=True)
+        except FileNotFoundError:
+            return {"error": f"File not found: {file_path}"}
+        except Exception as exc:
+            return {"error": f"Could not read CSV '{file_path}': {exc}"}
+
+        logger.info("run_transforms: transforming %s (%d records)", file_path, df.height)
         tc = TransformConfig(mode="silent")
-        transformed_df, fixes = run_transform(df, tc)
+        transformed_df, fixes = run_transform(df, tc, strict=True)
+        logger.info("run_transforms: %d transforms applied", len(fixes))
 
         output_path = args.get("output_path")
+        write_error = None
         if output_path:
-            transformed_df.write_csv(output_path)
+            try:
+                transformed_df.write_csv(output_path)
+            except Exception as exc:
+                write_error = f"Results computed but failed to write to '{output_path}': {exc}"
+                output_path = None
 
-        return {
-            "file": args["file_path"],
+        result = {
+            "file": file_path,
             "total_records": transformed_df.height,
             "transforms_applied": len(fixes),
             "transforms": fixes,
             "output_path": output_path,
         }
+        if write_error:
+            result["write_error"] = write_error
+        return result
 
     return {"error": f"Unknown agent tool: {name}"}
