@@ -749,9 +749,15 @@ def _extract_stats(result: dict) -> dict:
     dupes = result.get("dupes")
     unique = result.get("unique")
 
+    # total_records counts *input* rows, not output tables. Every source
+    # record lives in exactly one of:
+    #   - dupes:  rows that are members of a 2+ cluster
+    #   - unique: rows that did not match anything
+    # golden is a derived rollup (one canonical record per multi-member
+    # cluster), not another row population. Including it here double-counted
+    # every cluster and made total_records > df.height whenever any
+    # duplicates were found.
     total_records = 0
-    if golden is not None:
-        total_records += golden.height
     if dupes is not None:
         total_records += dupes.height
     if unique is not None:

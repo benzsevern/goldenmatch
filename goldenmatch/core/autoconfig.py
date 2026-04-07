@@ -417,10 +417,37 @@ def build_matchkeys(
 
         scorer, weight, transforms = scorer_info
 
-        if scorer == "exact" and p.cardinality_ratio > 0 and p.cardinality_ratio < 0.01:
+        # Geo and zip are blocking signals, NOT identity claims. An exact
+        # matchkey on res_city_desc asserts "two records sharing a city are
+        # the same entity", which is catastrophically wrong for person /
+        # address dedup: every voter in Raleigh collapses into one cluster.
+        # These columns still drive blocking via build_blocking() — they just
+        # must not become matchkeys themselves. Only true identifiers
+        # (email, phone, identifier) may back an exact matchkey.
+        if scorer == "exact" and p.col_type in ("zip", "geo"):
+            logger.info(
+                "Skipping exact matchkey for '%s' (col_type=%s is a blocking "
+                "signal, not an identity claim). It remains a blocking candidate.",
+                p.name, p.col_type,
+            )
+            continue
+
+        # Exact matchkeys assert identity equivalence, so the backing column
+        # must be plausibly unique. True identifiers (email, phone, driver
+        # license, SSN) have cardinality_ratio close to 1.0. The old 0.01
+        # guard only caught pathological cases and missed realistic footguns:
+        # e.g. birth_year (80 distinct / 5000 rows = 0.016) misclassified as
+        # phone after a date transform, gender codes classified as string,
+        # state codes classified as geo. Requiring >= 0.5 ensures at least
+        # half the values are distinct before the column can back an exact
+        # matchkey. This is a rough heuristic — the right long-term answer
+        # is per-type thresholds — but it closes the class of bugs where
+        # low-cardinality numeric columns collapse into mega-clusters.
+        if scorer == "exact" and p.cardinality_ratio > 0 and p.cardinality_ratio < 0.5:
             logger.warning(
-                "Skipping exact matchkey for '%s' (cardinality_ratio=%.4f; "
-                "too few distinct values — would match nearly everything)",
+                "Skipping exact matchkey for '%s' (cardinality_ratio=%.4f < 0.5; "
+                "column lacks identifier-level uniqueness — exact match would "
+                "create spurious mega-clusters)",
                 p.name, p.cardinality_ratio,
             )
             continue
@@ -1154,13 +1181,24 @@ def auto_configure_df(
 
     # ── Data-driven strategy selection ──
 
-    # 1. Learned blocking for large datasets
-    if blocking is not None and total_rows >= 5000:
+    # 1. Learned blocking for large datasets.
+    #
+    # Gated at >= 50K rows. The previous threshold of 5K was a footgun: on a
+    # 5K dataset the learner trained its predicates on 100% of its own input
+    # (sample_size was also 5K), producing overfit predicates and multi-minute
+    # runtimes. The sample size is now capped at 25% of the dataset (max 5K)
+    # so the learner always has held-out rows to generalize to, and the gate
+    # is raised so small/medium datasets use static blocking by default where
+    # the quality wins of learned blocking do not pay for its training cost.
+    if blocking is not None and total_rows >= 50_000:
         blocking.strategy = "learned"
-        blocking.learned_sample_size = 5000
+        blocking.learned_sample_size = min(total_rows // 4, 5000)
         blocking.learned_min_recall = 0.95
         blocking.skip_oversized = True
-        logger.info("Upgraded to learned blocking (dataset has %d rows)", total_rows)
+        logger.info(
+            "Upgraded to learned blocking (dataset has %d rows, sample_size=%d)",
+            total_rows, blocking.learned_sample_size,
+        )
 
     # 2. Reranking for multi-field matchkeys
     for mk in matchkeys:
