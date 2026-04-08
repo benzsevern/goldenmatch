@@ -11,12 +11,15 @@ Usage:
 """
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import polars as pl
+
+logger = logging.getLogger(__name__)
 
 
 def _detect_llm_provider() -> str | None:
@@ -749,13 +752,35 @@ def _extract_stats(result: dict) -> dict:
     dupes = result.get("dupes")
     unique = result.get("unique")
 
+    # total_records counts *input* rows, not output tables. Every source
+    # record lives in exactly one of:
+    #   - dupes:  rows that are members of a 2+ cluster
+    #   - unique: rows that did not match anything
+    # golden is a derived rollup (one canonical record per multi-member
+    # cluster), not another row population. Including it here double-counted
+    # every cluster and made total_records > df.height whenever any
+    # duplicates were found.
     total_records = 0
-    if golden is not None:
-        total_records += golden.height
     if dupes is not None:
         total_records += dupes.height
     if unique is not None:
         total_records += unique.height
+
+    # Defensive: if a pipeline path ever produces a golden-only result with
+    # dupes/unique elided, total_records would silently be 0 and match_rate
+    # a meaningless 0/0. The standard pipeline always materializes dupes
+    # and unique when it materializes golden, so ANY golden-present /
+    # dupes-absent / unique-absent shape is a contract violation and deserves
+    # the warning — including an empty golden, since that still means a
+    # refactor started producing golden without dupes/unique.
+    if golden is not None and dupes is None and unique is None:
+        logger.warning(
+            "Stats aggregation received golden (%d rows) with no dupes/unique "
+            "tables — total_records will be 0. This shape is not produced by "
+            "the standard pipeline; if you hit this, the pipeline output "
+            "contract has changed and _extract_stats needs updating.",
+            golden.height,
+        )
 
     total_clusters = sum(1 for c in clusters.values() if c.get("size", 0) > 1)
     matched_records = sum(c.get("size", 0) for c in clusters.values() if c.get("size", 0) > 1)

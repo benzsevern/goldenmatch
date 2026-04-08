@@ -558,10 +558,17 @@ class TestExtractHelpers:
         assert stats["match_rate"] == 0.0
 
     def test_extract_stats_with_data(self):
+        """total_records counts *input* rows (dupes + unique), not output
+        tables. golden is a derived rollup — one canonical per multi-member
+        cluster — and must NOT be added on top, or the count exceeds the
+        number of rows that were ever in the dataset.
+        """
         from goldenmatch._api import _extract_stats
-        golden = pl.DataFrame({"x": [1, 2]})
-        dupes = pl.DataFrame({"x": [3]})
-        unique = pl.DataFrame({"x": [4, 5]})
+        # Realistic shape: 1 duplicate cluster with 2 source rows (rolled up
+        # to 1 golden canonical), plus 2 unique singletons. Input rows = 4.
+        golden = pl.DataFrame({"x": [10]})     # 1 canonical
+        dupes = pl.DataFrame({"x": [1, 2]})    # 2 source rows in cluster
+        unique = pl.DataFrame({"x": [3, 4]})   # 2 singletons
         clusters = {
             0: {"size": 2, "members": [1, 2], "pair_scores": {}},
             1: {"size": 1, "members": [3], "pair_scores": {}},
@@ -570,7 +577,7 @@ class TestExtractHelpers:
             "golden": golden, "dupes": dupes, "unique": unique,
             "clusters": clusters,
         })
-        assert stats["total_records"] == 5
+        assert stats["total_records"] == 4  # dupes(2) + unique(2), NOT + golden
         assert stats["total_clusters"] == 1  # only size > 1
         assert stats["matched_records"] == 2
 

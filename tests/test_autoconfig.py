@@ -850,11 +850,16 @@ class TestCardinalityBoundaryValues:
         assert email_profile.cardinality_ratio < 0.95
         # email should now be eligible (though may or may not be selected depending on block size)
 
-    def test_matchkey_boundary_0_01_excluded(self):
-        """Column with cardinality_ratio < 0.01 should be excluded from exact matchkeys."""
+    def test_geo_never_promoted_to_exact_matchkey(self):
+        """col_type='geo' is a blocking signal, not an identity claim.
+
+        Two records sharing a city or state are not the same entity. Geo
+        columns are excluded from exact matchkeys regardless of cardinality,
+        and still participate in blocking via build_blocking().
+        """
         random.seed(42)
         profiles = [
-            ColumnProfile("state", "Utf8", "geo", 0.9, cardinality_ratio=0.009),
+            ColumnProfile("state", "Utf8", "geo", 0.9, cardinality_ratio=0.9),
             ColumnProfile("name", "Utf8", "name", 0.9, cardinality_ratio=0.5),
         ]
         matchkeys = build_matchkeys(profiles)
@@ -864,11 +869,11 @@ class TestCardinalityBoundaryValues:
                 exact_fields.extend(f.field for f in mk.fields)
         assert "state" not in exact_fields
 
-    def test_matchkey_boundary_0_01_included(self):
-        """Column with cardinality_ratio exactly 0.01 should be included in exact matchkeys."""
+    def test_zip_never_promoted_to_exact_matchkey(self):
+        """col_type='zip' is a blocking signal, not an identity claim."""
         random.seed(42)
         profiles = [
-            ColumnProfile("state", "Utf8", "geo", 0.9, cardinality_ratio=0.01),
+            ColumnProfile("zip_code", "Utf8", "zip", 0.9, cardinality_ratio=0.9),
             ColumnProfile("name", "Utf8", "name", 0.9, cardinality_ratio=0.5),
         ]
         matchkeys = build_matchkeys(profiles)
@@ -876,10 +881,53 @@ class TestCardinalityBoundaryValues:
         for mk in matchkeys:
             if mk.type == "exact":
                 exact_fields.extend(f.field for f in mk.fields)
-        assert "state" in exact_fields
+        assert "zip_code" not in exact_fields
+
+    def test_exact_typed_low_cardinality_excluded(self):
+        """Even an exact-scoring column (e.g. phone, email) with
+        cardinality_ratio < 0.5 must not back an exact matchkey.
+
+        This is the birth_year-as-phone failure mode: a 4-digit year that
+        an upstream transform reshapes into an ISO date looks phone-shaped
+        to the phone classifier, but with ~80 distinct values in 5K rows
+        its cardinality is too low to function as an identity claim.
+        """
+        random.seed(42)
+        profiles = [
+            ColumnProfile("year_looks_phoney", "Utf8", "phone", 0.9, cardinality_ratio=0.016),
+            ColumnProfile("name", "Utf8", "name", 0.9, cardinality_ratio=0.5),
+        ]
+        matchkeys = build_matchkeys(profiles)
+        exact_fields = []
+        for mk in matchkeys:
+            if mk.type == "exact":
+                exact_fields.extend(f.field for f in mk.fields)
+        assert "year_looks_phoney" not in exact_fields
+
+    def test_exact_typed_high_cardinality_included(self):
+        """An exact-scoring column (email) with high cardinality is still
+        promoted to an exact matchkey."""
+        random.seed(42)
+        profiles = [
+            ColumnProfile("email", "Utf8", "email", 0.9, cardinality_ratio=0.9),
+            ColumnProfile("name", "Utf8", "name", 0.9, cardinality_ratio=0.5),
+        ]
+        matchkeys = build_matchkeys(profiles)
+        exact_fields = []
+        for mk in matchkeys:
+            if mk.type == "exact":
+                exact_fields.extend(f.field for f in mk.fields)
+        assert "email" in exact_fields
 
     def test_matchkey_default_cardinality_not_affected(self):
-        """Profiles with default cardinality_ratio=0.0 should NOT be affected by the guard."""
+        """Profiles with default cardinality_ratio=0.0 should NOT be affected
+        by the guard (the guard only triggers when cardinality_ratio > 0).
+
+        Callers that construct ColumnProfile without a cardinality_ratio
+        (tests, small synthetic fixtures) should not have their exact
+        matchkeys silently dropped — the guard only suppresses columns
+        with real measured low cardinality.
+        """
         random.seed(42)
         profiles = [
             ColumnProfile("email", "Utf8", "email", 0.9),  # cardinality_ratio defaults to 0.0
@@ -1026,26 +1074,47 @@ class TestDataDrivenStrategy:
     """Tests for data-driven strategy selection in auto-config."""
 
     def test_learned_blocking_large_dataset(self):
-        """Datasets >= 5000 rows should get learned blocking."""
+        """Datasets >= 50K rows should get learned blocking.
+
+        The threshold was raised from 5K in fix/autoconfig-regressions
+        because at 5K the learner trained its predicates on 100% of the
+        dataset (sample_size=5K), producing multi-minute runtimes and
+        overfit predicates on small inputs. The gate is now 50K rows,
+        and sample_size is capped at 25% of the dataset.
+        """
         from goldenmatch.core.autoconfig import auto_configure_df
 
         df = pl.DataFrame({
-            "name": [f"Person {i}" for i in range(5000)],
-            "city": [f"City {i % 100}" for i in range(5000)],
+            "name": [f"Person {i}" for i in range(60_000)],
+            "city": [f"City {i % 100}" for i in range(60_000)],
         })
 
         config = auto_configure_df(df)
         assert config.blocking is not None
         assert config.blocking.strategy == "learned"
         assert config.blocking.learned_min_recall == 0.95
+        assert config.blocking.learned_sample_size <= 60_000 // 4
 
     def test_static_blocking_small_dataset(self):
-        """Datasets < 5000 rows should keep static blocking."""
+        """Datasets < 50K rows should keep static/multi_pass blocking."""
         from goldenmatch.core.autoconfig import auto_configure_df
 
         df = pl.DataFrame({
             "name": ["John Smith", "Jane Doe", "Bob Wilson"],
             "city": ["NYC", "LA", "Chicago"],
+        })
+
+        config = auto_configure_df(df)
+        assert config.blocking is not None
+        assert config.blocking.strategy != "learned"
+
+    def test_medium_dataset_not_upgraded_to_learned(self):
+        """5K-49K row datasets must stay on static/multi_pass blocking."""
+        from goldenmatch.core.autoconfig import auto_configure_df
+
+        df = pl.DataFrame({
+            "name": [f"Person {i}" for i in range(5_000)],
+            "city": [f"City {i % 100}" for i in range(5_000)],
         })
 
         config = auto_configure_df(df)

@@ -397,6 +397,12 @@ def build_matchkeys(
     fuzzy_fields = []
     description_columns = []
 
+    # Track why each exact-eligible column was skipped, so the aggregate
+    # warning below can explain *which* columns were lost and *why* instead
+    # of just a count. This is the difference between a notebook user
+    # noticing their config silently degraded and not.
+    skipped_exact: list[tuple[str, str]] = []  # (column, reason)
+
     for p in profiles:
         if p.col_type in ("numeric", "date", "identifier"):
             continue  # skip non-matchable columns
@@ -417,23 +423,54 @@ def build_matchkeys(
 
         scorer, weight, transforms = scorer_info
 
-        if scorer == "exact" and p.cardinality_ratio > 0 and p.cardinality_ratio < 0.01:
+        # Geo and zip are blocking signals, NOT identity claims. An exact
+        # matchkey on a city column asserts "two records sharing a city are
+        # the same entity", which collapses every record per city into one
+        # mega-cluster. These columns still drive blocking via build_blocking;
+        # they just cannot back matchkeys themselves.
+        if scorer == "exact" and p.col_type in ("zip", "geo"):
+            reason = f"col_type={p.col_type} is a blocking signal, not an identity claim"
             logger.warning(
-                "Skipping exact matchkey for '%s' (cardinality_ratio=%.4f; "
-                "too few distinct values — would match nearly everything)",
-                p.name, p.cardinality_ratio,
+                "Skipping exact matchkey for '%s' (%s). "
+                "Column remains a blocking candidate.",
+                p.name, reason,
             )
+            skipped_exact.append((p.name, reason))
+            continue
+
+        # Exact matchkeys assert identity equivalence, so the backing column
+        # must be plausibly unique. Requiring cardinality_ratio >= 0.5 ensures
+        # at least half the values are distinct before the column can back an
+        # exact matchkey. This catches low-cardinality numeric columns that
+        # get misclassified by upstream transforms — e.g. a 4-digit year
+        # reshaped into an ISO date can look phone-shaped to the phone
+        # classifier, collapsing every row sharing that year into one cluster.
+        # TODO(autoconfig): replace this blanket threshold with per-type
+        # cardinality thresholds once we have empirical data for each col_type.
+        if scorer == "exact" and p.cardinality_ratio > 0 and p.cardinality_ratio < 0.5:
+            reason = (
+                f"cardinality_ratio={p.cardinality_ratio:.4f} < 0.5 "
+                f"— lacks identifier-level uniqueness"
+            )
+            logger.warning(
+                "Skipping exact matchkey for '%s' (%s). "
+                "Exact match would create spurious mega-clusters.",
+                p.name, reason,
+            )
+            skipped_exact.append((p.name, reason))
             continue
 
         # Skip exact matchkeys for large datasets — exact matchkeys do a full
         # self-join which is O(N^2) without blocking. For auto-configure, use
         # exact columns only in blocking (handled by build_blocking).
         if scorer == "exact" and df is not None and df.height > 10000:
-            logger.info(
-                "Skipping exact matchkey for '%s' (dataset has %d rows; "
-                "exact self-joins are O(N^2) — use blocking instead)",
-                p.name, df.height,
+            reason = f"dataset has {df.height} rows; exact self-join is O(N^2)"
+            logger.warning(
+                "Skipping exact matchkey for '%s' (%s). "
+                "Use blocking instead.",
+                p.name, reason,
             )
+            skipped_exact.append((p.name, reason))
             continue
 
         mf = MatchkeyField(
@@ -448,17 +485,34 @@ def build_matchkeys(
         else:
             fuzzy_fields.append(mf)
 
-    # Warn if all exact-eligible columns were excluded by guards
+    # Aggregate warning: if every exact-eligible column was filtered out,
+    # explain which ones and why. This is the load-bearing surface that tells
+    # a notebook user their auto-config silently degraded to fuzzy-only.
     _exact_eligible = [
         p for p in profiles
         if p.col_type not in ("numeric", "date", "identifier", "description")
         and _SCORER_MAP.get(p.col_type, (None,))[0] == "exact"
     ]
     if _exact_eligible and not exact_fields:
+        if skipped_exact:
+            detail = "; ".join(f"{col} ({why})" for col, why in skipped_exact)
+        else:
+            # All exact-eligible columns were filtered before reaching the
+            # named skip paths above — e.g. by a source-overlap check, a
+            # dropped profile, or a scorer_info lookup miss. Surface this
+            # shape loudly so a future refactor that starts dropping columns
+            # silently can be noticed.
+            eligible_names = ", ".join(p.name for p in _exact_eligible)
+            detail = (
+                f"no per-column reason captured — eligible columns "
+                f"({eligible_names}) were filtered before reaching the "
+                f"exact-matchkey skip paths"
+            )
         logger.warning(
-            "All %d exact-eligible columns were excluded by cardinality/size guards. "
-            "Falling back to fuzzy-only matchkeys. Consider providing explicit config.",
-            len(_exact_eligible),
+            "All %d exact-eligible columns were excluded by auto-config guards "
+            "(%s). Falling back to fuzzy-only matchkeys — if any of these "
+            "columns actually are identifiers, provide an explicit config.",
+            len(_exact_eligible), detail,
         )
 
     matchkeys = []
@@ -1154,13 +1208,27 @@ def auto_configure_df(
 
     # ── Data-driven strategy selection ──
 
-    # 1. Learned blocking for large datasets
-    if blocking is not None and total_rows >= 5000:
+    # 1. Learned blocking for large datasets.
+    #
+    # Gated at >= 50K rows because the learner needs two things the sample
+    # cap below cannot provide on smaller inputs:
+    #
+    #   a) held-out rows to generalize to — `learned_sample_size` caps the
+    #      training sample at 25% of the dataset, max 5K. Below 50K that cap
+    #      is tight enough (<=12.5K training / 37.5K held-out) to produce
+    #      predicates that generalize instead of memorizing the input.
+    #
+    #   b) enough rows to amortize training cost — below 50K, static or
+    #      multi_pass blocking is usually faster and comparable in quality.
+    if blocking is not None and total_rows >= 50_000:
         blocking.strategy = "learned"
-        blocking.learned_sample_size = 5000
+        blocking.learned_sample_size = min(total_rows // 4, 5000)
         blocking.learned_min_recall = 0.95
         blocking.skip_oversized = True
-        logger.info("Upgraded to learned blocking (dataset has %d rows)", total_rows)
+        logger.info(
+            "Upgraded to learned blocking (dataset has %d rows, sample_size=%d)",
+            total_rows, blocking.learned_sample_size,
+        )
 
     # 2. Reranking for multi-field matchkeys
     for mk in matchkeys:

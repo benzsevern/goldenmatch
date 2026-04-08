@@ -44,3 +44,4 @@ venv/
 .cursorrules
 .windsurfrules
 docs/superpowers/
+.profile_tmp/
