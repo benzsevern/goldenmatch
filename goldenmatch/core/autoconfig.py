@@ -397,6 +397,12 @@ def build_matchkeys(
     fuzzy_fields = []
     description_columns = []
 
+    # Track why each exact-eligible column was skipped, so the aggregate
+    # warning below can explain *which* columns were lost and *why* instead
+    # of just a count. This is the difference between a notebook user
+    # noticing their config silently degraded and not.
+    skipped_exact: list[tuple[str, str]] = []  # (column, reason)
+
     for p in profiles:
         if p.col_type in ("numeric", "date", "identifier"):
             continue  # skip non-matchable columns
@@ -418,49 +424,53 @@ def build_matchkeys(
         scorer, weight, transforms = scorer_info
 
         # Geo and zip are blocking signals, NOT identity claims. An exact
-        # matchkey on res_city_desc asserts "two records sharing a city are
-        # the same entity", which is catastrophically wrong for person /
-        # address dedup: every voter in Raleigh collapses into one cluster.
-        # These columns still drive blocking via build_blocking() — they just
-        # must not become matchkeys themselves. Only true identifiers
-        # (email, phone, identifier) may back an exact matchkey.
+        # matchkey on a city column asserts "two records sharing a city are
+        # the same entity", which collapses every record per city into one
+        # mega-cluster. These columns still drive blocking via build_blocking;
+        # they just cannot back matchkeys themselves.
         if scorer == "exact" and p.col_type in ("zip", "geo"):
-            logger.info(
-                "Skipping exact matchkey for '%s' (col_type=%s is a blocking "
-                "signal, not an identity claim). It remains a blocking candidate.",
-                p.name, p.col_type,
+            reason = f"col_type={p.col_type} is a blocking signal, not an identity claim"
+            logger.warning(
+                "Skipping exact matchkey for '%s' (%s). "
+                "Column remains a blocking candidate.",
+                p.name, reason,
             )
+            skipped_exact.append((p.name, reason))
             continue
 
         # Exact matchkeys assert identity equivalence, so the backing column
-        # must be plausibly unique. True identifiers (email, phone, driver
-        # license, SSN) have cardinality_ratio close to 1.0. The old 0.01
-        # guard only caught pathological cases and missed realistic footguns:
-        # e.g. birth_year (80 distinct / 5000 rows = 0.016) misclassified as
-        # phone after a date transform, gender codes classified as string,
-        # state codes classified as geo. Requiring >= 0.5 ensures at least
-        # half the values are distinct before the column can back an exact
-        # matchkey. This is a rough heuristic — the right long-term answer
-        # is per-type thresholds — but it closes the class of bugs where
-        # low-cardinality numeric columns collapse into mega-clusters.
+        # must be plausibly unique. Requiring cardinality_ratio >= 0.5 ensures
+        # at least half the values are distinct before the column can back an
+        # an exact matchkey. This catches low-cardinality numeric columns that
+        # get misclassified by upstream transforms — e.g. a 4-digit year
+        # reshaped into an ISO date can look phone-shaped, and without this
+        # guard ~60 people per birth year would collapse into mega-clusters.
+        # TODO(autoconfig): replace this blanket threshold with per-type
+        # cardinality thresholds once we have empirical data for each col_type.
         if scorer == "exact" and p.cardinality_ratio > 0 and p.cardinality_ratio < 0.5:
-            logger.warning(
-                "Skipping exact matchkey for '%s' (cardinality_ratio=%.4f < 0.5; "
-                "column lacks identifier-level uniqueness — exact match would "
-                "create spurious mega-clusters)",
-                p.name, p.cardinality_ratio,
+            reason = (
+                f"cardinality_ratio={p.cardinality_ratio:.4f} < 0.5 "
+                f"— lacks identifier-level uniqueness"
             )
+            logger.warning(
+                "Skipping exact matchkey for '%s' (%s). "
+                "Exact match would create spurious mega-clusters.",
+                p.name, reason,
+            )
+            skipped_exact.append((p.name, reason))
             continue
 
         # Skip exact matchkeys for large datasets — exact matchkeys do a full
         # self-join which is O(N^2) without blocking. For auto-configure, use
         # exact columns only in blocking (handled by build_blocking).
         if scorer == "exact" and df is not None and df.height > 10000:
-            logger.info(
-                "Skipping exact matchkey for '%s' (dataset has %d rows; "
-                "exact self-joins are O(N^2) — use blocking instead)",
-                p.name, df.height,
+            reason = f"dataset has {df.height} rows; exact self-join is O(N^2)"
+            logger.warning(
+                "Skipping exact matchkey for '%s' (%s). "
+                "Use blocking instead.",
+                p.name, reason,
             )
+            skipped_exact.append((p.name, reason))
             continue
 
         mf = MatchkeyField(
@@ -475,17 +485,21 @@ def build_matchkeys(
         else:
             fuzzy_fields.append(mf)
 
-    # Warn if all exact-eligible columns were excluded by guards
+    # Aggregate warning: if every exact-eligible column was filtered out,
+    # explain which ones and why. This is the load-bearing surface that tells
+    # a notebook user their auto-config silently degraded to fuzzy-only.
     _exact_eligible = [
         p for p in profiles
         if p.col_type not in ("numeric", "date", "identifier", "description")
         and _SCORER_MAP.get(p.col_type, (None,))[0] == "exact"
     ]
     if _exact_eligible and not exact_fields:
+        detail = "; ".join(f"{col} ({why})" for col, why in skipped_exact) or "no detail"
         logger.warning(
-            "All %d exact-eligible columns were excluded by cardinality/size guards. "
-            "Falling back to fuzzy-only matchkeys. Consider providing explicit config.",
-            len(_exact_eligible),
+            "All %d exact-eligible columns were excluded by auto-config guards "
+            "(%s). Falling back to fuzzy-only matchkeys — if any of these "
+            "columns actually are identifiers, provide an explicit config.",
+            len(_exact_eligible), detail,
         )
 
     matchkeys = []

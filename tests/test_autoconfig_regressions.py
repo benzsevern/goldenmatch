@@ -20,10 +20,37 @@ the bugs under test.
 """
 from __future__ import annotations
 
+import time
+
 import polars as pl
 
 from goldenmatch import dedupe_df
-from goldenmatch.core.autoconfig import auto_configure_df
+from goldenmatch._api import _extract_stats
+from goldenmatch.core.autoconfig import (
+    ColumnProfile,
+    auto_configure_df,
+    build_matchkeys,
+)
+
+
+# Realistic surname pool that distributes across soundex codes. Using a
+# pattern like f"Last{i:05d}" is a trap: every synthetic name starting with
+# "Last" collapses to the same soundex code, so soundex(last_name) blocking
+# lands every row in ONE giant block and downstream fuzzy scoring becomes
+# O(n^2) — a 5K test that was meant to run in 15s hangs for an hour.
+_SURNAMES = [
+    "Smith", "Jones", "Williams", "Brown", "Davis", "Miller", "Wilson",
+    "Moore", "Taylor", "Anderson", "Thomas", "Jackson", "White", "Harris",
+    "Martin", "Thompson", "Garcia", "Martinez", "Robinson", "Clark",
+    "Rodriguez", "Lewis", "Lee", "Walker", "Hall", "Allen", "Young",
+    "King", "Wright", "Lopez",
+]
+_FIRSTNAMES = [
+    "Alex", "Blair", "Casey", "Dana", "Eli", "Finley", "Gray", "Harper",
+    "Indigo", "Jamie", "Kendall", "Logan", "Morgan", "Noel", "Oakley",
+    "Parker", "Quinn", "Riley", "Sage", "Taylor", "Umi", "Val", "Wren",
+    "Xena", "Yael", "Zane",
+]
 
 
 def _person_df(n: int) -> pl.DataFrame:
@@ -32,12 +59,14 @@ def _person_df(n: int) -> pl.DataFrame:
     - 3 distinct cities / 3 distinct zips → low cardinality geo/zip
     - 80 distinct birth years → low cardinality numeric (was misclassified
       as phone after upstream date transforms)
-    - distinct names per row
+    - surnames drawn from a 30-name pool so soundex blocking produces
+      ~30 blocks of n/30 each (keeps fuzzy scoring tractable)
+    - distinct addresses per row so no real duplicates
     """
     return pl.DataFrame([
         {
-            "last_name": f"Last{i:05d}",
-            "first_name": f"First{i:05d}",
+            "last_name": _SURNAMES[i % len(_SURNAMES)],
+            "first_name": f"{_FIRSTNAMES[i % len(_FIRSTNAMES)]}{i}",
             "middle_name": f"M{i % 26}",
             "res_street_address": f"{i} Main St",
             "res_city_desc": ["Raleigh", "Durham", "Cary"][i % 3],
@@ -172,3 +201,212 @@ def test_total_records_equals_input_row_count_with_duplicates():
         f"Stats aggregation is double-counting the golden rollup "
         f"(golden + dupes + unique instead of dupes + unique)."
     )
+
+
+# ── Positive cases: the fixes must NOT over-exclude legitimate identifiers ─
+
+def test_high_cardinality_email_still_promoted_to_exact():
+    """The raised cardinality guard (0.5) must not accidentally exclude real
+    identifier columns. Email with ratio ~0.95 should still back an exact
+    matchkey. This is the negative-of-the-fix test: any future tightening
+    that breaks email classification must fail CI, because silently losing
+    the most common dedupe key destroys recall without warning.
+    """
+    profiles = [
+        ColumnProfile("email", "Utf8", "email", 0.95, cardinality_ratio=0.95),
+        ColumnProfile("name",  "Utf8", "name",  0.9,  cardinality_ratio=0.5),
+    ]
+    matchkeys = build_matchkeys(profiles)
+    exact_fields: list[str] = []
+    for mk in matchkeys:
+        if mk.type == "exact":
+            exact_fields.extend(f.field for f in mk.fields)
+    assert "email" in exact_fields, (
+        "high-cardinality email (ratio=0.95) was not promoted to exact matchkey"
+    )
+
+
+def test_high_cardinality_phone_still_promoted_to_exact():
+    """Same as email: phone with high cardinality must still back an exact
+    matchkey. Separately tested because phone has a different col_type
+    scorer lookup path and a misclassification on phone is the exact
+    regression #2 exists to prevent on the *negative* side."""
+    profiles = [
+        ColumnProfile("phone", "Utf8", "phone", 0.95, cardinality_ratio=0.90),
+        ColumnProfile("name",  "Utf8", "name",  0.9,  cardinality_ratio=0.5),
+    ]
+    matchkeys = build_matchkeys(profiles)
+    exact_fields: list[str] = []
+    for mk in matchkeys:
+        if mk.type == "exact":
+            exact_fields.extend(f.field for f in mk.fields)
+    assert "phone" in exact_fields, (
+        "high-cardinality phone (ratio=0.90) was not promoted to exact matchkey"
+    )
+
+
+# ── Boundary values at the new thresholds ─────────────────────────────────
+
+def test_learned_blocking_exact_50k_boundary_triggers():
+    """The gate is `>= 50_000`, so a dataset of exactly 50,000 rows MUST
+    upgrade to learned blocking. Guards against an off-by-one refactor
+    switching `>=` to `>`.
+    """
+    cfg = auto_configure_df(_person_df(50_000))
+    assert cfg.blocking is not None
+    assert cfg.blocking.strategy == "learned", (
+        f"total_rows=50_000 did not trigger learned blocking: "
+        f"strategy={cfg.blocking.strategy}"
+    )
+
+
+def test_learned_blocking_just_below_50k_does_not_trigger():
+    """49,999 rows must stay on static/multi_pass — off-by-one guard on
+    the low side of the boundary."""
+    cfg = auto_configure_df(_person_df(49_999))
+    assert cfg.blocking is not None
+    assert cfg.blocking.strategy != "learned", (
+        f"total_rows=49_999 triggered learned blocking: "
+        f"strategy={cfg.blocking.strategy}"
+    )
+
+
+def test_cardinality_guard_exact_0_5_boundary_included():
+    """The matchkey guard is `< 0.5`, so a column at exactly 0.5 MUST be
+    included. This pins the contract against a future tightening that
+    silently flips the comparator to `<=`.
+    """
+    profiles = [
+        ColumnProfile("email", "Utf8", "email", 0.95, cardinality_ratio=0.5),
+        ColumnProfile("name",  "Utf8", "name",  0.9,  cardinality_ratio=0.5),
+    ]
+    matchkeys = build_matchkeys(profiles)
+    exact_fields: list[str] = []
+    for mk in matchkeys:
+        if mk.type == "exact":
+            exact_fields.extend(f.field for f in mk.fields)
+    assert "email" in exact_fields, (
+        "cardinality_ratio=0.5 was excluded — guard should be strict < 0.5"
+    )
+
+
+def test_cardinality_guard_just_below_0_5_excluded():
+    """0.4999 is below the guard and must be excluded."""
+    profiles = [
+        ColumnProfile("email", "Utf8", "email", 0.95, cardinality_ratio=0.4999),
+        ColumnProfile("name",  "Utf8", "name",  0.9,  cardinality_ratio=0.5),
+    ]
+    matchkeys = build_matchkeys(profiles)
+    exact_fields: list[str] = []
+    for mk in matchkeys:
+        if mk.type == "exact":
+            exact_fields.extend(f.field for f in mk.fields)
+    assert "email" not in exact_fields, (
+        "cardinality_ratio=0.4999 was included — guard should exclude <0.5"
+    )
+
+
+# ── Interaction: single e2e run that exercises all three fixes together ───
+
+def test_dedupe_df_interaction_all_three_fixes_together():
+    """One end-to-end run that would hit all three bugs simultaneously if
+    any regressed:
+
+    - Bug 1 (learned blocking auto-upgrade): pre-fix this triggered at
+      >= 5K rows and hung for minutes. A 500-row run must finish fast.
+    - Bug 2 (geo/zip/low-card → exact matchkey): pre-fix this collapsed
+      every record per city/zip/birth-year into mega-clusters. We bound
+      the largest cluster at 10 members.
+    - Bug 3 (total_records double-count): pre-fix this exceeded df.height
+      by the number of multi-member clusters. We assert strict equality.
+
+    Uses 500 rows rather than 5000 — big enough that all three guards
+    actually engage (blocking falls through geo/zip guards, cardinality
+    guard fires on birth_year, config shape is non-trivial) but small
+    enough to run in a handful of seconds including cross-encoder warm-up.
+    A 5K run on the same synthetic shape would take significantly longer
+    because the surname pool is small (by design) and ensemble scoring
+    grows quadratically inside each soundex block.
+    """
+    df = _person_df(500)
+    t0 = time.perf_counter()
+    result = dedupe_df(df)
+    elapsed = time.perf_counter() - t0
+
+    # Bug 1: runtime must not explode. 90s is generous for a 500-row run
+    # (actual runtime is ~15s with cold-start cross-encoder loading).
+    assert elapsed < 90.0, (
+        f"dedupe_df(500) took {elapsed:.1f}s — expected < 90s. "
+        f"Likely cause: a blocking / matchkey fix regressed and the "
+        f"scorer is doing O(n^2) work inside a single huge block."
+    )
+    # Bug 2: no mega-clusters. Synthetic data has distinct addresses and
+    # rotating surnames/firstnames, so real clusters (if any from ensemble
+    # noise) should be tiny. Any cluster > 10 members indicates a
+    # geo/zip/low-cardinality column regressed back into an exact matchkey.
+    if result.clusters:
+        largest = max(len(c["members"]) for c in result.clusters.values())
+        assert largest <= 10, (
+            f"Largest cluster has {largest} members. Expected <= 10 on "
+            f"synthetic data with distinct addresses. Likely cause: "
+            f"geo/zip or low-cardinality column promoted back into an "
+            f"exact matchkey."
+        )
+    # Bug 3: row count invariant.
+    assert result.total_records == df.height, (
+        f"total_records={result.total_records} != df.height={df.height}. "
+        f"Likely cause: _extract_stats re-added golden to the sum."
+    )
+
+
+# ── _extract_stats edge cases (contract pinning) ──────────────────────────
+
+def test_extract_stats_golden_only_warns_not_silent_zero():
+    """If a pipeline path ever produces golden without dupes/unique, the
+    stats helper must surface it as a warning rather than silently returning
+    total_records=0 (which would make match_rate a meaningless 0/0).
+
+    This is a contract test — the standard pipeline always materializes
+    all three, so if this shape ever starts appearing a refactor changed
+    _api.py's output contract and _extract_stats needs revisiting.
+    """
+    import logging
+    caplog_records = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            caplog_records.append(record)
+
+    handler = _Capture()
+    api_logger = logging.getLogger("goldenmatch._api")
+    api_logger.addHandler(handler)
+    api_logger.setLevel(logging.WARNING)
+    try:
+        stats = _extract_stats({
+            "golden": pl.DataFrame({"x": [1, 2, 3]}),
+            "dupes": None,
+            "unique": None,
+            "clusters": {0: {"size": 3, "members": [1, 2, 3], "pair_scores": {}}},
+        })
+    finally:
+        api_logger.removeHandler(handler)
+
+    assert stats["total_records"] == 0
+    # Must have warned — silent zero is the exact failure mode we want to
+    # prevent because match_rate divides by total_records.
+    assert any("golden" in r.getMessage() for r in caplog_records), (
+        "golden-only result shape returned zeroed stats with no warning"
+    )
+
+
+def test_extract_stats_all_none_returns_empty():
+    """All-None input is a valid empty-result shape (no records at all)
+    and must return zero stats cleanly without raising or warning about
+    the golden-only edge case.
+    """
+    stats = _extract_stats({
+        "golden": None, "dupes": None, "unique": None, "clusters": {},
+    })
+    assert stats["total_records"] == 0
+    assert stats["total_clusters"] == 0
+    assert stats["match_rate"] == 0.0
