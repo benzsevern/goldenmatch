@@ -768,10 +768,12 @@ def _extract_stats(result: dict) -> dict:
 
     # Defensive: if a pipeline path ever produces a golden-only result with
     # dupes/unique elided, total_records would silently be 0 and match_rate
-    # a meaningless 0/0. That shape is unexpected today (the pipeline always
-    # materializes dupes and unique when it materializes golden), so surface
-    # it loudly rather than silently returning zeroed stats.
-    if total_records == 0 and golden is not None and golden.height > 0:
+    # a meaningless 0/0. The standard pipeline always materializes dupes
+    # and unique when it materializes golden, so ANY golden-present /
+    # dupes-absent / unique-absent shape is a contract violation and deserves
+    # the warning — including an empty golden, since that still means a
+    # refactor started producing golden without dupes/unique.
+    if golden is not None and dupes is None and unique is None:
         logger.warning(
             "Stats aggregation received golden (%d rows) with no dupes/unique "
             "tables — total_records will be 0. This shape is not produced by "

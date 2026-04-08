@@ -51,6 +51,19 @@ _FIRSTNAMES = [
     "Parker", "Quinn", "Riley", "Sage", "Taylor", "Umi", "Val", "Wren",
     "Xena", "Yael", "Zane",
 ]
+# Address street names must vary too, not just the numeric prefix. A naive
+# generator like f"{i} Main St" makes every address share the "Main St"
+# suffix, so the token_sort address scorer returns ~0.67 on every pair
+# inside a soundex block; combined with last_name exact weight that nudges
+# ensemble scores over threshold and union-find transitively merges the
+# whole block into one fuzzy-false-positive cluster. Rotating street names
+# keeps the synthetic fixture from producing fuzzy noise that masquerades
+# as a bug-2 regression.
+_STREETS = [
+    "Elm St", "Oak Ave", "Pine Rd", "Maple Dr", "Cedar Ln", "Birch Ct",
+    "Walnut Way", "Chestnut Blvd", "Willow Pl", "Hickory Pk",
+    "Spruce Tr", "Poplar Cir", "Aspen Rte", "Sycamore Hwy", "Beech Row",
+]
 
 
 def _person_df(n: int) -> pl.DataFrame:
@@ -61,14 +74,16 @@ def _person_df(n: int) -> pl.DataFrame:
       as phone after upstream date transforms)
     - surnames drawn from a 30-name pool so soundex blocking produces
       ~30 blocks of n/30 each (keeps fuzzy scoring tractable)
-    - distinct addresses per row so no real duplicates
+    - first names AND street names rotate through independent pools so
+      no two rows share enough fuzzy-matchable content to trip the
+      ensemble scorer into transitive merges (no real duplicates)
     """
     return pl.DataFrame([
         {
             "last_name": _SURNAMES[i % len(_SURNAMES)],
             "first_name": f"{_FIRSTNAMES[i % len(_FIRSTNAMES)]}{i}",
             "middle_name": f"M{i % 26}",
-            "res_street_address": f"{i} Main St",
+            "res_street_address": f"{i} {_STREETS[i % len(_STREETS)]}",
             "res_city_desc": ["Raleigh", "Durham", "Cary"][i % 3],
             "zip_code": ["27601", "27701", "27511"][i % 3],
             "birth_year": str(1930 + (i % 80)),
@@ -96,7 +111,7 @@ def test_learned_blocking_not_triggered_below_50k():
 def test_learned_blocking_sample_size_capped_at_quarter():
     """When learned blocking does engage, sample_size must stay below 25% of
     the dataset so the learner always has held-out rows to generalize to."""
-    cfg = auto_configure_df(_person_df(60_000))
+    cfg = auto_configure_df(_gate_test_df(60_000))
     assert cfg.blocking is not None
     if cfg.blocking.strategy == "learned":
         assert cfg.blocking.learned_sample_size <= 60_000 // 4, (
@@ -247,23 +262,46 @@ def test_high_cardinality_phone_still_promoted_to_exact():
 
 # ── Boundary values at the new thresholds ─────────────────────────────────
 
+def _gate_test_df(n: int) -> pl.DataFrame:
+    """Trivial 2-column fixture for boundary-gate tests.
+
+    The learned-blocking gate only reads `df.height`, not column content.
+    Building `_person_df(50_000)` for every boundary test wastes ~2s per run
+    on dict-of-strings construction for values the gate never inspects.
+    This fixture keeps the two columns auto-config needs (one name-typed,
+    one email-typed) so a valid config with non-None blocking is produced,
+    but skips the per-row payload.
+    """
+    return pl.DataFrame({
+        "name":  [f"Person{i}" for i in range(n)],
+        "email": [f"user{i}@example.com" for i in range(n)],
+    })
+
+
 def test_learned_blocking_exact_50k_boundary_triggers():
     """The gate is `>= 50_000`, so a dataset of exactly 50,000 rows MUST
     upgrade to learned blocking. Guards against an off-by-one refactor
-    switching `>=` to `>`.
+    switching `>=` to `>`. Also asserts `learned_sample_size == 5000` to
+    pin the `min(total_rows // 4, 5000)` formula — at 50K that clamps to
+    5000, and a regression flipping `// 4` to `// 5` would silently shrink
+    the sample to 4000 without this assertion failing.
     """
-    cfg = auto_configure_df(_person_df(50_000))
+    cfg = auto_configure_df(_gate_test_df(50_000))
     assert cfg.blocking is not None
     assert cfg.blocking.strategy == "learned", (
         f"total_rows=50_000 did not trigger learned blocking: "
         f"strategy={cfg.blocking.strategy}"
+    )
+    assert cfg.blocking.learned_sample_size == 5000, (
+        f"at total_rows=50_000 expected learned_sample_size=5000 "
+        f"(min(50000//4, 5000)), got {cfg.blocking.learned_sample_size}"
     )
 
 
 def test_learned_blocking_just_below_50k_does_not_trigger():
     """49,999 rows must stay on static/multi_pass — off-by-one guard on
     the low side of the boundary."""
-    cfg = auto_configure_df(_person_df(49_999))
+    cfg = auto_configure_df(_gate_test_df(49_999))
     assert cfg.blocking is not None
     assert cfg.blocking.strategy != "learned", (
         f"total_rows=49_999 triggered learned blocking: "
@@ -320,37 +358,56 @@ def test_dedupe_df_interaction_all_three_fixes_together():
     - Bug 3 (total_records double-count): pre-fix this exceeded df.height
       by the number of multi-member clusters. We assert strict equality.
 
-    Uses 500 rows rather than 5000 — big enough that all three guards
-    actually engage (blocking falls through geo/zip guards, cardinality
-    guard fires on birth_year, config shape is non-trivial) but small
-    enough to run in a handful of seconds including cross-encoder warm-up.
-    A 5K run on the same synthetic shape would take significantly longer
-    because the surname pool is small (by design) and ensemble scoring
-    grows quadratically inside each soundex block.
+    Builds the config via `auto_configure_df` (which exercises all the
+    fixed code paths) and then disables `rerank=True` on weighted matchkeys
+    before running the pipeline. Reranking auto-loads a cross-encoder model
+    from Hugging Face, which would make this test fail for the wrong reason
+    on offline CI runners with no HF cache. Disabling it is safe here
+    because none of the three regressions live in the rerank code path —
+    they all live in build_matchkeys / the stats aggregator.
+
+    Uses 500 rows — large enough that all three guards actually engage
+    (blocking falls through geo/zip guards, cardinality guard fires on
+    birth_year, config shape is non-trivial, stats aggregation runs over
+    a non-empty clusters dict) but small enough to run in a couple seconds.
     """
     df = _person_df(500)
+
+    # Exercise the fixed auto-config path explicitly so we can strip
+    # reranking out of the produced config before the pipeline runs.
+    # If the bug-2 fix regressed, this call would still produce exact
+    # matchkeys on city/zip/birth_year and the downstream assertions
+    # below would catch it.
+    config = auto_configure_df(df)
+    for mk in config.get_matchkeys():
+        if getattr(mk, "rerank", False):
+            mk.rerank = False
+
     t0 = time.perf_counter()
-    result = dedupe_df(df)
+    result = dedupe_df(df, config=config)
     elapsed = time.perf_counter() - t0
 
-    # Bug 1: runtime must not explode. 90s is generous for a 500-row run
-    # (actual runtime is ~15s with cold-start cross-encoder loading).
-    assert elapsed < 90.0, (
-        f"dedupe_df(500) took {elapsed:.1f}s — expected < 90s. "
+    # Bug 1: runtime must not explode. 30s is generous for a 500-row run
+    # with rerank disabled (actual runtime is ~2s on a warm runner).
+    assert elapsed < 30.0, (
+        f"dedupe_df(500) took {elapsed:.1f}s — expected < 30s. "
         f"Likely cause: a blocking / matchkey fix regressed and the "
         f"scorer is doing O(n^2) work inside a single huge block."
     )
-    # Bug 2: no mega-clusters. Synthetic data has distinct addresses and
-    # rotating surnames/firstnames, so real clusters (if any from ensemble
-    # noise) should be tiny. Any cluster > 10 members indicates a
-    # geo/zip/low-cardinality column regressed back into an exact matchkey.
+    # Bug 2: no mega-clusters. The fixture has 3 cities, 3 zip codes, and
+    # 80 birth years, so a regression reintroducing exact matchkeys on
+    # those columns would produce clusters of ~167 (city/zip) or larger.
+    # The assertion bound is set at 50 — well above the ~17-member ceiling
+    # from benign fuzzy transitive merges inside a single soundex block
+    # (500 rows / 30 surname pool ≈ 17 per block), and well below the 167
+    # that any bug-2-style column-wide collapse would produce.
     if result.clusters:
         largest = max(len(c["members"]) for c in result.clusters.values())
-        assert largest <= 10, (
-            f"Largest cluster has {largest} members. Expected <= 10 on "
-            f"synthetic data with distinct addresses. Likely cause: "
-            f"geo/zip or low-cardinality column promoted back into an "
-            f"exact matchkey."
+        assert largest <= 50, (
+            f"Largest cluster has {largest} members — exceeds 50. "
+            f"Bug-2-style city/zip mega-clusters produce clusters of "
+            f"~167 members on this fixture. Likely cause: geo/zip or "
+            f"low-cardinality column regressed back into an exact matchkey."
         )
     # Bug 3: row count invariant.
     assert result.total_records == df.height, (

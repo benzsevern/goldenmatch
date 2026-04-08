@@ -441,10 +441,10 @@ def build_matchkeys(
         # Exact matchkeys assert identity equivalence, so the backing column
         # must be plausibly unique. Requiring cardinality_ratio >= 0.5 ensures
         # at least half the values are distinct before the column can back an
-        # an exact matchkey. This catches low-cardinality numeric columns that
+        # exact matchkey. This catches low-cardinality numeric columns that
         # get misclassified by upstream transforms — e.g. a 4-digit year
-        # reshaped into an ISO date can look phone-shaped, and without this
-        # guard ~60 people per birth year would collapse into mega-clusters.
+        # reshaped into an ISO date can look phone-shaped to the phone
+        # classifier, collapsing every row sharing that year into one cluster.
         # TODO(autoconfig): replace this blanket threshold with per-type
         # cardinality thresholds once we have empirical data for each col_type.
         if scorer == "exact" and p.cardinality_ratio > 0 and p.cardinality_ratio < 0.5:
@@ -494,7 +494,20 @@ def build_matchkeys(
         and _SCORER_MAP.get(p.col_type, (None,))[0] == "exact"
     ]
     if _exact_eligible and not exact_fields:
-        detail = "; ".join(f"{col} ({why})" for col, why in skipped_exact) or "no detail"
+        if skipped_exact:
+            detail = "; ".join(f"{col} ({why})" for col, why in skipped_exact)
+        else:
+            # All exact-eligible columns were filtered before reaching the
+            # named skip paths above — e.g. by a source-overlap check, a
+            # dropped profile, or a scorer_info lookup miss. Surface this
+            # shape loudly so a future refactor that starts dropping columns
+            # silently can be noticed.
+            eligible_names = ", ".join(p.name for p in _exact_eligible)
+            detail = (
+                f"no per-column reason captured — eligible columns "
+                f"({eligible_names}) were filtered before reaching the "
+                f"exact-matchkey skip paths"
+            )
         logger.warning(
             "All %d exact-eligible columns were excluded by auto-config guards "
             "(%s). Falling back to fuzzy-only matchkeys — if any of these "
@@ -1197,13 +1210,16 @@ def auto_configure_df(
 
     # 1. Learned blocking for large datasets.
     #
-    # Gated at >= 50K rows. The previous threshold of 5K was a footgun: on a
-    # 5K dataset the learner trained its predicates on 100% of its own input
-    # (sample_size was also 5K), producing overfit predicates and multi-minute
-    # runtimes. The sample size is now capped at 25% of the dataset (max 5K)
-    # so the learner always has held-out rows to generalize to, and the gate
-    # is raised so small/medium datasets use static blocking by default where
-    # the quality wins of learned blocking do not pay for its training cost.
+    # Gated at >= 50K rows because the learner needs two things the sample
+    # cap below cannot provide on smaller inputs:
+    #
+    #   a) held-out rows to generalize to — `learned_sample_size` caps the
+    #      training sample at 25% of the dataset, max 5K. Below 50K that cap
+    #      is tight enough (<=12.5K training / 37.5K held-out) to produce
+    #      predicates that generalize instead of memorizing the input.
+    #
+    #   b) enough rows to amortize training cost — below 50K, static or
+    #      multi_pass blocking is usually faster and comparable in quality.
     if blocking is not None and total_rows >= 50_000:
         blocking.strategy = "learned"
         blocking.learned_sample_size = min(total_rows // 4, 5000)
