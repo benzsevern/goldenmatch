@@ -22,7 +22,7 @@ from pathlib import Path
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import Tool, TextContent, Resource, Prompt
 
 from goldenmatch.mcp.agent_tools import AGENT_TOOLS, handle_agent_tool
 
@@ -408,6 +408,14 @@ def create_server(file_paths: list[str] | None = None, config_path: str | None =
                 },
             ),
         ]
+
+    @server.list_resources()
+    async def list_resources() -> list[Resource]:
+        return []
+
+    @server.list_prompts()
+    async def list_prompts() -> list[Prompt]:
+        return []
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
