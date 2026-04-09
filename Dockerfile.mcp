@@ -1,5 +1,5 @@
 FROM python:3.12-slim
-
+# cache-bust: v1.4.4 (empty resources/prompts handlers)
 WORKDIR /app
 
 COPY . .
