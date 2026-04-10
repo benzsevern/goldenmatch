@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "goldenmatch",
-      "version": "1.4.5",
+      "version": "1.4.7",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
