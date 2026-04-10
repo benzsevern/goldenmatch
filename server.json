@@ -4,7 +4,7 @@
   "title": "GoldenMatch",
   "description": "Find duplicate records in 30 seconds. Zero-config entity resolution, 97.2% F1 out of the box.",
   "websiteUrl": "https://benzsevern.github.io/goldenmatch/",
-  "version": "1.4.6",
+  "version": "1.4.7",
   "repository": {
     "url": "https://github.com/benzsevern/goldenmatch",
     "source": "github"
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "goldenmatch",
-      "version": "1.4.4",
+      "version": "1.4.5",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
