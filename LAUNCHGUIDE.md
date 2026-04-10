@@ -28,6 +28,8 @@ Record deduplication, Entity resolution, Customer matching, Data merging, Golden
 - Cluster management — inspect, shatter, unmerge, suggest config improvements
 - Real-time single-record matching against loaded datasets
 - 30 MCP tools covering the full ER workflow
+- 4 MCP Resources: dataset stats, cluster summary, current config, dataset schema
+- 5 MCP Prompts: deduplicate-walkthrough, investigate-cluster, compare-records, data-quality-audit, pprl-setup
 - Integrates with GoldenCheck (scan quality) and GoldenFlow (transform)
 
 ## Getting Started
