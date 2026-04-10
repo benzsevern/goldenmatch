@@ -2,8 +2,9 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.benzsevern/goldenmatch",
   "title": "GoldenMatch",
-  "description": "Entity resolution toolkit — deduplicate, match records, golden records, PPRL",
-  "version": "1.4.4",
+  "description": "Find duplicate records in 30 seconds. Zero-config entity resolution, 97.2% F1 out of the box.",
+  "websiteUrl": "https://benzsevern.github.io/goldenmatch/",
+  "version": "1.4.5",
   "repository": {
     "url": "https://github.com/benzsevern/goldenmatch.git",
     "source": "github"
