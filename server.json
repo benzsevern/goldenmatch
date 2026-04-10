@@ -4,9 +4,9 @@
   "title": "GoldenMatch",
   "description": "Find duplicate records in 30 seconds. Zero-config entity resolution, 97.2% F1 out of the box.",
   "websiteUrl": "https://benzsevern.github.io/goldenmatch/",
-  "version": "1.4.5",
+  "version": "1.4.6",
   "repository": {
-    "url": "https://github.com/benzsevern/goldenmatch.git",
+    "url": "https://github.com/benzsevern/goldenmatch",
     "source": "github"
   },
   "packages": [
