@@ -1,0 +1,8 @@
+# Directories containing private/internal packages — not the published MCP server.
+dbt-goldenmatch/
+tests/
+docs/
+examples/
+scripts/
+assets/
+checkpoints/

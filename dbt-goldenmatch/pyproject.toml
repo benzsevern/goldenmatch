@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "Ben Severn", email = "benzsevern@gmail.com" }]
+classifiers = ["Private :: Do Not Upload"]
 dependencies = [
     "goldenmatch>=0.3.0",
     "dbt-core>=1.7",
