@@ -10,7 +10,7 @@ description = "Entity resolution toolkit — deduplicate records, match across s
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-authors = [{ name = "Ben Severn", email = "benzsevern@gmail.com" }]
+authors = [{ name = "Ben Severn", email = "ben@bensevern.dev" }]
 keywords = ["entity-resolution", "deduplication", "record-matching", "golden-record", "data-quality"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -42,6 +42,7 @@ dependencies = [
 Homepage = "https://github.com/benzsevern/goldenmatch"
 Documentation = "https://benzsevern.github.io/goldenmatch/"
 Changelog = "https://github.com/benzsevern/goldenmatch/blob/main/CHANGELOG.md"
+Author = "https://bensevern.dev"
 Repository = "https://github.com/benzsevern/goldenmatch"
 Issues = "https://github.com/benzsevern/goldenmatch/issues"
 

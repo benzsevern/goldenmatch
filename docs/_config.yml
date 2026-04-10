@@ -22,7 +22,7 @@ aux_links:
 
 aux_links_new_tab: true
 
-footer_content: "GoldenMatch — MIT License"
+footer_content: "GoldenMatch &mdash; MIT License &mdash; Built by <a href=\"https://bensevern.dev\">Ben Severn</a>"
 
 exclude:
   - wiki/

@@ -2,6 +2,7 @@
 # GoldenMatch
 
 **Find duplicate records in 30 seconds. No rules to write, no models to train.**
+Built by [Ben Severn](https://bensevern.dev).
 
 ![GoldenMatch Demo](docs/screenshots/demo.svg)
 
@@ -773,6 +774,10 @@ goldenmatch/
 - **Iterative LLM calibration** — instead of scoring all candidates, calibrates the decision threshold from ~200 sampled pairs. Typically converges in 2-3 rounds at negligible cost (~$0.01 on a 401K-row equipment dataset).
 - **ANN hybrid blocking** — oversized blocks that exceed the max block size now fall back to embedding-based ANN sub-blocking automatically, keeping blocks tractable without manual tuning.
 - **Auto-config classification fixes** — improved heuristics for ID and price fields, utility-based field ranking to select better blocking keys, and LLM-assisted classification for ambiguous column names.
+
+## Author
+
+[Ben Severn](https://bensevern.dev)
 
 ## License
 
