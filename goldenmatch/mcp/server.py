@@ -22,7 +22,10 @@ from pathlib import Path
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent, Resource, Prompt
+from mcp.types import (
+    Tool, TextContent, Resource, Prompt,
+    PromptArgument, PromptMessage,
+)
 
 from goldenmatch.mcp.agent_tools import AGENT_TOOLS, handle_agent_tool
 
@@ -411,11 +414,242 @@ def create_server(file_paths: list[str] | None = None, config_path: str | None =
 
     @server.list_resources()
     async def list_resources() -> list[Resource]:
-        return []
+        resources = []
+        if _result is not None:
+            s = _result.stats
+            resources.append(Resource(
+                uri="goldenmatch://dataset/stats",
+                name="Dataset Statistics",
+                description=f"{s.total_records} records, {s.total_clusters} clusters, {round(s.match_rate, 1)}% match rate",
+                mimeType="application/json",
+            ))
+            resources.append(Resource(
+                uri="goldenmatch://dataset/clusters",
+                name="Cluster Summary",
+                description=f"{s.total_clusters} clusters (avg size {round(s.avg_cluster_size, 1)}, max {s.max_cluster_size})",
+                mimeType="application/json",
+            ))
+        if _config is not None:
+            resources.append(Resource(
+                uri="goldenmatch://config/current",
+                name="Current Configuration",
+                description="Active matchkeys, thresholds, scorers, and blocking rules",
+                mimeType="application/json",
+            ))
+        if _rows:
+            resources.append(Resource(
+                uri="goldenmatch://dataset/schema",
+                name="Dataset Schema",
+                description="Column names, types, and sample values from the loaded data",
+                mimeType="application/json",
+            ))
+        return resources
+
+    @server.read_resource()
+    async def read_resource(uri: str) -> str:
+        if uri == "goldenmatch://dataset/stats":
+            if _result is None:
+                return json.dumps({"error": "No dataset loaded"})
+            s = _result.stats
+            return json.dumps({
+                "total_records": s.total_records,
+                "total_clusters": s.total_clusters,
+                "singleton_count": s.singleton_count,
+                "match_rate": round(s.match_rate, 2),
+                "avg_cluster_size": round(s.avg_cluster_size, 2),
+                "max_cluster_size": s.max_cluster_size,
+                "total_pairs": len(_result.scored_pairs),
+            }, indent=2)
+        elif uri == "goldenmatch://dataset/clusters":
+            if _result is None:
+                return json.dumps({"error": "No dataset loaded"})
+            clusters = {}
+            for row in _rows:
+                cid = row.get("__cluster_id__")
+                if cid is not None:
+                    clusters.setdefault(cid, []).append(row.get("__row_id__"))
+            summary = [
+                {"cluster_id": cid, "size": len(members)}
+                for cid, members in sorted(clusters.items(), key=lambda x: -len(x[1]))
+                if len(members) > 1
+            ][:50]
+            return json.dumps({"clusters": summary, "total": len(summary)}, indent=2)
+        elif uri == "goldenmatch://config/current":
+            if _config is None:
+                return json.dumps({"error": "No config loaded"})
+            return json.dumps(_config.to_dict(), default=str, indent=2)
+        elif uri == "goldenmatch://dataset/schema":
+            if not _rows:
+                return json.dumps({"error": "No dataset loaded"})
+            sample = _rows[0] if _rows else {}
+            cols = [
+                {"name": k, "type": type(v).__name__, "sample": str(v)[:100]}
+                for k, v in sample.items()
+                if not k.startswith("__")
+            ]
+            return json.dumps({"columns": cols, "record_count": len(_rows)}, indent=2)
+        else:
+            return json.dumps({"error": f"Unknown resource: {uri}"})
 
     @server.list_prompts()
     async def list_prompts() -> list[Prompt]:
-        return []
+        return [
+            Prompt(
+                name="deduplicate-walkthrough",
+                description="Step-by-step guided deduplication workflow: profile data, configure matching, run, review results, fix bad merges.",
+                arguments=[
+                    PromptArgument(
+                        name="focus",
+                        description="What to focus on: 'accuracy' (minimize false positives), 'recall' (minimize missed duplicates), or 'balanced' (default)",
+                        required=False,
+                    ),
+                ],
+            ),
+            Prompt(
+                name="investigate-cluster",
+                description="Deep-dive into a specific cluster: explain why records matched, identify potential bad merges, suggest fixes.",
+                arguments=[
+                    PromptArgument(
+                        name="cluster_id",
+                        description="The cluster ID to investigate",
+                        required=True,
+                    ),
+                ],
+            ),
+            Prompt(
+                name="compare-records",
+                description="Detailed comparison of two records: field-by-field scoring, match/no-match verdict, explanation.",
+                arguments=[
+                    PromptArgument(
+                        name="record_a",
+                        description="First record as JSON (e.g. {\"name\": \"John Smith\", \"email\": \"john@test.com\"})",
+                        required=True,
+                    ),
+                    PromptArgument(
+                        name="record_b",
+                        description="Second record as JSON",
+                        required=True,
+                    ),
+                ],
+            ),
+            Prompt(
+                name="data-quality-audit",
+                description="Full data quality audit: profile columns, identify issues, recommend cleaning steps before matching.",
+                arguments=[],
+            ),
+            Prompt(
+                name="pprl-setup",
+                description="Guide through privacy-preserving record linkage setup: assess data sensitivity, recommend PPRL config, run linkage.",
+                arguments=[
+                    PromptArgument(
+                        name="security_level",
+                        description="Security level: 'standard', 'high', or 'maximum'",
+                        required=False,
+                    ),
+                ],
+            ),
+        ]
+
+    @server.get_prompt()
+    async def get_prompt(name: str, arguments: dict | None = None) -> list[PromptMessage]:
+        args = arguments or {}
+
+        if name == "deduplicate-walkthrough":
+            focus = args.get("focus", "balanced")
+            return [PromptMessage(
+                role="user",
+                content=PromptTextContent(
+                    type="text",
+                    text=(
+                        f"I want to deduplicate my dataset with a '{focus}' focus. Walk me through it step by step:\n\n"
+                        "1. First, call `profile_data` to understand the data shape and quality.\n"
+                        "2. Review the profile and call `analyze_data` to detect the domain and recommend a strategy.\n"
+                        "3. Call `auto_configure` to generate matching config, or help me build one manually.\n"
+                        "4. Run `agent_deduplicate` to execute the matching pipeline.\n"
+                        "5. Call `get_stats` to show me the results summary.\n"
+                        "6. Call `list_clusters` to show the largest clusters.\n"
+                        "7. For any suspicious clusters, call `agent_explain_cluster` to check if the merges are correct.\n"
+                        "8. If there are bad merges, call `suggest_config` with examples and help me tune.\n"
+                        "9. Finally, call `export_results` to save the output.\n\n"
+                        "Start with step 1 now."
+                    ),
+                ),
+            )]
+
+        elif name == "investigate-cluster":
+            cluster_id = args.get("cluster_id", "0")
+            return [PromptMessage(
+                role="user",
+                content=PromptTextContent(
+                    type="text",
+                    text=(
+                        f"Investigate cluster {cluster_id} in detail:\n\n"
+                        f"1. Call `get_cluster` with cluster_id={cluster_id} to see all member records.\n"
+                        f"2. Call `agent_explain_cluster` with cluster_id={cluster_id} to understand why these records were grouped.\n"
+                        f"3. Call `get_golden_record` with cluster_id={cluster_id} to see the merged canonical record.\n"
+                        "4. For any pair that looks suspicious, call `explain_match` with the two records.\n"
+                        "5. If a record doesn't belong, call `unmerge_record` to remove it.\n"
+                        "6. If the whole cluster is wrong, call `shatter_cluster` to break it apart.\n\n"
+                        "Start with step 1 now."
+                    ),
+                ),
+            )]
+
+        elif name == "compare-records":
+            rec_a = args.get("record_a", "{}")
+            rec_b = args.get("record_b", "{}")
+            return [PromptMessage(
+                role="user",
+                content=PromptTextContent(
+                    type="text",
+                    text=(
+                        "Compare these two records and tell me if they're the same entity:\n\n"
+                        f"Record A: {rec_a}\n"
+                        f"Record B: {rec_b}\n\n"
+                        "1. Call `explain_match` with these two records to get the field-by-field score breakdown.\n"
+                        "2. Interpret the result: which fields agree, which disagree, what's the overall score vs threshold.\n"
+                        "3. Give a clear verdict: match or no-match, and explain why in plain English."
+                    ),
+                ),
+            )]
+
+        elif name == "data-quality-audit":
+            return [PromptMessage(
+                role="user",
+                content=PromptTextContent(
+                    type="text",
+                    text=(
+                        "Run a full data quality audit on the loaded dataset:\n\n"
+                        "1. Call `profile_data` to get column types, null rates, unique counts, and samples.\n"
+                        "2. If goldencheck is available, call `scan_quality` for deeper issue detection.\n"
+                        "3. Summarize: which columns have quality issues (high nulls, low cardinality, inconsistent formats)?\n"
+                        "4. Recommend specific cleaning steps before running entity resolution.\n"
+                        "5. If goldenflow is available, suggest `run_transforms` for phone/date/unicode normalization."
+                    ),
+                ),
+            )]
+
+        elif name == "pprl-setup":
+            level = args.get("security_level", "high")
+            return [PromptMessage(
+                role="user",
+                content=PromptTextContent(
+                    type="text",
+                    text=(
+                        f"Help me set up privacy-preserving record linkage at '{level}' security:\n\n"
+                        "1. Call `suggest_pprl` to check if my data needs privacy-preserving matching.\n"
+                        "2. Call `pprl_auto_config` to get recommended PPRL settings (bloom filter params, fields, thresholds).\n"
+                        "3. Review the config and explain the tradeoffs (precision vs recall vs privacy).\n"
+                        "4. When ready, call `pprl_link` to execute the privacy-preserving linkage.\n"
+                        "5. Show me the results and compare accuracy to non-PPRL matching if available."
+                    ),
+                ),
+            )]
+
+        return [PromptMessage(
+            role="user",
+            content=PromptTextContent(type="text", text=f"Unknown prompt: {name}"),
+        )]
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
