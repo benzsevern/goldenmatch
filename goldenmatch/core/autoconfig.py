@@ -64,6 +64,28 @@ class ColumnProfile:
     avg_len: float = 0.0  # average string length
 
 
+@dataclass
+class AutoConfigDecisions:
+    """Captures the *choices* auto_configure_df makes from profiled data.
+
+    Separating decisions from the GoldenMatchConfig enables future iterative
+    tuning (see spec docs/superpowers/specs/2026-04-14-autoconfig-verification-design.md
+    section 7.2): a future loop can nudge these decisions without re-profiling
+    and then rebuild the config via `_rebuild_from_decisions`.
+
+    Populated only by auto_configure_df; not persisted to YAML.
+    """
+
+    blocking_strategy: str
+    blocking_keys: list[BlockingKeyConfig]
+    blocking_passes: list[BlockingKeyConfig]
+    matchkeys: list[MatchkeyConfig]
+    threshold: float
+    domain_mode: str | None
+    llm_enabled: bool
+    allow_remote_assets: bool
+
+
 def _classify_by_name(col_name: str) -> str | None:
     """Phase 1: classify column by name pattern matching.
 

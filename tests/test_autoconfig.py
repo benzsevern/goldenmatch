@@ -1314,3 +1314,28 @@ def test_classify_by_data_prose_not_multi_name():
     ] * 10
     col_type, _ = _classify_by_data(values)
     assert col_type != "multi_name"
+
+
+def test_autoconfig_parity_pins_unchanged():
+    """Pin test: AutoConfigDecisions refactor must not change output for the
+    three benchmarks. If this fails, the refactor changed behavior - fix the
+    refactor, not the pin file."""
+    import json
+    import sys
+    from pathlib import Path
+
+    import polars as pl
+
+    repo_root = Path(__file__).parent.parent
+    # Import pin_config from the capture script (not a normal test import)
+    sys.path.insert(0, str(repo_root / "tests" / "parity"))
+    from capture_autoconfig_output import pin_config  # type: ignore
+
+    pin_file = repo_root / "tests" / "parity" / "autoconfig-classification.json"
+    expected = {p["name"]: p for p in json.loads(pin_file.read_text())}
+
+    datasets = repo_root / "tests" / "benchmarks" / "datasets"
+    dblp = pl.read_csv(datasets / "DBLP-ACM/DBLP2.csv", encoding="utf8-lossy", ignore_errors=True)
+    acm = pl.read_csv(datasets / "DBLP-ACM/ACM.csv", encoding="utf8-lossy", ignore_errors=True)
+    got = pin_config("dblp_acm", pl.concat([dblp, acm], how="diagonal_relaxed"))
+    assert got == expected["dblp_acm"], "parity drift: diff between pin and current output"
