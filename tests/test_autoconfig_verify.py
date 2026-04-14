@@ -133,3 +133,38 @@ def test_preflight_check4_warns_on_mega_block():
     report = preflight(df, cfg)
     warnings = [f for f in report.findings if f.check == "block_size"]
     assert warnings and not warnings[0].repaired
+
+
+def test_preflight_check5_demotes_embedding_by_default():
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    from goldenmatch.core.autoconfig_verify import preflight
+    df = pl.DataFrame({"name": ["alice", "bob"], "desc": ["x", "y"]})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["name"])]),
+        matchkeys=[MatchkeyConfig(name="mk", type="weighted", threshold=0.7, fields=[
+            MatchkeyField(field="desc", scorer="embedding", weight=1.0),
+        ])],
+    )
+    report = preflight(df, cfg, allow_remote_assets=False)
+    demoted = [mk for mk in cfg.get_matchkeys() for f in mk.fields if f.scorer == "ensemble"]
+    assert demoted
+    findings = [f for f in report.findings if f.check == "remote_asset"]
+    assert findings and findings[0].repaired
+
+
+def test_preflight_check5_keeps_embedding_when_allowed():
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    from goldenmatch.core.autoconfig_verify import preflight
+    df = pl.DataFrame({"name": ["alice", "bob"], "desc": ["x", "y"]})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["name"])]),
+        matchkeys=[MatchkeyConfig(name="mk", type="weighted", threshold=0.7, fields=[
+            MatchkeyField(field="desc", scorer="embedding", weight=1.0),
+        ])],
+    )
+    preflight(df, cfg, allow_remote_assets=True)
+    assert any(f.scorer == "embedding" for mk in cfg.get_matchkeys() for f in mk.fields)

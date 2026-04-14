@@ -349,6 +349,72 @@ def _check_block_sizes(
             )
 
 
+_REMOTE_SCORERS = frozenset({"embedding", "record_embedding"})
+
+
+def _check_remote_assets(
+    config: "GoldenMatchConfig",
+    report: PreflightReport,
+    *,
+    allow_remote_assets: bool,
+) -> None:
+    """Check 5: demote scorers that require downloading models or hitting the
+    network, unless the caller explicitly allowed them or an LLM scorer is
+    already enabled (which implies online operation is fine).
+    """
+    if allow_remote_assets:
+        return
+
+    llm_enabled = (
+        config.llm_scorer is not None and config.llm_scorer.enabled is True
+    )
+    if llm_enabled:
+        return
+
+    for mk in config.get_matchkeys():
+        uses_remote = any(f.scorer in _REMOTE_SCORERS for f in mk.fields)
+        uses_rerank = bool(mk.rerank)
+        if not (uses_remote or uses_rerank):
+            continue
+
+        for f in mk.fields:
+            if f.scorer in _REMOTE_SCORERS:
+                original = f.scorer
+                f.scorer = "ensemble"
+                report.findings.append(
+                    PreflightFinding(
+                        check="remote_asset",
+                        severity="warning",
+                        subject=f"{mk.name}.{f.field}",
+                        message=(
+                            f"scorer '{original}' requires downloading a model; "
+                            f"demoted to 'ensemble' (offline-safe). "
+                            f"Pass allow_remote_assets=True to opt in."
+                        ),
+                        repaired=True,
+                        repair_note=f"scorer: {original} → ensemble",
+                    )
+                )
+                report.config_was_modified = True
+        if uses_rerank:
+            mk.rerank = False
+            report.findings.append(
+                PreflightFinding(
+                    check="remote_asset",
+                    severity="warning",
+                    subject=mk.name,
+                    message=(
+                        f"matchkey '{mk.name}' had rerank=True (cross-encoder "
+                        f"model download); disabled. "
+                        f"Pass allow_remote_assets=True to opt in."
+                    ),
+                    repaired=True,
+                    repair_note="rerank: True → False",
+                )
+            )
+            report.config_was_modified = True
+
+
 def preflight(
     df: "pl.DataFrame",
     config: "GoldenMatchConfig",
@@ -367,4 +433,5 @@ def preflight(
     _check_columns(df, config, report)
     _check_cardinality(df, config, report)
     _check_block_sizes(df, config, report)
+    _check_remote_assets(config, report, allow_remote_assets=allow_remote_assets)
     return report
