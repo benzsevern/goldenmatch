@@ -16,7 +16,7 @@
 import type { Row, ScoredPair, LLMScorerConfig } from "../types.js";
 import { BudgetTracker, countTokensApprox } from "./budget.js";
 import type { BudgetSnapshot } from "./budget.js";
-import { llmScorePairs } from "./scorer.js";
+import { llmScorePairs, LLMHttpError } from "./scorer.js";
 import type { LLMScoreResult } from "./scorer.js";
 
 // ---------------------------------------------------------------------------
@@ -140,7 +140,12 @@ export async function llmClusterPairs(
           apiKey,
           budget,
         );
-      } catch {
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          "llm_cluster call failed, falling back to pairwise:",
+          err instanceof Error ? err.message : String(err),
+        );
         clusterResult = null;
       }
 
@@ -381,7 +386,8 @@ async function openaiJson(
     }),
   });
   if (!resp.ok) {
-    throw new Error(`OpenAI ${resp.status}`);
+    const body = await resp.text().catch(() => "");
+    throw new LLMHttpError(resp.status, `OpenAI ${resp.status}: ${body.slice(0, 200)}`);
   }
   const data = (await resp.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
@@ -414,7 +420,8 @@ async function anthropicJson(
     }),
   });
   if (!resp.ok) {
-    throw new Error(`Anthropic ${resp.status}`);
+    const body = await resp.text().catch(() => "");
+    throw new LLMHttpError(resp.status, `Anthropic ${resp.status}: ${body.slice(0, 200)}`);
   }
   const data = (await resp.json()) as {
     content?: Array<{ text?: string }>;

@@ -50,8 +50,8 @@ function makeRng(seed: number): () => number {
     x ^= x << 13;
     x ^= x >>> 17;
     x ^= x << 5;
-    // Return in [0, 1)
-    return ((x >>> 0) % 0xffffffff) / 0xffffffff;
+    // Return in [0, 1): divide by 2^32 (not 2^32-1) so the value cannot reach 1.0.
+    return (x >>> 0) / 0x100000000;
   };
 }
 

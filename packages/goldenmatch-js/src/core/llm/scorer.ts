@@ -358,7 +358,7 @@ export async function scoreStringsWithLlm(
   b: string,
   config: LLMScorerConfig,
   apiKey?: string,
-): Promise<{ score: number; budget: BudgetSnapshot }> {
+): Promise<{ score: number; budget: BudgetSnapshot; error?: string }> {
   const budget = new BudgetTracker(
     config.budget ?? {},
     config.model ?? "gpt-4o-mini",
@@ -381,8 +381,13 @@ export async function scoreStringsWithLlm(
     const upper = text.trim().toUpperCase();
     const score = upper.includes("YES") ? 1.0 : 0.0;
     return { score, budget: budget.snapshot() };
-  } catch {
-    return { score: 0, budget: budget.snapshot() };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // eslint-disable-next-line no-console
+    console.warn("scoreStringsWithLlm failed:", message);
+    // Return score=0 (treats as "not matched") but surface the error so
+    // operators can distinguish HTTP failures from genuine LLM "no" answers.
+    return { score: 0, budget: budget.snapshot(), error: message };
   }
 }
 

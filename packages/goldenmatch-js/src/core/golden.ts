@@ -117,7 +117,9 @@ function _mostComplete(
   const strVals = nonNull.map(
     ([i, v]) => [i, String(v), v] as [number, string, unknown],
   );
-  const maxLen = Math.max(...strVals.map(([, s]) => s.length));
+  // For-loop max — Math.max(...arr) crashes on arrays with >65K elements.
+  let maxLen = 0;
+  for (const [, s] of strVals) if (s.length > maxLen) maxLen = s.length;
   const longest = strVals.filter(([, s]) => s.length === maxLen);
 
   if (longest.length === 1) {

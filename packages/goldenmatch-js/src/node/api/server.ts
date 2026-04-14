@@ -22,7 +22,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { resolve, isAbsolute } from "node:path";
+import { resolve, isAbsolute, sep } from "node:path";
 import { dedupe, match, scoreStrings } from "../../core/api.js";
 import type { Row } from "../../core/types.js";
 import {
@@ -91,7 +91,8 @@ const reviewQueue = new ReviewQueue();
 export function sanitizePath(raw: string): string {
   const resolved = isAbsolute(raw) ? resolve(raw) : resolve(process.cwd(), raw);
   const cwd = resolve(process.cwd());
-  if (!resolved.startsWith(cwd)) {
+  // Guard against prefix-bypass: cwd="/app/foo" must NOT accept "/app/foobar".
+  if (resolved !== cwd && !resolved.startsWith(cwd + sep)) {
     throw new Error(`Path '${raw}' is outside the working directory`);
   }
   return resolved;
@@ -391,8 +392,13 @@ export function startApiServer(options: StartApiOptions = {}): ReturnType<typeof
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ error: msg }));
         }
-      } catch {
-        // ignore
+      } catch (writeErr) {
+        // Response already committed or socket closed — log and move on.
+        // eslint-disable-next-line no-console
+        console.warn(
+          "Failed to write API error response:",
+          writeErr instanceof Error ? writeErr.message : String(writeErr),
+        );
       }
     });
   });

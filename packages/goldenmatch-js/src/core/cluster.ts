@@ -320,8 +320,14 @@ export function buildClusters(
 
   const clusters = uf.getClusters();
 
-  // Sort clusters by minimum member for deterministic IDs
-  clusters.sort((a, b) => Math.min(...a) - Math.min(...b));
+  // Sort clusters by minimum member for deterministic IDs.
+  // Use for-loop min — Math.min(...set) crashes on Sets with >65K elements.
+  const minOf = (s: Set<number>): number => {
+    let m = Infinity;
+    for (const v of s) if (v < m) m = v;
+    return m;
+  };
+  clusters.sort((a, b) => minOf(a) - minOf(b));
 
   // Map members to cluster IDs
   const memberToCid = new Map<number, number>();

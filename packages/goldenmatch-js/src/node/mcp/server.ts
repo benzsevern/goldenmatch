@@ -13,7 +13,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { resolve, isAbsolute } from "node:path";
+import { resolve, isAbsolute, sep } from "node:path";
 import { createInterface } from "node:readline";
 
 import { dedupe, match, scoreStrings } from "../../core/api.js";
@@ -357,7 +357,8 @@ function sanitizePath(raw: string): string {
   }
   const resolved = isAbsolute(raw) ? resolve(raw) : resolve(process.cwd(), raw);
   const cwd = resolve(process.cwd());
-  if (!resolved.startsWith(cwd)) {
+  // Guard against prefix-bypass: cwd="/app/foo" must NOT accept "/app/foobar".
+  if (resolved !== cwd && !resolved.startsWith(cwd + sep)) {
     throw new Error(`Path '${raw}' is outside the working directory`);
   }
   return resolved;

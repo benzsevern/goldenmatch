@@ -453,7 +453,12 @@ export async function rerankPair(
         : await callAnthropic(prompt, apiKey, model, maxRetries);
     const score = parseScore(res.text);
     return score ?? NaN;
-  } catch {
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "cross-encoder LLM score failed:",
+      err instanceof Error ? err.message : String(err),
+    );
     return NaN;
   }
 }
@@ -534,6 +539,7 @@ export async function rerankTopPairs(
   }
 
   const newScores = new Map<number, number>();
+  let loggedLlmError = false;
   for (const idx of targets) {
     const pair = pairs[idx]!;
     const rowA = rowById.get(pair.idA);
@@ -579,8 +585,16 @@ export async function rerankTopPairs(
       if (llmScore === null) continue;
       const combined = (1 - weight) * pair.score + weight * llmScore;
       newScores.set(idx, Math.min(1, Math.max(0, combined)));
-    } catch {
+    } catch (err) {
       // Degrade gracefully: keep original score for this pair.
+      if (!loggedLlmError) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          "rerank LLM call failed for pair; keeping original score. First error:",
+          err instanceof Error ? err.message : String(err),
+        );
+        loggedLlmError = true;
+      }
       continue;
     }
   }
