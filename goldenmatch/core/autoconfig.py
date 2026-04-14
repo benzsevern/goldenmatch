@@ -38,6 +38,7 @@ _PRICE_PATTERNS = re.compile(r"(price|cost|amount|revenue|salary|fee|charge|tota
 _ADDRESS_PATTERNS = re.compile(r"(address|street|addr|line.?1|line.?2)", re.IGNORECASE)
 _GEO_PATTERNS = re.compile(r"((?<![a-z])city|^state$|state.?cd|^country$|province|region|(?<![a-z])county)", re.IGNORECASE)
 _DATE_PATTERNS = re.compile(r"(date|_dt$|_date$|registr|created|updated|birth.?d|dob)", re.IGNORECASE)
+_YEAR_PATTERNS = re.compile(r"(^|_)(year|yr)(_|$)", re.IGNORECASE)
 _ID_PATTERNS = re.compile(
     r"^(?i:id|key|code|sku)$|_(?i:id|key)$|(?<=[a-zA-Z])(?:ID|Id)$"
     r"|(^|_)(num|no|uuid|guid)(_|$)|.*_(reg_num|ref|ref_num|account)$"
@@ -67,6 +68,8 @@ def _classify_by_name(col_name: str) -> str | None:
     """
     if _DATE_PATTERNS.search(col_name):
         return "date"
+    if _YEAR_PATTERNS.search(col_name):
+        return "year"
     if _EMAIL_PATTERNS.search(col_name):
         return "email"
     if _ID_PATTERNS.search(col_name):
@@ -102,6 +105,18 @@ def _classify_by_data(values: list[str]) -> tuple[str, float]:
         cardinality_ratio = len(set(values)) / len(values)
         if cardinality_ratio >= 0.95:
             return "identifier", 0.9
+
+    # Year detection: 4-digit integers in 1900..2100. Cheap blocking signal
+    # for bibliographic / birth-year data (not full dates).
+    def _is_year(v: str) -> bool:
+        v = v.strip()
+        if len(v) != 4 or not v.isdigit():
+            return False
+        n = int(v)
+        return 1900 <= n <= 2100
+
+    if values and all(_is_year(v) for v in values):
+        return "year", 0.9
 
     # Map profiler types to our types
     type_map = {
@@ -198,7 +213,7 @@ def profile_columns(
         # (date, geo) because data profiling frequently misclassifies them
         # (e.g., ISO dates look like phone numbers, city names look like person names).
         # For other types, Phase 2 (data) wins when it contradicts Phase 1 (name).
-        _name_authoritative = {"date", "geo", "identifier", "numeric"}
+        _name_authoritative = {"date", "geo", "identifier", "numeric", "year"}
         if name_type and name_type in _name_authoritative:
             # Name pattern is authoritative for date/geo — trust it
             col_type = name_type
@@ -415,8 +430,8 @@ def build_matchkeys(
     skipped_exact: list[tuple[str, str]] = []  # (column, reason)
 
     for p in profiles:
-        if p.col_type in ("numeric", "date", "identifier"):
-            continue  # skip non-matchable columns
+        if p.col_type in ("numeric", "date", "identifier", "year"):
+            continue  # skip non-matchable columns (year is blocking-only)
 
         if p.col_type == "description":
             fuzzy_fields.append(MatchkeyField(
@@ -909,14 +924,14 @@ def build_blocking(
 
     exact_cols = [
         p for p in profiles
-        if p.col_type in ("email", "phone", "zip", "identifier")
+        if p.col_type in ("email", "phone", "zip", "identifier", "year")
         and _null_rate(p.name) <= max_null_rate
         and p.cardinality_ratio < 0.95
         and _check_source_overlap(df, p.name) > 0.0
     ]
     # Log skipped columns
     for p in profiles:
-        if (p.col_type in ("email", "phone", "zip", "identifier")
+        if (p.col_type in ("email", "phone", "zip", "identifier", "year")
                 and _null_rate(p.name) <= max_null_rate
                 and p.cardinality_ratio < 0.95
                 and _check_source_overlap(df, p.name) == 0.0):

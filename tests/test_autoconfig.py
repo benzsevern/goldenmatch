@@ -1230,3 +1230,17 @@ def test_classify_by_name_voter_reg_num_is_identifier():
     assert _classify_by_name("voter_reg_num") == "identifier"
     assert _classify_by_name("account_no") == "identifier"
     assert _classify_by_name("guid_col") == "identifier"
+
+
+def test_classify_by_name_year_column():
+    from goldenmatch.core.autoconfig import _classify_by_name
+    assert _classify_by_name("birth_year") == "year"
+    assert _classify_by_name("year") == "year"
+    assert _classify_by_name("pub_yr") == "year"
+
+
+def test_classify_by_data_year_values():
+    from goldenmatch.core.autoconfig import _classify_by_data
+    values = ["1999", "2000", "2001", "1985", "1978"] * 10
+    col_type, _ = _classify_by_data(values)
+    assert col_type == "year"
