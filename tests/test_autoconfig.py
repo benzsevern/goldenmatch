@@ -1287,3 +1287,30 @@ def test_low_confidence_field_gets_capped_weight():
         for f in mk.fields:
             if f.field == "mystery_col":
                 assert (f.weight or 0) <= 0.3, f"low-conf field weight={f.weight}"
+
+
+def test_classify_by_name_num_kids_is_not_identifier():
+    from goldenmatch.core.autoconfig import _classify_by_name
+    assert _classify_by_name("num_kids") != "identifier"
+    assert _classify_by_name("num_days") != "identifier"
+    assert _classify_by_name("no_show") != "identifier"
+    assert _classify_by_name("yes_no") != "identifier"
+
+
+def test_classify_by_data_year_float_promoted():
+    from goldenmatch.core.autoconfig import _classify_by_data
+    values = ["1999.0", "2000.0", "2001.0", "1985.0"] * 10
+    col_type, _ = _classify_by_data(values)
+    assert col_type == "year"
+
+
+def test_classify_by_data_prose_not_multi_name():
+    from goldenmatch.core.autoconfig import _classify_by_data
+    # Long prose with one comma per row - NOT multi-name
+    values = [
+        "Today, the meeting went well and we discussed several topics at length.",
+        "Yesterday, we deployed a new version and everyone was quite pleased.",
+        "On Monday, the team gathered to review progress across multiple projects.",
+    ] * 10
+    col_type, _ = _classify_by_data(values)
+    assert col_type != "multi_name"

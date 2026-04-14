@@ -40,8 +40,13 @@ _GEO_PATTERNS = re.compile(r"((?<![a-z])city|^state$|state.?cd|^country$|provinc
 _DATE_PATTERNS = re.compile(r"(date|_dt$|_date$|registr|created|updated|birth.?d|dob)", re.IGNORECASE)
 _YEAR_PATTERNS = re.compile(r"(^|_)(year|yr)(_|$)", re.IGNORECASE)
 _ID_PATTERNS = re.compile(
-    r"^(?i:id|key|code|sku)$|_(?i:id|key)$|(?<=[a-zA-Z])(?:ID|Id)$"
-    r"|(^|_)(num|no|uuid|guid)(_|$)|.*_(reg_num|ref|ref_num|account)$"
+    r"^(?i:id|key|code|sku)$"                      # whole-name matches
+    r"|_(?i:id|key)$"                              # *_id / *_key suffix
+    r"|(?<=[a-zA-Z])(?:ID|Id)$"                    # CamelCase ID suffix (e.g. recordID)
+    r"|(?i:^uuid$|^guid$|_uuid$|_guid$)"           # uuid/guid bounded
+    r"|(?i:^uuid_|^guid_)"                         # uuid_*/guid_* prefix (e.g. guid_col)
+    r"|^(?i:account_no|account_num)$"              # whole-name account identifiers
+    r"|_(?i:ref|ref_num|reg_num|account_no|account_num|account)$"  # targeted ID-suffixes
 )
 
 
@@ -109,11 +114,18 @@ def _classify_by_data(values: list[str]) -> tuple[str, float]:
     # Year detection: 4-digit integers in 1900..2100. Cheap blocking signal
     # for bibliographic / birth-year data (not full dates).
     def _is_year(v: str) -> bool:
+        """True if v looks like a 4-digit year in 1900-2100, tolerating
+        float-promoted integer columns (e.g. '1999.0')."""
         v = v.strip()
-        if len(v) != 4 or not v.isdigit():
+        try:
+            n = int(float(v))
+        except (ValueError, TypeError):
             return False
-        n = int(v)
-        return 1900 <= n <= 2100
+        if not (1900 <= n <= 2100):
+            return False
+        # Round-trip check: stringified int must match v (with optional '.0').
+        # Prevents '1.999e3' / '2001abc' from sneaking through.
+        return str(n) == v.replace(".0", "").strip()
 
     if values and all(_is_year(v) for v in values):
         return "year", 0.9
@@ -138,9 +150,16 @@ def _classify_by_data(values: list[str]) -> tuple[str, float]:
     # Catches this before the generic description branch so it gets routed
     # to token_sort rather than the embedding pathway.
     if col_type == "string":
-        delim_density = sum(v.count(",") + v.count(";") for v in values) / max(len(values), 1)
+        rows_with_delim = sum(1 for v in values if "," in v or ";" in v)
+        delim_ratio = rows_with_delim / max(len(values), 1)
+        if rows_with_delim > 0:
+            avg_delims_in_delim_rows = sum(
+                (v.count(",") + v.count(";")) for v in values if ("," in v or ";" in v)
+            ) / rows_with_delim
+        else:
+            avg_delims_in_delim_rows = 0
         avg_len = sum(len(v) for v in values) / max(len(values), 1)
-        if avg_len > 30 and delim_density > 0.5:
+        if avg_len > 30 and delim_ratio >= 0.7 and avg_delims_in_delim_rows >= 2:
             return "multi_name", 0.7
 
     # Check for description (long freetext)
@@ -609,6 +628,9 @@ def build_matchkeys(
     # Confidence-gated weighting: when a profile's classification confidence
     # is low (<0.5), cap the weight at 0.3 so noisy/ambiguous columns can't
     # dominate a weighted matchkey. Profile lookup is by column name.
+    # Ordering note: this cap runs AFTER field-utility truncation above.
+    # Reordering (cap before truncate) would distort utility-based selection
+    # because _field_utility reads f.weight as input.
     _profile_lookup = {p.name: p for p in profiles}
     for f in all_weighted:
         if f.field is None:
