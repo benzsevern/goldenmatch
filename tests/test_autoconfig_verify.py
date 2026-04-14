@@ -59,3 +59,59 @@ def test_preflight_check1_domain_auto_repair():
     assert cfg.domain.mode == "bibliographic"
     repaired = [f for f in report.findings if f.repaired]
     assert any(f.check == "missing_column" for f in repaired)
+
+
+def test_preflight_check2_drops_high_cardinality_exact_matchkey():
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    from goldenmatch.core.autoconfig_verify import preflight
+    df = pl.DataFrame({"id": list(range(100)), "name": ["alice"] * 100})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["name"])]),
+        matchkeys=[
+            MatchkeyConfig(name="mk_id", type="exact", fields=[MatchkeyField(field="id")]),
+            MatchkeyConfig(name="mk_name", type="weighted", threshold=0.7,
+                           fields=[MatchkeyField(field="name", scorer="exact", weight=1.0)]),
+        ],
+    )
+    report = preflight(df, cfg)
+    remaining_names = [mk.name for mk in cfg.get_matchkeys()]
+    assert "mk_id" not in remaining_names
+    warnings = [f for f in report.findings if f.check == "cardinality_high"]
+    assert warnings and warnings[0].repaired
+
+
+def test_preflight_check3_drops_low_cardinality_exact_matchkey():
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    from goldenmatch.core.autoconfig_verify import preflight
+    df = pl.DataFrame({"state": ["NC"] * 100, "last_name": [f"name{i}" for i in range(100)]})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["last_name"])]),
+        matchkeys=[
+            MatchkeyConfig(name="mk_state", type="exact", fields=[MatchkeyField(field="state")]),
+            MatchkeyConfig(name="mk_name", type="weighted", threshold=0.7,
+                           fields=[MatchkeyField(field="last_name", scorer="exact", weight=1.0)]),
+        ],
+    )
+    report = preflight(df, cfg)
+    assert "mk_state" not in [mk.name for mk in cfg.get_matchkeys()]
+    warnings = [f for f in report.findings if f.check == "cardinality_low"]
+    assert warnings and warnings[0].repaired
+
+
+def test_preflight_no_matchkeys_after_drops_is_hard_error():
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    from goldenmatch.core.autoconfig_verify import preflight
+    df = pl.DataFrame({"id": list(range(100))})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["id"])]),
+        matchkeys=[MatchkeyConfig(name="mk_id", type="exact", fields=[MatchkeyField(field="id")])],
+    )
+    report = preflight(df, cfg)
+    assert report.has_errors
+    assert any(f.check == "no_matchkeys_remain" for f in report.findings)

@@ -175,6 +175,101 @@ def _repair_domain(
 # ── Entry point ──────────────────────────────────────────────────────────
 
 
+def _check_cardinality(
+    df: "pl.DataFrame", config: "GoldenMatchConfig", report: PreflightReport
+) -> None:
+    """Checks 2 & 3: drop exact matchkeys whose column cardinality is useless.
+
+    - ratio >= 0.99 → near-unique, no pair ever agrees (warning + drop).
+    - ratio <  0.01 → always-same, every pair agrees trivially (warning + drop).
+    """
+    if df.height == 0:
+        return
+
+    mks = config.get_matchkeys()
+    kept: list = []
+    df_cols = set(df.columns)
+
+    for mk in mks:
+        if mk.type != "exact":
+            kept.append(mk)
+            continue
+
+        # Exact matchkey: inspect the fields' cardinality. A multi-field exact
+        # matchkey is dropped only if *every* field is out of bounds; otherwise
+        # it probably still discriminates.
+        high_hits: list[str] = []
+        low_hits: list[str] = []
+        checked = 0
+        for f in mk.fields:
+            col = f.field
+            if not col or col not in df_cols:
+                continue
+            checked += 1
+            n_unique = df[col].n_unique()
+            ratio = n_unique / df.height
+            if ratio >= 0.99:
+                high_hits.append(col)
+            elif ratio <= 0.01:
+                low_hits.append(col)
+
+        drop = False
+        reason_check: str | None = None
+        reason_msg: str | None = None
+        if checked > 0 and len(high_hits) == checked:
+            drop = True
+            reason_check = "cardinality_high"
+            reason_msg = (
+                f"exact matchkey '{mk.name}' dropped: column(s) {high_hits} "
+                f"have cardinality_ratio >= 0.99 (near-unique, never agree)"
+            )
+        elif checked > 0 and len(low_hits) == checked:
+            drop = True
+            reason_check = "cardinality_low"
+            reason_msg = (
+                f"exact matchkey '{mk.name}' dropped: column(s) {low_hits} "
+                f"have cardinality_ratio < 0.01 (always-same, trivially agree)"
+            )
+
+        if drop:
+            report.findings.append(
+                PreflightFinding(
+                    check=reason_check or "cardinality",
+                    severity="warning",
+                    subject=mk.name,
+                    message=reason_msg or "",
+                    repaired=True,
+                    repair_note="matchkey dropped from config",
+                )
+            )
+            report.config_was_modified = True
+        else:
+            kept.append(mk)
+
+    # Write back if we actually dropped anything.
+    if len(kept) != len(mks):
+        if config.matchkeys is not None:
+            config.matchkeys = kept
+        elif config.match_settings is not None:
+            config.match_settings.matchkeys = kept
+
+    # Hard-error if no matchkeys remain.
+    if not config.get_matchkeys():
+        report.findings.append(
+            PreflightFinding(
+                check="no_matchkeys_remain",
+                severity="error",
+                subject="<config>",
+                message=(
+                    "no matchkeys remain after preflight cardinality repair; "
+                    "auto-config cannot produce a usable config for this data"
+                ),
+                repaired=False,
+                repair_note=None,
+            )
+        )
+
+
 def preflight(
     df: "pl.DataFrame",
     config: "GoldenMatchConfig",
@@ -191,4 +286,5 @@ def preflight(
     """
     report = PreflightReport()
     _check_columns(df, config, report)
+    _check_cardinality(df, config, report)
     return report
