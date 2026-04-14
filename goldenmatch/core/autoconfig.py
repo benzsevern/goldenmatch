@@ -133,6 +133,16 @@ def _classify_by_data(values: list[str]) -> tuple[str, float]:
 
     col_type = type_map.get(data_type, "string")
 
+    # Multi-value name detection: comma/semicolon-delimited text with
+    # substantive length is almost always a co-author / multi-name field.
+    # Catches this before the generic description branch so it gets routed
+    # to token_sort rather than the embedding pathway.
+    if col_type == "string":
+        delim_density = sum(v.count(",") + v.count(";") for v in values) / max(len(values), 1)
+        avg_len = sum(len(v) for v in values) / max(len(values), 1)
+        if avg_len > 10 and delim_density > 0.5:
+            return "multi_name", 0.7
+
     # Check for description (long freetext)
     if col_type == "string":
         avg_len = sum(len(v) for v in values) / len(values) if values else 0
@@ -441,6 +451,15 @@ def build_matchkeys(
                 transforms=["lowercase", "strip"],
             ))
             description_columns.append(p)
+            continue
+
+        if p.col_type == "multi_name":
+            fuzzy_fields.append(MatchkeyField(
+                field=p.name,
+                scorer="token_sort",
+                weight=1.0,
+                transforms=["lowercase", "strip"],
+            ))
             continue
 
         scorer_info = _SCORER_MAP.get(p.col_type)

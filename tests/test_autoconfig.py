@@ -1244,3 +1244,27 @@ def test_classify_by_data_year_values():
     values = ["1999", "2000", "2001", "1985", "1978"] * 10
     col_type, _ = _classify_by_data(values)
     assert col_type == "year"
+
+
+def test_classify_by_data_multi_name_detection():
+    from goldenmatch.core.autoconfig import _classify_by_data
+    values = [
+        "Alice Smith, Bob Jones, Carol White",
+        "Dave Brown; Eve Green; Frank Blue",
+        "Grace Hopper, Alan Turing",
+    ] * 10
+    col_type, _ = _classify_by_data(values)
+    assert col_type == "multi_name"
+
+
+def test_build_matchkeys_multi_name_gets_token_sort():
+    import polars as pl
+    from goldenmatch.core.autoconfig import auto_configure_df
+    df = pl.DataFrame({
+        "authors": ["A Smith, B Jones", "C White, D Brown"] * 50,
+        "title": [f"paper {i}" for i in range(100)],
+    })
+    cfg = auto_configure_df(df)
+    mks = cfg.get_matchkeys()
+    authors_fields = [f for mk in mks for f in mk.fields if f.field == "authors"]
+    assert any(f.scorer == "token_sort" and f.weight == 1.0 for f in authors_fields)
