@@ -115,3 +115,21 @@ def test_preflight_no_matchkeys_after_drops_is_hard_error():
     report = preflight(df, cfg)
     assert report.has_errors
     assert any(f.check == "no_matchkeys_remain" for f in report.findings)
+
+
+def test_preflight_check4_warns_on_mega_block():
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    from goldenmatch.core.autoconfig_verify import preflight
+    # 10000 rows, all same state code → one mega-block
+    n = 10000
+    df = pl.DataFrame({"state": ["NC"] * n, "last_name": [f"name{i}" for i in range(n)]})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["state"])]),
+        matchkeys=[MatchkeyConfig(name="mk", type="weighted", threshold=0.7,
+                                  fields=[MatchkeyField(field="last_name", scorer="token_sort", weight=1.0)])],
+    )
+    report = preflight(df, cfg)
+    warnings = [f for f in report.findings if f.check == "block_size"]
+    assert warnings and not warnings[0].repaired

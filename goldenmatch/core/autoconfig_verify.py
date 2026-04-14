@@ -270,6 +270,85 @@ def _check_cardinality(
         )
 
 
+def _check_block_sizes(
+    df: "pl.DataFrame", config: "GoldenMatchConfig", report: PreflightReport
+) -> None:
+    """Check 4: per-key block-size sanity (P50/P99 distribution).
+
+    Warns — does not auto-repair. Blocking strategy choice is usually
+    intentional; preflight's job is to surface the trade-off, not override it.
+    """
+    if config.blocking is None or df.height == 0:
+        return
+
+    import polars as pl
+    from goldenmatch.core.blocker import _build_block_key_expr
+
+    # Cap sample at 10K rows — block-size distribution converges well below
+    # full-dataset sizes and the transforms are O(n).
+    n = min(df.height, 10_000)
+    sample = df.head(n) if df.height > n else df
+
+    keys = list(config.blocking.keys or [])
+    keys.extend(config.blocking.passes or [])
+
+    for key in keys:
+        # Skip if the blocking key references a column the df doesn't have;
+        # that's Check 1's problem.
+        if not all(f in df.columns for f in key.fields):
+            continue
+        try:
+            expr = _build_block_key_expr(key)
+            sizes = (
+                sample.with_columns(expr)
+                .group_by("__block_key__")
+                .len()
+                .get_column("len")
+            )
+        except Exception as exc:
+            # Transform failure — don't crash preflight; Check 1 or runtime
+            # will surface it.
+            report.findings.append(
+                PreflightFinding(
+                    check="block_size",
+                    severity="info",
+                    subject=",".join(key.fields),
+                    message=f"could not sample block sizes: {exc!r}",
+                    repaired=False,
+                    repair_note=None,
+                )
+            )
+            continue
+
+        if sizes.len() == 0:
+            continue
+
+        p50 = float(sizes.quantile(0.5) or 0)
+        p99 = float(sizes.quantile(0.99) or 0)
+
+        if p99 > 5000 or p50 < 2:
+            verdict = []
+            if p99 > 5000:
+                verdict.append(f"P99={p99:.0f} > 5000 (mega-blocks will dominate runtime)")
+            if p50 < 2:
+                verdict.append(f"P50={p50:.0f} < 2 (most blocks too small to produce pairs)")
+            report.findings.append(
+                PreflightFinding(
+                    check="block_size",
+                    severity="warning",
+                    subject=",".join(key.fields),
+                    message=(
+                        f"blocking key {key.fields}: "
+                        f"P50={p50:.0f}, P99={p99:.0f}, "
+                        f"n_blocks={sizes.len()} (sampled {n} rows). "
+                        + "; ".join(verdict)
+                    ),
+                    repaired=False,
+                    repair_note=None,
+                )
+            )
+
+
 def preflight(
     df: "pl.DataFrame",
     config: "GoldenMatchConfig",
@@ -287,4 +366,5 @@ def preflight(
     report = PreflightReport()
     _check_columns(df, config, report)
     _check_cardinality(df, config, report)
+    _check_block_sizes(df, config, report)
     return report
