@@ -1380,8 +1380,10 @@ def auto_configure_df(
     memory_config = MemoryConfig(enabled=True) if llm_auto else None
 
     # Capture choices in a decisions object so a future iterative-tuning loop
-    # can nudge them without re-profiling. Currently only `matchkeys` flows
-    # through the decisions object; blocking follows in Task 7c.
+    # can nudge them without re-profiling. Matchkeys and blocking strategy/
+    # keys/passes all flow through decisions; non-decision runtime attributes
+    # on the transient `blocking` object (learned_sample_size, min_recall,
+    # skip_oversized, etc.) are preserved via model_copy below.
     decisions = AutoConfigDecisions(
         blocking_strategy=blocking.strategy if blocking is not None else "none",
         blocking_keys=list(blocking.keys) if (blocking is not None and blocking.keys) else [],
@@ -1393,10 +1395,23 @@ def auto_configure_df(
         allow_remote_assets=False,
     )
 
+    # Rebuild final blocking from decisions, preserving runtime-only attrs
+    # (learned_sample_size, learned_min_recall, skip_oversized, etc.) from
+    # the transient blocking object produced above.
+    final_blocking: BlockingConfig | None
+    if blocking is None:
+        final_blocking = None
+    else:
+        final_blocking = blocking.model_copy(update={
+            "strategy": decisions.blocking_strategy,
+            "keys": decisions.blocking_keys,
+            "passes": decisions.blocking_passes if decisions.blocking_passes else blocking.passes,
+        })
+
     # Build config
     config = GoldenMatchConfig(
         matchkeys=decisions.matchkeys,
-        blocking=blocking,
+        blocking=final_blocking,
         golden_rules=GoldenRulesConfig(default_strategy="most_complete"),
         output=OutputConfig(),
         llm_scorer=llm_scorer_config,
