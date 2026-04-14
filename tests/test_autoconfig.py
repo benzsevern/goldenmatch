@@ -1223,3 +1223,10 @@ def test_classify_by_data_cardinality_guard_beats_phone():
     col_type, confidence = _classify_by_data(values)
     assert col_type == "identifier", f"got {col_type!r} (confidence={confidence})"
     assert confidence == 0.9
+
+
+def test_classify_by_name_voter_reg_num_is_identifier():
+    from goldenmatch.core.autoconfig import _classify_by_name
+    assert _classify_by_name("voter_reg_num") == "identifier"
+    assert _classify_by_name("account_no") == "identifier"
+    assert _classify_by_name("guid_col") == "identifier"

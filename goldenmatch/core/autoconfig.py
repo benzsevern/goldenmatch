@@ -40,6 +40,7 @@ _GEO_PATTERNS = re.compile(r"((?<![a-z])city|^state$|state.?cd|^country$|provinc
 _DATE_PATTERNS = re.compile(r"(date|_dt$|_date$|registr|created|updated|birth.?d|dob)", re.IGNORECASE)
 _ID_PATTERNS = re.compile(
     r"^(?i:id|key|code|sku)$|_(?i:id|key)$|(?<=[a-zA-Z])(?:ID|Id)$"
+    r"|(^|_)(num|no|uuid|guid)(_|$)|.*_(reg_num|ref|ref_num|account)$"
 )
 
 
