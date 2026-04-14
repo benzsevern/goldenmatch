@@ -1379,9 +1379,23 @@ def auto_configure_df(
 
     memory_config = MemoryConfig(enabled=True) if llm_auto else None
 
+    # Capture choices in a decisions object so a future iterative-tuning loop
+    # can nudge them without re-profiling. Currently only `matchkeys` flows
+    # through the decisions object; blocking follows in Task 7c.
+    decisions = AutoConfigDecisions(
+        blocking_strategy=blocking.strategy if blocking is not None else "none",
+        blocking_keys=list(blocking.keys) if (blocking is not None and blocking.keys) else [],
+        blocking_passes=list(blocking.passes) if (blocking is not None and blocking.passes) else [],
+        matchkeys=matchkeys,
+        threshold=0.0,  # populated in a later task
+        domain_mode=None,
+        llm_enabled=llm_scorer_config is not None,
+        allow_remote_assets=False,
+    )
+
     # Build config
     config = GoldenMatchConfig(
-        matchkeys=matchkeys,
+        matchkeys=decisions.matchkeys,
         blocking=blocking,
         golden_rules=GoldenRulesConfig(default_strategy="most_complete"),
         output=OutputConfig(),
