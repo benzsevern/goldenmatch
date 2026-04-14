@@ -3,7 +3,18 @@
 ## Related Projects
 - **SQL Extensions repo:** `D:\show_case\goldenmatch-extensions` -- Postgres extension + DuckDB UDFs. Has its own CLAUDE.md.
 - **PyPI:** `goldenmatch` (Python toolkit), `goldenmatch-duckdb` (DuckDB UDFs)
+- **npm:** `goldenmatch` (TypeScript port at `packages/goldenmatch-js/`)
 - **GitHub:** `benzsevern/goldenmatch`, `benzsevern/goldenmatch-extensions`
+
+## TypeScript Port (`packages/goldenmatch-js/`)
+- **npm:** `goldenmatch` (same name, different registry from PyPI)
+- **Commands** (from `packages/goldenmatch-js/`): `npx tsc --noEmit`, `npx vitest run`, `npm run build` (tsup)
+- **Edge-safe rule:** files in `src/core/` MUST NOT import `node:*`. Node-only code lives in `src/node/`.
+- **Parity harness:** `tests/parity/scorer-ground-truth.test.ts` locks scorer output at 4-decimal tolerance against Python
+- **Strict TS:** `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes` — use `!` on bounded-loop indices, conditional spread for optional props
+- **Optional peer deps:** load via `await import("pkg-name" as string)` — the `as string` cast prevents tsup from resolving at build time
+- **tsup has 5 entrypoints:** `index`, `core/index`, `node/index`, `cli`, `node/backends/score-worker` (piscina worker)
+- **PORTING_GUIDE.md** in repo root is the playbook for porting
 
 ## Branch & Merge SOP (all Golden Suite repos)
 - Feature work goes on `feature/<name>` branches, never directly to main
@@ -13,6 +24,7 @@
 - Merge when: tests pass, docs updated. Days not weeks.
 - After merge: delete remote branch
 - Commands: `gh pr create --title "..." --body "..."` then squash merge via GitHub UI or `gh pr merge --squash`
+- **Release tags:** Python = `v1.4.x` (triggers `publish.yml` → PyPI). TypeScript = `goldenmatch-js-v0.1.x` (triggers `publish-npm.yml` → npm). Never push an unprefixed version tag for TS.
 
 ## Environment
 - Windows 11, bash shell (Git Bash) -- use Unix paths in scripts
@@ -29,6 +41,8 @@
 - PostgreSQL 16 portable at `C:\Users\bsevern\tools\pg16portable\pgsql`
 
 ## Testing
+- **TypeScript:** `cd packages/goldenmatch-js && npx vitest run` — 478 tests currently. Full check: `npx tsc --noEmit && npx vitest run && npm run build`
+- TS parity check: `tests/parity/` — add new parity cases when porting any new scorer or algorithm
 - `pytest --tb=short` from project root — all tests must pass after every change
 - 1319 tests (+ 6 skipped for optional deps), run in ~60s
 - e2e tests calling `dedupe_df(df)` on auto-config: auto-config enables `rerank=True` for 3+ field weighted matchkeys, which loads a cross-encoder model from HuggingFace. Offline CI fails with download error. Pattern: pre-build config via `auto_configure_df(df)`, set `mk.rerank = False` on weighted matchkeys, then pass `dedupe_df(df, config=config)`. See `tests/test_autoconfig_regressions.py::test_dedupe_df_interaction_all_three_fixes_together`.
@@ -208,6 +222,9 @@ Hosted on Railway, registered on Smithery:
 - `llm_scorer` and `backend` kwargs applied uniformly after config resolution (not inside zero-config branch)
 
 ## Gotchas
+- GitHub Discussions API: REST returns 404. Use GraphQL `createDiscussion` mutation with `repositoryId` (R_kgDORoztPA for this repo) and a `categoryId` fetched via `discussionCategories`.
+- `gh repo edit --add-topic` fails at 20 topics (API-side cap). Drop low-value topics with `--remove-topic` before adding.
+- Wiki repo: `git clone https://github.com/benzsevern/goldenmatch.wiki.git`, branch is `master` (not `main`).
 - GoldenFlow (`date_iso8601`) runs BEFORE the inside-pipeline `auto_configure_df` call. This reshapes year-only columns into ISO date form, which then looks phone-shaped to the phone classifier. If auto-config misclassifies a date-ish column, check transform order, not just the classifier.
 - GitHub release → PyPI publish workflow: ~25s via trusted publishing. PyPI JSON API takes ~20s to reflect new version after workflow completes — don't check immediately. Trigger is `release: published`, not tag push.
 - `.github/workflows/*.yml` currently pin `actions/checkout@v4` and `actions/setup-python@v5` on Node.js 20, which deprecates Sep 2026. Bump or set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` before then.
