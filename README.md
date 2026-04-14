@@ -7,11 +7,19 @@ Built by [Ben Severn](https://bensevern.dev).
 ![GoldenMatch Demo](docs/screenshots/demo.svg)
 
 ```bash
+# Python
 pip install goldenmatch
+
+# TypeScript / Node.js
+npm install goldenmatch
+```
+
+```bash
 goldenmatch dedupe customers.csv
 ```
 
 [![PyPI](https://img.shields.io/pypi/v/goldenmatch?color=d4a017)](https://pypi.org/project/goldenmatch/)
+[![npm](https://img.shields.io/npm/v/goldenmatch?color=339933&label=npm)](https://www.npmjs.com/package/goldenmatch)
 [![CI](https://github.com/benzsevern/goldenmatch/actions/workflows/ci.yml/badge.svg)](https://github.com/benzsevern/goldenmatch/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/benzsevern/goldenmatch/graph/badge.svg)](https://codecov.io/gh/benzsevern/goldenmatch)
 [![Downloads](https://static.pepy.tech/badge/goldenmatch/month)](https://pepy.tech/project/goldenmatch)
@@ -39,6 +47,8 @@ goldenmatch dedupe customers.csv
 | Use from Claude Desktop / AI assistant | [MCP Server](https://benzsevern.github.io/goldenmatch/mcp) |
 | Build AI agents that deduplicate | [ER Agent (A2A)](https://benzsevern.github.io/goldenmatch/agent) |
 | Write Python code | [Python API](https://benzsevern.github.io/goldenmatch/python-api) |
+| Write TypeScript / Node.js | [TypeScript API](https://benzsevern.github.io/goldenmatch/typescript) |
+| Deploy to Vercel Edge / Cloudflare Workers | [TypeScript API](https://benzsevern.github.io/goldenmatch/typescript) |
 | Use the interactive TUI | [TUI Guide](https://benzsevern.github.io/goldenmatch/tui) |
 
 ---
@@ -93,6 +103,40 @@ goldenmatch dedupe customers.csv
 - **Codespaces ready** — one-click dev environment
 
 </details>
+
+## TypeScript / Node.js
+
+GoldenMatch ships an npm package with full feature parity — same scorers, clustering, golden records, and YAML configs.
+
+```bash
+npm install goldenmatch
+```
+
+```typescript
+import { dedupe } from "goldenmatch";
+
+const rows = [
+  { id: 1, name: "John Smith", email: "john@example.com", zip: "12345" },
+  { id: 2, name: "Jon Smith",  email: "john@example.com", zip: "12345" },
+  { id: 3, name: "Jane Doe",   email: "jane@example.com", zip: "54321" },
+];
+
+const result = dedupe(rows, {
+  fuzzy: { name: 0.85 },
+  blocking: ["zip"],
+  threshold: 0.85,
+});
+
+console.log(result.stats);  // { totalRecords: 3, totalClusters: 2, ... }
+```
+
+- **Edge-safe core** — runs in browsers, Vercel Edge Runtime, Cloudflare Workers, Deno
+- **Feature parity** with Python: fuzzy scorers, probabilistic Fellegi-Sunter, PPRL, graph ER, LLM reranking, MCP/REST/A2A servers, 11+ CLI commands, interactive TUI
+- **478 tests, strict TypeScript** (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`)
+- **Zero-dep install** works — optional peer deps unlock native paths (hnswlib-node, @huggingface/transformers for ONNX cross-encoder, piscina for worker threads, pg/duckdb/snowflake for data connectors)
+
+Full docs: [benzsevern.github.io/goldenmatch/typescript](https://benzsevern.github.io/goldenmatch/typescript)
+See [packages/goldenmatch-js/examples/](packages/goldenmatch-js/examples/) for 10+ usage examples.
 
 ## Installation
 

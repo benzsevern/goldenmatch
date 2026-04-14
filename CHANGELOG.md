@@ -4,7 +4,12 @@ All notable changes to GoldenMatch are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/) (strict after v1.0.0).
 
-## [Unreleased]
+## [Unreleased] / TypeScript port
+
+- **NEW**: TypeScript / Node.js port published as `goldenmatch` on npm
+  - Full feature parity with Python: scorers, clustering, golden records, LLM, PPRL, probabilistic, graph ER, streaming, MCP/REST/A2A servers
+  - Edge-safe core (browsers, Workers, Edge Runtime) + Node-only file/DB layer
+  - 478 tests, strict TypeScript
 
 ## [1.4.1] - 2026-04-06
 

@@ -66,11 +66,12 @@ Scale: 7,823 records/sec on a laptop (fuzzy + exact + golden).
 
 ---
 
-## 7 Ways to Use It
+## 8 Ways to Use It
 
 | Interface | Install | Best For |
 |-----------|---------|----------|
 | [Python API](python-api) | `pip install goldenmatch` | Notebooks, scripts, AI agents |
+| [TypeScript / Node.js](typescript) | `npm install goldenmatch` | Edge runtimes, web apps, Node services |
 | [CLI](cli) | Same package, 21 commands | Terminal workflows |
 | [Interactive TUI](tui) | `goldenmatch tui` | Visual exploration |
 | [PostgreSQL](sql-postgres) | [Pre-built .deb/.rpm](https://github.com/benzsevern/goldenmatch-extensions/releases) | Production databases |
@@ -87,6 +88,7 @@ Scale: 7,823 records/sec on a laptop (fuzzy + exact + golden).
 | [Installation](installation) | pip, apt, rpm, Docker, build from source |
 | [Quick Start](quick-start) | First dedupe in 30 seconds |
 | [Python API](python-api) | 101 exports: dedupe, match, score, explain, PPRL |
+| [TypeScript API](typescript) | npm package with edge-safe core and Node entrypoint |
 | [CLI Reference](cli) | 23 commands with examples |
 | [Interactive TUI](tui) | 6-tab visual interface |
 | [Configuration](configuration) | YAML config with matchkeys, blocking, golden rules |
