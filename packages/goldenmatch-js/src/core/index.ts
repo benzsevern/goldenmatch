@@ -83,6 +83,8 @@ export {
   jaroWinkler,
   levenshteinDistance,
   levenshteinSimilarity,
+  indelDistance,
+  indelSimilarity,
   tokenSortRatio,
   soundexMatch,
   diceCoefficient,

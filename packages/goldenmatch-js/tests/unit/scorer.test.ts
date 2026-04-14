@@ -19,10 +19,20 @@ import {
 import type { MatchkeyConfig, MatchkeyField, Row } from "../../src/core/index.js";
 
 describe("jaro / jaroWinkler", () => {
-  it("jaroWinkler MARTHA ~= MARHTA (~0.96)", () => {
-    const s = jaroWinkler("MARTHA", "MARHTA");
-    expect(s).toBeGreaterThan(0.94);
-    expect(s).toBeLessThan(0.98);
+  it("jaro MARTHA ~= MARHTA matches Python (0.9444)", () => {
+    expect(jaro("MARTHA", "MARHTA")).toBeCloseTo(0.9444, 4);
+  });
+
+  it("jaroWinkler MARTHA ~= MARHTA matches Python (0.9611)", () => {
+    expect(jaroWinkler("MARTHA", "MARHTA")).toBeCloseTo(0.9611, 4);
+  });
+
+  it("jaroWinkler DIXON / DICKSONX matches Python (0.8133)", () => {
+    expect(jaroWinkler("DIXON", "DICKSONX")).toBeCloseTo(0.8133, 4);
+  });
+
+  it("jaroWinkler JELLYFISH / SMELLYFISH matches Python (0.8963)", () => {
+    expect(jaroWinkler("JELLYFISH", "SMELLYFISH")).toBeCloseTo(0.8963, 4);
   });
 
   it("jaro identical -> 1.0", () => {
@@ -50,11 +60,37 @@ describe("levenshtein", () => {
   it("similarity 1.0 for identical", () => {
     expect(levenshteinSimilarity("abc", "abc")).toBe(1.0);
   });
+
+  it("kitten/sitting similarity matches Python (1 - 3/7 = 0.5714)", () => {
+    expect(levenshteinSimilarity("kitten", "sitting")).toBeCloseTo(0.5714, 4);
+  });
+
+  it("saturday/sunday similarity matches Python (1 - 3/8 = 0.6250)", () => {
+    expect(levenshteinSimilarity("saturday", "sunday")).toBeCloseTo(0.625, 4);
+  });
 });
 
-describe("tokenSortRatio", () => {
-  it("John Smith / Smith John -> 1.0", () => {
+describe("tokenSortRatio (rapidfuzz-compatible)", () => {
+  it("John Smith / Smith John -> 1.0 (same token set)", () => {
     expect(tokenSortRatio("John Smith", "Smith John")).toBe(1.0);
+  });
+
+  it("New York Mets / Mets New York -> 1.0", () => {
+    expect(tokenSortRatio("New York Mets", "Mets New York")).toBe(1.0);
+  });
+
+  it("John Smith / Smith Johnson matches Indel ratio (0.8696)", () => {
+    // sorted: "john smith" (10) vs "johnson smith" (13)
+    // indel distance = 3 (insert s, o, n), 1 - 3/23 = 20/23 ≈ 0.8696
+    expect(tokenSortRatio("John Smith", "Smith Johnson")).toBeCloseTo(0.8696, 4);
+  });
+
+  it("lowercases before sorting (case-insensitive)", () => {
+    expect(tokenSortRatio("John SMITH", "smith JOHN")).toBe(1.0);
+  });
+
+  it("strips punctuation (rapidfuzz preprocessing)", () => {
+    expect(tokenSortRatio("John, Smith!", "smith john.")).toBe(1.0);
   });
 
   it("different tokens return < 1", () => {
@@ -63,8 +99,12 @@ describe("tokenSortRatio", () => {
 });
 
 describe("soundexMatch", () => {
-  it("Robert/Rupert same code -> 1.0", () => {
+  it("Robert/Rupert same code -> 1.0 (both R163)", () => {
     expect(soundexMatch("Robert", "Rupert")).toBe(1.0);
+  });
+
+  it("Smith/Smyth same code -> 1.0 (both S530)", () => {
+    expect(soundexMatch("Smith", "Smyth")).toBe(1.0);
   });
 
   it("Smith/Doe -> 0", () => {
@@ -136,6 +176,11 @@ describe("scoreField", () => {
   it("token_sort", () => {
     const s = scoreField("a b", "b a", "token_sort");
     expect(s).toBe(1.0);
+  });
+
+  it("token_sort strips punctuation and lowercases (rapidfuzz parity)", () => {
+    // "John, Smith!" vs "smith john." → both sort to "john smith" → 1.0
+    expect(scoreField("John, Smith!", "smith john.", "token_sort")).toBe(1.0);
   });
 });
 

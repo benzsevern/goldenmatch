@@ -39,7 +39,7 @@ export interface DedupeOptions {
   readonly blocking?: readonly string[];
   /** Overall fuzzy threshold (default 0.85). */
   readonly threshold?: number;
-  /** Enable LLM scorer for borderline pairs (not yet implemented in JS). */
+  /** Enable LLM scorer for borderline pairs. Requires OPENAI_API_KEY or ANTHROPIC_API_KEY in env. */
   readonly llmScorer?: boolean;
 }
 

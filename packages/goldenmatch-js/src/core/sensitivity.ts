@@ -144,7 +144,13 @@ export function runSensitivity(
       let twi: number | undefined;
       try {
         twi = compareClusters(baselineRun.clusters, runResult.clusters).twi;
-      } catch {
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `TWI comparison failed for sweep point ${JSON.stringify(combo)}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
         twi = undefined;
       }
       if (twi === undefined || Math.abs(1 - twi) > 0.05) stable = false;

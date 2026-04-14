@@ -29,6 +29,97 @@ import type {
   SortKeyField,
   CanopyConfig,
 } from "../types.js";
+import {
+  VALID_SCORERS,
+  VALID_TRANSFORMS,
+  VALID_STRATEGIES,
+  VALID_STANDARDIZERS,
+} from "../types.js";
+
+// ---------------------------------------------------------------------------
+// String-union validation
+// ---------------------------------------------------------------------------
+
+const VALID_MATCHKEY_TYPES = new Set([
+  "exact",
+  "weighted",
+  "probabilistic",
+] as const);
+
+const VALID_BLOCKING_STRATEGIES = new Set([
+  "static",
+  "adaptive",
+  "sorted_neighborhood",
+  "multi_pass",
+  "ann",
+  "canopy",
+  "ann_pairs",
+  "learned",
+] as const);
+
+const VALID_MEMORY_BACKENDS = new Set(["sqlite", "postgres"] as const);
+
+const VALID_QUALITY_MODES = new Set([
+  "silent",
+  "announced",
+  "disabled",
+] as const);
+
+const VALID_QUALITY_FIX_MODES = new Set(["safe", "moderate", "none"] as const);
+
+const VALID_LLM_MODES = new Set(["pairwise", "cluster"] as const);
+
+const VALID_VALIDATION_RULE_TYPES = new Set([
+  "regex",
+  "min_length",
+  "max_length",
+  "not_null",
+  "in_set",
+  "format",
+] as const);
+
+const VALID_VALIDATION_ACTIONS = new Set([
+  "null",
+  "quarantine",
+  "flag",
+] as const);
+
+/**
+ * Validate that `value` is one of `allowed`. If `defaultValue` is provided,
+ * return it when `value` is null/undefined. Throws a clear error otherwise.
+ */
+function requireIn<T extends string>(
+  value: unknown,
+  allowed: ReadonlySet<T>,
+  fieldName: string,
+  defaultValue?: T,
+): T {
+  if (value === undefined || value === null) {
+    if (defaultValue !== undefined) return defaultValue;
+    throw new Error(`Required field '${fieldName}' is missing`);
+  }
+  if (typeof value !== "string" || !(allowed as ReadonlySet<string>).has(value)) {
+    const valid = [...allowed].sort().join(", ");
+    throw new Error(
+      `Invalid value '${String(value)}' for '${fieldName}'. Valid options: ${valid}`,
+    );
+  }
+  return value as T;
+}
+
+/**
+ * Accept known transforms plus parametric forms:
+ *   - substring:<n>:<n>
+ *   - qgram:<n>
+ *   - bloom_filter, bloom_filter:<...>
+ */
+function isValidTransform(t: string): boolean {
+  if ((VALID_TRANSFORMS as ReadonlySet<string>).has(t)) return true;
+  if (/^substring:\d+:\d+$/.test(t)) return true;
+  if (/^qgram:\d+$/.test(t)) return true;
+  if (t === "bloom_filter" || /^bloom_filter:/.test(t)) return true;
+  return false;
+}
 
 // ---------------------------------------------------------------------------
 // Snake_case to camelCase conversion
@@ -147,11 +238,48 @@ function optBool(v: unknown): boolean | undefined {
 
 function parseMatchkeyField(raw: unknown, ctx: string): MatchkeyField {
   const obj = asObj(raw, ctx);
+  const fieldName = typeof obj.field === "string" ? obj.field : "<unknown>";
+
+  // Validate transforms. Allow parametric forms like "substring:0:3", "qgram:3",
+  // "bloom_filter:high".
+  const transforms: string[] = Array.isArray(obj.transforms)
+    ? (obj.transforms as unknown[]).map((t, i) => {
+        if (typeof t !== "string") {
+          throw new Error(
+            `${ctx}.transforms[${i}]: expected string, got ${typeof t}`,
+          );
+        }
+        return t;
+      })
+    : [];
+  for (const t of transforms) {
+    if (!isValidTransform(t)) {
+      const valid = [...VALID_TRANSFORMS].sort().join(", ");
+      throw new Error(
+        `Invalid transform '${t}' on field '${fieldName}'. ` +
+          `Valid: ${valid}, or 'substring:<n>:<n>', 'qgram:<n>', 'bloom_filter[:...]'.`,
+      );
+    }
+  }
+
+  // Scorer is optional for exact matchkeys. Allow plugin scorers — warn only
+  // if the name is unknown (plugin registration may fill it in later).
+  if (obj.scorer !== undefined && obj.scorer !== null) {
+    if (
+      typeof obj.scorer !== "string" ||
+      !(VALID_SCORERS as ReadonlySet<string>).has(obj.scorer)
+    ) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `Unknown scorer '${String(obj.scorer)}' on field '${fieldName}' ` +
+          `(will be rejected at score-time if no plugin is registered).`,
+      );
+    }
+  }
+
   return stripUndefined({
     field: asStr(obj.field, `${ctx}.field`),
-    transforms: Array.isArray(obj.transforms)
-      ? (obj.transforms as string[])
-      : [],
+    transforms,
     scorer: typeof obj.scorer === "string" ? obj.scorer : "jaro_winkler",
     weight: typeof obj.weight === "number" ? obj.weight : 1.0,
     model: optStr(obj.model),
@@ -177,7 +305,12 @@ function parseMatchkeyConfig(raw: unknown, ctx: string): MatchkeyConfig {
 
   return stripUndefined({
     name: asStr(obj.name, `${ctx}.name`),
-    type: (obj.type as MatchkeyConfig["type"]) ?? "weighted",
+    type: requireIn(
+      obj.type,
+      VALID_MATCHKEY_TYPES,
+      `${ctx}.type`,
+      "weighted",
+    ),
     fields,
     threshold: optNum(obj.threshold),
     autoThreshold: optBool(obj.autoThreshold),
@@ -252,7 +385,12 @@ function parseBlockingConfig(raw: unknown, ctx: string): BlockingConfig {
       : undefined;
 
   return stripUndefined({
-    strategy: (obj.strategy as BlockingConfig["strategy"]) ?? "static",
+    strategy: requireIn(
+      obj.strategy,
+      VALID_BLOCKING_STRATEGIES,
+      `${ctx}.strategy`,
+      "static",
+    ),
     keys,
     maxBlockSize:
       typeof obj.maxBlockSize === "number" ? obj.maxBlockSize : 5000,
@@ -281,8 +419,9 @@ function parseBlockingConfig(raw: unknown, ctx: string): BlockingConfig {
 function parseGoldenFieldRule(raw: unknown, ctx: string): GoldenFieldRule {
   const obj = asObj(raw, ctx);
   return stripUndefined({
-    strategy: asStr(
+    strategy: requireIn(
       obj.strategy,
+      VALID_STRATEGIES,
       `${ctx}.strategy`,
     ) as GoldenFieldRule["strategy"],
     dateColumn: optStr(obj.dateColumn),
@@ -359,7 +498,21 @@ function parseStandardizationConfig(
   const rules: Record<string, readonly string[]> = {};
   for (const [key, val] of Object.entries(rulesObj)) {
     if (Array.isArray(val)) {
-      rules[key] = val as string[];
+      const arr = val as unknown[];
+      for (const rule of arr) {
+        if (typeof rule !== "string") {
+          throw new Error(
+            `${ctx}.${key}: expected array of strings, got ${typeof rule}`,
+          );
+        }
+        if (!(VALID_STANDARDIZERS as ReadonlySet<string>).has(rule)) {
+          const valid = [...VALID_STANDARDIZERS].sort().join(", ");
+          throw new Error(
+            `Invalid standardizer '${rule}' on column '${key}'. Valid: ${valid}`,
+          );
+        }
+      }
+      rules[key] = arr as string[];
     }
   }
 
@@ -403,7 +556,7 @@ function parseLLMScorerConfig(
       typeof obj.budget === "object" && obj.budget !== null
         ? parseBudgetConfig(obj.budget, `${ctx}.budget`)
         : undefined,
-    mode: (obj.mode as LLMScorerConfig["mode"]) ?? "pairwise",
+    mode: requireIn(obj.mode, VALID_LLM_MODES, `${ctx}.mode`, "pairwise"),
     clusterMaxSize: optNum(obj.clusterMaxSize),
     clusterMinSize: optNum(obj.clusterMinSize),
   }) as LLMScorerConfig;
@@ -416,12 +569,21 @@ function parseValidationRuleConfig(
   const obj = asObj(raw, ctx);
   return {
     column: asStr(obj.column, `${ctx}.column`),
-    ruleType: asStr(obj.ruleType, `${ctx}.ruleType`) as ValidationRuleConfig["ruleType"],
+    ruleType: requireIn(
+      obj.ruleType,
+      VALID_VALIDATION_RULE_TYPES,
+      `${ctx}.ruleType`,
+    ),
     params:
       typeof obj.params === "object" && obj.params !== null
         ? (obj.params as Record<string, unknown>)
         : {},
-    action: (obj.action as ValidationRuleConfig["action"]) ?? "flag",
+    action: requireIn(
+      obj.action,
+      VALID_VALIDATION_ACTIONS,
+      `${ctx}.action`,
+      "flag",
+    ),
   };
 }
 
@@ -462,8 +624,13 @@ function parseQualityConfig(raw: unknown, ctx: string): QualityConfig {
   const obj = asObj(raw, ctx);
   return stripUndefined({
     enabled: typeof obj.enabled === "boolean" ? obj.enabled : true,
-    mode: (obj.mode as QualityConfig["mode"]) ?? "silent",
-    fixMode: (obj.fixMode as QualityConfig["fixMode"]) ?? "safe",
+    mode: requireIn(obj.mode, VALID_QUALITY_MODES, `${ctx}.mode`, "silent"),
+    fixMode: requireIn(
+      obj.fixMode,
+      VALID_QUALITY_FIX_MODES,
+      `${ctx}.fixMode`,
+      "safe",
+    ),
     domain: optStr(obj.domain),
   }) as QualityConfig;
 }
@@ -472,7 +639,7 @@ function parseTransformConfig(raw: unknown, ctx: string): TransformConfig {
   const obj = asObj(raw, ctx);
   return {
     enabled: typeof obj.enabled === "boolean" ? obj.enabled : true,
-    mode: (obj.mode as TransformConfig["mode"]) ?? "silent",
+    mode: requireIn(obj.mode, VALID_QUALITY_MODES, `${ctx}.mode`, "silent"),
   };
 }
 
@@ -494,7 +661,12 @@ function parseMemoryConfig(raw: unknown, ctx: string): MemoryConfig {
   const obj = asObj(raw, ctx);
   return stripUndefined({
     enabled: typeof obj.enabled === "boolean" ? obj.enabled : false,
-    backend: (obj.backend as MemoryConfig["backend"]) ?? "sqlite",
+    backend: requireIn(
+      obj.backend,
+      VALID_MEMORY_BACKENDS,
+      `${ctx}.backend`,
+      "sqlite",
+    ),
     path: optStr(obj.path),
     trust: typeof obj.trust === "number" ? obj.trust : 0.9,
     learning:

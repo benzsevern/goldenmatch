@@ -141,14 +141,69 @@ export function levenshteinSimilarity(a: string, b: string): number {
 }
 
 /**
- * Token sort ratio.
- * Split both strings on whitespace, sort tokens, rejoin,
- * then compute Levenshtein normalized similarity on sorted strings.
+ * Indel (insertion+deletion) edit distance.
+ *
+ * Like Levenshtein but without substitutions — a substitution costs 2
+ * (one delete + one insert) instead of 1. This matches the distance
+ * metric used by rapidfuzz's Indel ratio, which underlies
+ * `rapidfuzz.fuzz.token_sort_ratio` in Python.
+ */
+export function indelDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const m = a.length;
+  const n = b.length;
+  let prev = new Uint32Array(n + 1);
+  let curr = new Uint32Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      if (a.charCodeAt(i - 1) === b.charCodeAt(j - 1)) {
+        curr[j] = prev[j - 1]!;
+      } else {
+        // Only insert or delete allowed — cost 1 each. No substitution.
+        curr[j] = Math.min(prev[j]! + 1, curr[j - 1]! + 1);
+      }
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[n]!;
+}
+
+/**
+ * Indel normalized similarity: `1 - d_indel / (len_a + len_b)`.
+ * Matches rapidfuzz's `Indel.normalized_similarity`.
+ */
+export function indelSimilarity(a: string, b: string): number {
+  const total = a.length + b.length;
+  if (total === 0) return 1.0;
+  return 1 - indelDistance(a, b) / total;
+}
+
+/**
+ * Token sort ratio, rapidfuzz-compatible.
+ *
+ * Matches `rapidfuzz.fuzz.token_sort_ratio`:
+ * 1. Lowercase both strings.
+ * 2. Strip non-alphanumeric characters (replace with whitespace).
+ * 3. Split on whitespace, drop empties, sort tokens, rejoin with single space.
+ * 4. Compare via Indel normalized similarity (NOT Levenshtein).
+ *
+ * Python reference: for ("John Smith", "Smith Johnson") returns ~0.8571.
  */
 export function tokenSortRatio(a: string, b: string): number {
-  const sortedA = a.trim().split(/\s+/).sort().join(" ");
-  const sortedB = b.trim().split(/\s+/).sort().join(" ");
-  return levenshteinSimilarity(sortedA, sortedB);
+  const normalize = (s: string): string =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .sort()
+      .join(" ");
+  return indelSimilarity(normalize(a), normalize(b));
 }
 
 /**

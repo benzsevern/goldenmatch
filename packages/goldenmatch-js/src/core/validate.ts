@@ -63,57 +63,94 @@ function valueToStr(v: unknown): string | null {
   return null;
 }
 
-/** Returns true if the rule passes for this value, false otherwise. */
-export function checkRule(value: unknown, rule: ValidationRule): boolean {
-  const params = rule.params;
-
+/**
+ * Compile a rule into a checker function. Expensive work (regex compilation)
+ * happens here, not on every row. If a regex is invalid, log once and return
+ * a checker that matches no rows.
+ */
+function compileRule(rule: ValidationRule): (value: unknown) => boolean {
   if (rule.ruleType === "not_null") {
-    return value !== null && value !== undefined && value !== "";
+    return (v) => v !== null && v !== undefined && v !== "";
   }
 
-  // Other rules short-circuit on null to pass (use not_null to force)
-  if (value === null || value === undefined) return true;
-
-  switch (rule.ruleType) {
-    case "regex": {
-      const pat = params["pattern"];
-      if (typeof pat !== "string") return true;
-      const str = valueToStr(value);
-      if (str === null) return false;
-      try {
-        return new RegExp(pat).test(str);
-      } catch {
+  if (rule.ruleType === "regex") {
+    const pat = rule.params["pattern"];
+    if (typeof pat !== "string") {
+      return (v) => v === null || v === undefined;
+    }
+    let re: RegExp;
+    try {
+      re = new RegExp(pat);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `Invalid regex pattern for rule on column '${rule.column}': ${pat}. ` +
+          `Error: ${err instanceof Error ? err.message : String(err)}. ` +
+          `Rule will match no rows.`,
+      );
+      return (v) => {
+        if (v === null || v === undefined) return true;
         return false;
-      }
+      };
     }
-    case "min_length": {
-      const min = typeof params["value"] === "number" ? params["value"] : 0;
-      const str = valueToStr(value) ?? "";
+    return (v) => {
+      if (v === null || v === undefined) return true;
+      const str = valueToStr(v);
+      if (str === null) return false;
+      return re.test(str);
+    };
+  }
+
+  if (rule.ruleType === "min_length") {
+    const min =
+      typeof rule.params["value"] === "number" ? rule.params["value"] : 0;
+    return (v) => {
+      if (v === null || v === undefined) return true;
+      const str = valueToStr(v) ?? "";
       return str.length >= min;
-    }
-    case "max_length": {
-      const max =
-        typeof params["value"] === "number" ? params["value"] : Infinity;
-      const str = valueToStr(value) ?? "";
+    };
+  }
+
+  if (rule.ruleType === "max_length") {
+    const max =
+      typeof rule.params["value"] === "number"
+        ? rule.params["value"]
+        : Infinity;
+    return (v) => {
+      if (v === null || v === undefined) return true;
+      const str = valueToStr(v) ?? "";
       return str.length <= max;
-    }
-    case "in_set": {
-      const allowed = params["values"];
-      if (!Array.isArray(allowed)) return true;
-      return allowed.includes(value);
-    }
-    case "format": {
-      const name = params["name"];
-      if (typeof name !== "string") return true;
-      const matcher = FORMAT_MATCHERS[name];
-      if (matcher === undefined) return true;
-      const str = valueToStr(value);
+    };
+  }
+
+  if (rule.ruleType === "in_set") {
+    const allowed = rule.params["values"];
+    if (!Array.isArray(allowed)) return () => true;
+    return (v) => {
+      if (v === null || v === undefined) return true;
+      return allowed.includes(v);
+    };
+  }
+
+  if (rule.ruleType === "format") {
+    const name = rule.params["name"];
+    if (typeof name !== "string") return () => true;
+    const matcher = FORMAT_MATCHERS[name];
+    if (matcher === undefined) return () => true;
+    return (v) => {
+      if (v === null || v === undefined) return true;
+      const str = valueToStr(v);
       if (str === null) return false;
       return matcher.test(str);
-    }
-    default:
-      return true;
+    };
   }
+
+  return () => true;
+}
+
+/** Returns true if the rule passes for this value, false otherwise. */
+export function checkRule(value: unknown, rule: ValidationRule): boolean {
+  return compileRule(rule)(value);
 }
 
 function ruleKey(rule: ValidationRule): string {
@@ -141,6 +178,12 @@ export function validateRows(
   const violations = new Map<string, number>();
   let flagged = 0;
 
+  // Pre-compile all rule checkers once. Logs any regex errors exactly once.
+  const compiled = rules.map((rule) => ({
+    rule,
+    check: compileRule(rule),
+  }));
+
   for (const row of rows) {
     let current: Record<string, unknown> = { ...row };
     let shouldQuarantine = false;
@@ -151,9 +194,9 @@ export function validateRows(
         )
       : [];
 
-    for (const rule of rules) {
+    for (const { rule, check } of compiled) {
       const value = current[rule.column];
-      if (checkRule(value, rule)) continue;
+      if (check(value)) continue;
 
       const key = ruleKey(rule);
       violations.set(key, (violations.get(key) ?? 0) + 1);
