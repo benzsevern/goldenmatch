@@ -415,6 +415,45 @@ def _check_remote_assets(
             report.config_was_modified = True
 
 
+def _check_weight_confidence(
+    config: "GoldenMatchConfig",
+    profiles: "list[ColumnProfile]",
+    report: PreflightReport,
+) -> None:
+    """Check 6: cap weight at 0.5 for fields whose column profile has
+    confidence < 0.5. Prevents a column that auto-config is unsure about
+    from dominating the weighted score.
+    """
+    conf_by_col = {p.name: p.confidence for p in profiles}
+
+    for mk in config.get_matchkeys():
+        if mk.type != "weighted":
+            continue
+        for f in mk.fields:
+            if f.field is None or f.weight is None:
+                continue
+            conf = conf_by_col.get(f.field)
+            if conf is None:
+                continue
+            if conf < 0.5 and f.weight > 0.5:
+                original = f.weight
+                f.weight = 0.5
+                report.findings.append(
+                    PreflightFinding(
+                        check="weight_confidence",
+                        severity="warning",
+                        subject=f"{mk.name}.{f.field}",
+                        message=(
+                            f"field '{f.field}' has column profile confidence "
+                            f"{conf:.2f} < 0.5; capped weight {original:.2f} → 0.50"
+                        ),
+                        repaired=True,
+                        repair_note=f"weight: {original:.2f} → 0.50",
+                    )
+                )
+                report.config_was_modified = True
+
+
 def preflight(
     df: "pl.DataFrame",
     config: "GoldenMatchConfig",
@@ -434,4 +473,6 @@ def preflight(
     _check_cardinality(df, config, report)
     _check_block_sizes(df, config, report)
     _check_remote_assets(config, report, allow_remote_assets=allow_remote_assets)
+    if profiles is not None:
+        _check_weight_confidence(config, profiles, report)
     return report

@@ -168,3 +168,30 @@ def test_preflight_check5_keeps_embedding_when_allowed():
     )
     preflight(df, cfg, allow_remote_assets=True)
     assert any(f.scorer == "embedding" for mk in cfg.get_matchkeys() for f in mk.fields)
+
+
+def test_preflight_check6_caps_weight_for_low_confidence():
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    from goldenmatch.core.autoconfig import ColumnProfile
+    from goldenmatch.core.autoconfig_verify import preflight
+    df = pl.DataFrame({"mystery": ["a", "b", "c"] * 10, "name": [f"n{i}" for i in range(30)]})
+    profiles = [
+        ColumnProfile(name="mystery", dtype="Utf8", col_type="string", confidence=0.3,
+                      null_rate=0.0, cardinality_ratio=0.1, avg_len=1.0, sample_values=[]),
+        ColumnProfile(name="name", dtype="Utf8", col_type="name", confidence=0.9,
+                      null_rate=0.0, cardinality_ratio=1.0, avg_len=2.0, sample_values=[]),
+    ]
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["name"])]),
+        matchkeys=[MatchkeyConfig(name="mk", type="weighted", threshold=0.7, fields=[
+            MatchkeyField(field="mystery", scorer="token_sort", weight=1.0),
+            MatchkeyField(field="name", scorer="token_sort", weight=1.0),
+        ])],
+    )
+    preflight(df, cfg, profiles=profiles)
+    mystery_f = next(f for mk in cfg.get_matchkeys() for f in mk.fields if f.field == "mystery")
+    name_f = next(f for mk in cfg.get_matchkeys() for f in mk.fields if f.field == "name")
+    assert mystery_f.weight == 0.5
+    assert name_f.weight == 1.0
