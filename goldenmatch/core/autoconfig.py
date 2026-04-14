@@ -92,6 +92,16 @@ def _classify_by_data(values: list[str]) -> tuple[str, float]:
 
     data_type = _guess_type(values)
 
+    # Cardinality guard: near-unique numeric-looking columns (phone/zip
+    # lookalikes) are almost certainly identifiers. Scoping to numeric-shaped
+    # types avoids reclassifying long text columns (titles, descriptions,
+    # distinct names) as identifiers. Require a non-trivial sample (>=10)
+    # so a handful of genuinely-unique zip/phone rows don't trip the guard.
+    if data_type in ("phone", "zip", "numeric") and len(values) >= 10:
+        cardinality_ratio = len(set(values)) / len(values)
+        if cardinality_ratio >= 0.95:
+            return "identifier", 0.9
+
     # Map profiler types to our types
     type_map = {
         "email": "email",

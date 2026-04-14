@@ -1215,3 +1215,11 @@ class TestLLMMemoryAutoEnablement:
         df = pl.DataFrame({"name": ["John", "Jane", "Bob"], "email": ["a@t.com", "b@t.com", "c@t.com"]})
         config = auto_configure_df(df)
         assert config.memory is None
+
+
+def test_classify_by_data_cardinality_guard_beats_phone():
+    from goldenmatch.core.autoconfig import _classify_by_data
+    values = [str(9000000 + i) for i in range(10)]
+    col_type, confidence = _classify_by_data(values)
+    assert col_type == "identifier", f"got {col_type!r} (confidence={confidence})"
+    assert confidence == 0.9
