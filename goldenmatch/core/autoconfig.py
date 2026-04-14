@@ -66,7 +66,9 @@ class ColumnProfile:
 
 @dataclass
 class AutoConfigDecisions:
-    """Captures the *choices* auto_configure_df makes from profiled data.
+    """Fields marked 'not read yet' are wired up in subsequent tasks; they must not be read before then.
+
+    Captures the *choices* auto_configure_df makes from profiled data.
 
     Separating decisions from the GoldenMatchConfig enables future iterative
     tuning (see spec docs/superpowers/specs/2026-04-14-autoconfig-verification-design.md
@@ -80,10 +82,10 @@ class AutoConfigDecisions:
     blocking_keys: list[BlockingKeyConfig]
     blocking_passes: list[BlockingKeyConfig]
     matchkeys: list[MatchkeyConfig]
-    threshold: float
-    domain_mode: str | None
-    llm_enabled: bool
-    allow_remote_assets: bool
+    threshold: float                # TODO(autoconfig-verify): consumed by postflight threshold nudge — not read yet
+    domain_mode: str | None         # TODO(autoconfig-verify): populated by preflight Check 1 — not read yet
+    llm_enabled: bool               # TODO(autoconfig-verify): preflight Check 5 input — not read yet
+    allow_remote_assets: bool       # TODO(autoconfig-verify): preflight Check 5 input — not read yet
 
 
 def _classify_by_name(col_name: str) -> str | None:
@@ -1433,11 +1435,7 @@ def _rebuild_from_decisions(
         final_blocking = transient_blocking.model_copy(update={
             "strategy": decisions.blocking_strategy,
             "keys": decisions.blocking_keys,
-            "passes": (
-                decisions.blocking_passes
-                if decisions.blocking_passes
-                else transient_blocking.passes
-            ),
+            "passes": decisions.blocking_passes,
         })
 
     # `profiles` is retained in the signature for future iterative-tuning hooks
