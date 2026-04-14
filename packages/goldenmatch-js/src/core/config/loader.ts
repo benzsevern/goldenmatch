@@ -303,24 +303,39 @@ function parseMatchkeyConfig(raw: unknown, ctx: string): MatchkeyConfig {
       )
     : [];
 
+  const name = asStr(obj.name, `${ctx}.name`);
+  const type = requireIn(
+    obj.type,
+    VALID_MATCHKEY_TYPES,
+    `${ctx}.type`,
+    "weighted",
+  ) as "exact" | "weighted" | "probabilistic";
+
+  if (type === "exact") {
+    return { name, type: "exact", fields };
+  }
+  if (type === "probabilistic") {
+    return stripUndefined({
+      name,
+      type: "probabilistic" as const,
+      fields,
+      threshold: optNum(obj.threshold),
+      emIterations: optNum(obj.emIterations),
+      convergenceThreshold: optNum(obj.convergenceThreshold),
+      linkThreshold: optNum(obj.linkThreshold),
+      reviewThreshold: optNum(obj.reviewThreshold),
+    }) as MatchkeyConfig;
+  }
+  // weighted
   return stripUndefined({
-    name: asStr(obj.name, `${ctx}.name`),
-    type: requireIn(
-      obj.type,
-      VALID_MATCHKEY_TYPES,
-      `${ctx}.type`,
-      "weighted",
-    ),
+    name,
+    type: "weighted" as const,
     fields,
-    threshold: optNum(obj.threshold),
+    threshold: optNum(obj.threshold) ?? 0.85,
     autoThreshold: optBool(obj.autoThreshold),
     rerank: optBool(obj.rerank),
     rerankModel: optStr(obj.rerankModel),
     rerankBand: optNum(obj.rerankBand),
-    emIterations: optNum(obj.emIterations),
-    convergenceThreshold: optNum(obj.convergenceThreshold),
-    linkThreshold: optNum(obj.linkThreshold),
-    reviewThreshold: optNum(obj.reviewThreshold),
   }) as MatchkeyConfig;
 }
 

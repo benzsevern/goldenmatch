@@ -24,6 +24,11 @@ export interface LineageEdge {
   readonly goldenRowId: number;
   readonly fieldProvenance: Readonly<Record<string, FieldProvenanceEntry>>;
   readonly timestamp: string;
+  /**
+   * Human-readable summary of this lineage edge. Only populated when
+   * `buildLineage` is called with `{ naturalLanguage: true }`.
+   */
+  readonly naturalLanguage?: string;
 }
 
 export interface LineageBundle {
@@ -61,6 +66,22 @@ function getClusterId(row: Row): number | null {
   return null;
 }
 
+function renderNaturalLanguage(edge: Omit<LineageEdge, "naturalLanguage">): string {
+  const numSources = edge.sourceRowIds.length;
+  const entries = Object.entries(edge.fieldProvenance);
+  const numFields = entries.length;
+  let strongest: [string, FieldProvenanceEntry] | null = null;
+  for (const entry of entries) {
+    if (strongest === null || entry[1].confidence > strongest[1].confidence) {
+      strongest = entry;
+    }
+  }
+  const strongestDesc = strongest
+    ? `${strongest[0]} from row ${strongest[1].sourceRowId} via ${strongest[1].strategy} (conf ${strongest[1].confidence.toFixed(2)})`
+    : "no field provenance";
+  return `Cluster ${edge.clusterId}: merged ${numSources} source records into golden row ${edge.goldenRowId} across ${numFields} fields. Strongest contribution: ${strongestDesc}.`;
+}
+
 function computeConfidence(cluster: ClusterInfo, strategy: string): number {
   // Base confidence is the cluster confidence; minor bonus for
   // most_complete / first_non_null which are safer picks.
@@ -76,6 +97,12 @@ function computeConfidence(cluster: ClusterInfo, strategy: string): number {
 // ---------------------------------------------------------------------------
 
 export interface BuildLineageOptions {
+  /**
+   * When `true`, every emitted `LineageEdge` gets a human-readable
+   * `naturalLanguage` summary describing which rows were merged, how many
+   * fields carry provenance, and the strongest contributing field. Zero LLM
+   * cost — purely template-based.
+   */
   readonly naturalLanguage?: boolean;
   readonly defaultStrategy?: string;
 }
@@ -86,6 +113,9 @@ export interface BuildLineageOptions {
  * The resulting bundle has one edge per golden record, with field-level
  * provenance keyed by column name. Source row IDs include every member of
  * the cluster the golden record came from.
+ *
+ * Pass `{ naturalLanguage: true }` to populate a human-readable summary on
+ * each edge (see {@link LineageEdge.naturalLanguage}).
  */
 export function buildLineage(
   result: DedupeResult,
@@ -146,13 +176,17 @@ export function buildLineage(
       };
     }
 
-    edges.push({
+    const base: Omit<LineageEdge, "naturalLanguage"> = {
       clusterId,
       sourceRowIds: [...cluster.members],
       goldenRowId,
       fieldProvenance,
       timestamp,
-    });
+    };
+    const edge: LineageEdge = options?.naturalLanguage
+      ? { ...base, naturalLanguage: renderNaturalLanguage(base) }
+      : base;
+    edges.push(edge);
   }
 
   return {

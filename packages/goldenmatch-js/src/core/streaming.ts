@@ -59,11 +59,12 @@ export class StreamProcessor {
       this.nextId = rowId + 1;
     }
 
-    // Matchkey with threshold override
-    const mk: MatchkeyConfig = {
-      ...this.config.matchkey,
-      threshold: this.config.threshold,
-    };
+    // Matchkey with threshold override (exact variant has no threshold).
+    const base = this.config.matchkey;
+    const mk: MatchkeyConfig =
+      base.type === "exact"
+        ? base
+        : { ...base, threshold: this.config.threshold };
 
     // Build snapshot of existing rows (exclude self if duplicate id)
     const existing: Row[] = [];

@@ -8,7 +8,8 @@
  * get a similarity boost before re-clustering.
  */
 
-import type { ClusterInfo, Row, ScoredPair } from "./types.js";
+import type { ClusterInfo, PairKey, Row, ScoredPair } from "./types.js";
+import { pairKey } from "./cluster.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,6 +33,22 @@ export interface GraphERResult {
   readonly iterations: number;
 }
 
+/**
+ * A scorer for graph ER.
+ *
+ * **Contract:** Must return `ScoredPair.idA` / `.idB` as **0-based row indices
+ * into the input `rows` array**, NOT the `__row_id__` values (or any other
+ * external/stable row identifier) those rows may carry.
+ *
+ * Why: `runGraphER` seeds its Union-Find with `0..rows.length` and indexes
+ * foreign-key cluster lookups by row position. Returning external row IDs
+ * instead of 0-based indices causes the evidence-propagation boost to never
+ * apply (ids won't line up with the UF roots or the fk-index map) and can
+ * silently produce wrong clusters.
+ *
+ * If you have stable external row IDs, re-number your rows to 0-based
+ * positional indices before scoring, then map back afterward.
+ */
 export interface GraphERScorer {
   (rows: readonly Row[]): readonly ScoredPair[];
 }
@@ -107,12 +124,11 @@ function clustersFromPairs(
   const uf = new UnionFind();
   for (let i = 0; i < rowCount; i++) uf.add(i);
 
-  const scoreMap = new Map<string, number>();
+  const scoreMap = new Map<PairKey, number>();
   for (const p of pairs) {
     if (p.score < threshold) continue;
     uf.union(p.idA, p.idB);
-    const k = p.idA < p.idB ? `${p.idA}|${p.idB}` : `${p.idB}|${p.idA}`;
-    scoreMap.set(k, p.score);
+    scoreMap.set(pairKey(p.idA, p.idB), p.score);
   }
 
   const rootMembers = new Map<number, number[]>();
@@ -126,7 +142,7 @@ function clustersFromPairs(
   const clusters = new Map<number, ClusterInfo>();
   let clusterId = 0;
   for (const members of rootMembers.values()) {
-    const pairScores = new Map<string, number>();
+    const pairScores = new Map<PairKey, number>();
     let minEdge = 1;
     let edgeSum = 0;
     let edgeCount = 0;
@@ -134,7 +150,7 @@ function clustersFromPairs(
       for (let j = i + 1; j < members.length; j++) {
         const a = members[i]!;
         const b = members[j]!;
-        const k = a < b ? `${a}|${b}` : `${b}|${a}`;
+        const k = pairKey(a, b);
         const s = scoreMap.get(k);
         if (s !== undefined) {
           pairScores.set(k, s);
@@ -184,6 +200,13 @@ function rowIdToCluster(clusters: ReadonlyMap<number, ClusterInfo>): Map<number,
  *      the same cluster in B. Boost those pair scores by `similarityBoost`.
  *   3. Re-cluster every table. Repeat until clusters stabilize or
  *      `maxIterations` is reached.
+ *
+ * **Scorer contract (important):** scorers in `options.scorerByTable` must
+ * return `ScoredPair.idA` / `.idB` as **0-based row indices** into the
+ * `rows` array they were handed (NOT the stable `__row_id__` values those
+ * rows may carry). The evidence-propagation step keys foreign-key cluster
+ * lookups by row position; using external row IDs will silently make the
+ * boost no-op and can produce wrong clusters. See {@link GraphERScorer}.
  */
 export function runGraphER(
   tables: readonly TableSchema[],
@@ -247,20 +270,22 @@ export function runGraphER(
         const bIndex = idIndexByTable.get(rel.tableB);
         if (!bIndex) continue;
 
-        // Build: rowId in A -> cluster id in B (or null)
-        const fkClusterById = new Map<number, number>();
+        // Build: row index in A (0-based) -> cluster id in B
+        // Keyed by positional index because `pair.idA`/`pair.idB` are 0-based
+        // indices per the GraphERScorer contract. See GraphERScorer JSDoc.
+        const fkClusterByIndex = new Map<number, number>();
         for (let i = 0; i < t.rows.length; i++) {
           const fkVal = t.rows[i]![rel.fkColumn];
           if (fkVal === null || fkVal === undefined) continue;
           const bRowIdx = bIndex.get(fkVal);
           if (bRowIdx === undefined) continue;
           const bCid = bClusters.get(bRowIdx);
-          if (bCid !== undefined) fkClusterById.set(i, bCid);
+          if (bCid !== undefined) fkClusterByIndex.set(i, bCid);
         }
 
         for (const pair of boosted) {
-          const ca = fkClusterById.get(pair.idA);
-          const cb = fkClusterById.get(pair.idB);
+          const ca = fkClusterByIndex.get(pair.idA);
+          const cb = fkClusterByIndex.get(pair.idB);
           if (ca !== undefined && cb !== undefined && ca === cb) {
             const newScore = Math.min(1, pair.score + similarityBoost);
             (pair as { score: number }).score = newScore;

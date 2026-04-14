@@ -12,6 +12,7 @@ import type {
   MatchkeyConfig,
   DedupeResult,
   DedupeStats,
+  PairKey,
   ScoredPair,
   MatchResult,
   GoldenRulesConfig,
@@ -131,7 +132,7 @@ export function runDedupePipeline(
 
   // ---- Step 4 & 5: Score exact + fuzzy matchkeys ----
   const allPairs: ScoredPair[] = [];
-  const matchedPairKeys = new Set<string>();
+  const matchedPairKeys = new Set<PairKey>();
   const sourceLookup = buildSourceLookup(processed);
 
   for (const mk of matchkeys) {

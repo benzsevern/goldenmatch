@@ -36,7 +36,8 @@ export function matchOne(
   rows: readonly Row[],
   mk: MatchkeyConfig,
 ): readonly MatchOneHit[] {
-  const threshold = mk.threshold ?? 0;
+  // Exact matchkeys require perfect match (score 1.0).
+  const threshold = mk.type === "exact" ? 1.0 : (mk.threshold ?? 0);
   const matches: MatchOneHit[] = [];
   for (const row of rows) {
     const score = scorePair(record, row, mk.fields);

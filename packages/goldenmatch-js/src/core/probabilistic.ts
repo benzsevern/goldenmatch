@@ -12,6 +12,7 @@
  */
 
 import type { Row, MatchkeyConfig, MatchkeyField, ScoredPair } from "./types.js";
+import { makeScoredPair } from "./types.js";
 import { scoreField, asString } from "./scorer.js";
 import { applyTransforms } from "./transforms.js";
 
@@ -192,9 +193,13 @@ export function trainEM(
   mk: MatchkeyConfig,
   options?: EMOptions,
 ): EMResult {
-  const maxIterations = options?.maxIterations ?? mk.emIterations ?? 20;
-  const convergence =
-    options?.convergence ?? mk.convergenceThreshold ?? 0.001;
+  // Probabilistic-only parameters; fall through to defaults for other variants.
+  const emIterations =
+    mk.type === "probabilistic" ? mk.emIterations : undefined;
+  const convergenceThreshold =
+    mk.type === "probabilistic" ? mk.convergenceThreshold : undefined;
+  const maxIterations = options?.maxIterations ?? emIterations ?? 20;
+  const convergence = options?.convergence ?? convergenceThreshold ?? 0.001;
   const blockingFields = new Set(options?.blockingFields ?? []);
   const seed = options?.seed ?? 42;
   const nSamplePairs = options?.nSamplePairs ?? 10000;
@@ -371,7 +376,9 @@ export function scoreProbabilistic(
   if (fields.length === 0) return [];
 
   const excludePairs = options?.excludePairs ?? new Set<string>();
-  const threshold = options?.threshold ?? mk.linkThreshold ?? 0.5;
+  const linkThreshold =
+    mk.type === "probabilistic" ? mk.linkThreshold : undefined;
+  const threshold = options?.threshold ?? linkThreshold ?? 0.5;
 
   // Min/max possible weight totals for normalization.
   let maxWeight = 0;
@@ -417,11 +424,9 @@ export function scoreProbabilistic(
         weightRange > 0 ? (total - minWeight) / weightRange : 0.5;
 
       if (normalized >= threshold) {
-        results.push({
-          idA: a,
-          idB: b,
-          score: Math.round(normalized * 10000) / 10000,
-        });
+        results.push(
+          makeScoredPair(a, b, Math.round(normalized * 10000) / 10000),
+        );
       }
     }
   }

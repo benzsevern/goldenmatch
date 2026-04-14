@@ -9,6 +9,7 @@
  */
 
 import type { BlockResult, Row, ScoredPair } from "./types.js";
+import { makeScoredPair } from "./types.js";
 import { getEmbedder, type EmbedderOptions } from "./embedder.js";
 
 // ---------------------------------------------------------------------------
@@ -576,11 +577,9 @@ export async function buildANNPairBlocks(
     return typeof v === "number" ? v : idx;
   };
 
-  const preScoredPairs: ScoredPair[] = scored.map(([a, b, score]) => ({
-    idA: rowIdAt(a),
-    idB: rowIdAt(b),
-    score,
-  }));
+  const preScoredPairs: ScoredPair[] = scored.map(([a, b, score]) =>
+    makeScoredPair(rowIdAt(a), rowIdAt(b), score),
+  );
 
   return [
     {

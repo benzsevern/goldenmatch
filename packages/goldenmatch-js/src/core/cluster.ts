@@ -3,19 +3,21 @@
  * Edge-safe: no Node.js imports, pure TypeScript only.
  */
 
-import type { ClusterInfo } from "./types.js";
+import type { ClusterInfo, PairKey } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Canonicalize a pair key: always min:max. */
-export function pairKey(a: number, b: number): string {
-  return `${Math.min(a, b)}:${Math.max(a, b)}`;
+/** Canonicalize a pair key: always min:max. Sole producer of branded PairKey. */
+export function pairKey(a: number, b: number): PairKey {
+  const lo = a < b ? a : b;
+  const hi = a < b ? b : a;
+  return `${lo}:${hi}` as PairKey;
 }
 
 /** Parse a pair key back into [idA, idB]. */
-function parsePairKey(key: string): [number, number] {
+export function parsePairKey(key: PairKey): readonly [number, number] {
   const idx = key.indexOf(":");
   return [Number(key.slice(0, idx)), Number(key.slice(idx + 1))];
 }
@@ -104,7 +106,7 @@ export class UnionFind {
  */
 export function buildMst(
   members: readonly number[],
-  pairScores: ReadonlyMap<string, number>,
+  pairScores: ReadonlyMap<PairKey, number>,
 ): [number, number, number][] {
   // Collect and sort edges by score descending
   const edges: [number, number, number][] = [];
@@ -146,7 +148,7 @@ export interface ClusterConfidence {
  * confidence = 0.4 * minEdge + 0.3 * avgEdge + 0.3 * connectivity
  */
 export function computeClusterConfidence(
-  pairScores: ReadonlyMap<string, number>,
+  pairScores: ReadonlyMap<PairKey, number>,
   size: number,
 ): ClusterConfidence {
   if (size <= 1 || pairScores.size === 0) {
@@ -161,7 +163,7 @@ export function computeClusterConfidence(
 
   let minEdge = Infinity;
   let sum = 0;
-  let bottleneckKey = "";
+  let bottleneckKey: PairKey | null = null;
 
   for (const [key, score] of pairScores) {
     sum += score;
@@ -194,7 +196,7 @@ interface MutableClusterInfo {
   members: number[];
   size: number;
   oversized: boolean;
-  pairScores: Map<string, number>;
+  pairScores: Map<PairKey, number>;
   confidence: number;
   bottleneckPair: readonly [number, number] | null;
   clusterQuality: "strong" | "weak" | "split";
@@ -207,7 +209,7 @@ interface MutableClusterInfo {
  */
 export function splitOversizedCluster(
   members: readonly number[],
-  pairScores: ReadonlyMap<string, number>,
+  pairScores: ReadonlyMap<PairKey, number>,
 ): MutableClusterInfo[] {
   if (members.length <= 1 || pairScores.size === 0) {
     return [
@@ -260,7 +262,7 @@ export function splitOversizedCluster(
   const result: MutableClusterInfo[] = [];
   for (const subMembers of uf.getClusters()) {
     const subList = [...subMembers].sort((a, b) => a - b);
-    const subPairs = new Map<string, number>();
+    const subPairs = new Map<PairKey, number>();
     for (const [key, score] of pairScores) {
       const [a, b] = parsePairKey(key);
       if (subMembers.has(a) && subMembers.has(b)) {
@@ -528,7 +530,7 @@ export function addToCluster(
 
   // Multiple clusters: merge all
   const mergedMembers: number[] = [recordId];
-  const mergedPairs = new Map<string, number>();
+  const mergedPairs = new Map<PairKey, number>();
 
   for (const cid of matchedCids) {
     const cinfo = clusters.get(cid)!;
@@ -673,9 +675,9 @@ export function unmergeCluster(
 export function getClusterPairScores(
   members: readonly number[],
   allPairs: readonly (readonly [number, number, number])[],
-): Map<string, number> {
+): Map<PairKey, number> {
   const memberSet = new Set(members);
-  const result = new Map<string, number>();
+  const result = new Map<PairKey, number>();
   for (const [a, b, s] of allPairs) {
     if (memberSet.has(a) && memberSet.has(b)) {
       result.set(pairKey(a, b), s);

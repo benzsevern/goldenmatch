@@ -116,7 +116,7 @@ describe("computeClusterConfidence", () => {
 
   it("confidence formula: 0.4*min + 0.3*avg + 0.3*connectivity", () => {
     // One pair, size=2 — fully connected so connectivity=1.0
-    const pairs = new Map<string, number>([[pairKey(1, 2), 0.8]]);
+    const pairs = new Map([[pairKey(1, 2), 0.8]]);
     const conf = computeClusterConfidence(pairs, 2);
     expect(conf.minEdge).toBe(0.8);
     expect(conf.avgEdge).toBe(0.8);
@@ -126,7 +126,7 @@ describe("computeClusterConfidence", () => {
   });
 
   it("bottleneck pair is weakest edge", () => {
-    const pairs = new Map<string, number>([
+    const pairs = new Map([
       [pairKey(1, 2), 0.9],
       [pairKey(2, 3), 0.5],
     ]);

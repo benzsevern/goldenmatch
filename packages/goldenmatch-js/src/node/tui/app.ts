@@ -190,9 +190,15 @@ export async function startTui(options: TuiOptions = {}): Promise<void> {
       return header;
     }
 
+    const mkThreshold = (mk: { readonly type: string }): string => {
+      if (mk.type === "exact") return "-";
+      const t = (mk as { threshold?: number }).threshold;
+      return t === undefined ? "-" : String(t);
+    };
+
     if (addons.SelectInput && selectedMk === null) {
       const items = mks.map((mk, i) => ({
-        label: `${mk.name} (${mk.type}) threshold=${mk.threshold ?? "-"}`,
+        label: `${mk.name} (${mk.type}) threshold=${mkThreshold(mk)}`,
         value: String(i),
       }));
       return h(
@@ -205,7 +211,12 @@ export async function startTui(options: TuiOptions = {}): Promise<void> {
           onSelect: (item: { value: string }) => {
             const idx = Number(item.value);
             setSelectedMk(idx);
-            setThresholdDraft(String(mks[idx]?.threshold ?? ""));
+            const picked = mks[idx];
+            const thr =
+              picked && picked.type !== "exact"
+                ? ((picked as { threshold?: number }).threshold ?? "")
+                : "";
+            setThresholdDraft(String(thr));
           },
         }),
       );
@@ -245,7 +256,7 @@ export async function startTui(options: TuiOptions = {}): Promise<void> {
           : h(
               ink.Text,
               { dimColor: true },
-              `  threshold: ${mk.threshold ?? "-"} (install ink-text-input to edit)`,
+              `  threshold: ${mkThreshold(mk)} (install ink-text-input to edit)`,
             ),
         h(ink.Text, { dimColor: true }, "[Enter] save  [Esc] back"),
       );
@@ -260,7 +271,7 @@ export async function startTui(options: TuiOptions = {}): Promise<void> {
         h(
           ink.Text,
           { key: `mk-${i}`, dimColor: true },
-          `  - ${mk.name} (${mk.type}), threshold=${mk.threshold ?? "-"}, fields: ${mk.fields
+          `  - ${mk.name} (${mk.type}), threshold=${mkThreshold(mk)}, fields: ${mk.fields
             .map((f) => f.field)
             .join(", ")}`,
         ),

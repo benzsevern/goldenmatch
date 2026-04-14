@@ -23,8 +23,10 @@ import { dirname, join } from "node:path";
 import type {
   BlockResult,
   MatchkeyConfig,
+  PairKey,
   ScoredPair,
 } from "../../core/types.js";
+import { pairKey } from "../../core/cluster.js";
 
 export interface WorkerPoolOptions {
   /** Max blocks scored concurrently per batch. Defaults to 4. */
@@ -57,7 +59,7 @@ export interface ParallelWorkerOptions {
 export async function scoreBlocksConcurrent(
   blocks: readonly BlockResult[],
   mk: MatchkeyConfig,
-  matchedPairs: Set<string>,
+  matchedPairs: Set<PairKey>,
   options: WorkerPoolOptions = {},
 ): Promise<readonly ScoredPair[]> {
   if (blocks.length === 0) return [];
@@ -76,7 +78,7 @@ export async function scoreBlocksConcurrent(
     const batch = blocks.slice(i, i + batchSize);
 
     // Snapshot exclude set per batch so concurrent block scoring is stable.
-    const excludeSnapshot: ReadonlySet<string> = new Set(matchedPairs);
+    const excludeSnapshot: ReadonlySet<PairKey> = new Set(matchedPairs);
 
     const batchResults = await Promise.all(
       batch.map((block) =>
@@ -93,7 +95,7 @@ export async function scoreBlocksConcurrent(
 
     for (const pairs of batchResults) {
       for (const p of pairs) {
-        const key = `${p.idA}:${p.idB}`;
+        const key = pairKey(p.idA, p.idB);
         if (matchedPairs.has(key)) continue;
         matchedPairs.add(key);
         results.push(p);
@@ -121,7 +123,7 @@ export async function scoreBlocksConcurrent(
 export async function scoreBlocksParallel(
   blocks: readonly BlockResult[],
   mk: MatchkeyConfig,
-  matchedPairs: Set<string>,
+  matchedPairs: Set<PairKey>,
   options: ParallelWorkerOptions = {},
 ): Promise<readonly ScoredPair[]> {
   if (blocks.length === 0) return [];
@@ -173,8 +175,7 @@ export async function scoreBlocksParallel(
     const all: ScoredPair[] = [];
     for (const r of results) {
       for (const p of r.pairs) {
-        const key =
-          p.idA < p.idB ? `${p.idA}:${p.idB}` : `${p.idB}:${p.idA}`;
+        const key = pairKey(p.idA, p.idB);
         if (matchedPairs.has(key)) continue;
         matchedPairs.add(key);
         all.push(p);

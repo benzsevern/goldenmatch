@@ -12,7 +12,12 @@
 export type {
   Row,
   ColumnValue,
+  PairKey,
   MatchkeyConfig,
+  ExactMatchkey,
+  WeightedMatchkey,
+  ProbabilisticMatchkey,
+  MakeMatchkeyConfigInput,
   MatchkeyField,
   BlockingConfig,
   BlockingKeyConfig,
@@ -54,6 +59,7 @@ export {
   makeBlockingConfig,
   makeGoldenRulesConfig,
   makeConfig,
+  makeScoredPair,
   getMatchkeys,
 } from "./types.js";
 
@@ -92,7 +98,6 @@ export {
   ensembleScore,
   scoreMatrix,
   asString,
-  pairKey as scorerPairKey,
 } from "./scorer.js";
 
 // ---------------------------------------------------------------------------
@@ -181,6 +186,7 @@ export {
   unmergeRecord,
   unmergeCluster,
   pairKey,
+  parsePairKey,
   getClusterPairScores,
 } from "./cluster.js";
 

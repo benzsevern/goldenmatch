@@ -15,6 +15,7 @@
  */
 
 import type { BudgetConfig, MatchkeyConfig, Row, ScoredPair } from "./types.js";
+import { makeScoredPair } from "./types.js";
 import { BudgetTracker, countTokensApprox } from "./llm/budget.js";
 
 // ---------------------------------------------------------------------------
@@ -495,7 +496,8 @@ export async function rerankTopPairs(
   const maxRetries = options.maxRetries ?? 2;
   const band = options.band ?? 0.1;
   const weight = options.rerankWeight ?? 0.5;
-  const threshold = mk.threshold ?? 0.85;
+  // Reranking only meaningful for weighted/probabilistic; exact is binary.
+  const threshold = mk.type === "exact" ? 1.0 : (mk.threshold ?? 0.85);
 
   // Build row lookup.
   const rowById = new Map<number, Row>();
@@ -606,7 +608,7 @@ export async function rerankTopPairs(
     const reranked = newScores.get(i);
     const finalScore = reranked ?? original.score;
     if (finalScore < threshold) continue;
-    out.push({ idA: original.idA, idB: original.idB, score: finalScore });
+    out.push(makeScoredPair(original.idA, original.idB, finalScore));
   }
   return out;
 }

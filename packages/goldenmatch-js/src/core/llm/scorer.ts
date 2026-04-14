@@ -12,6 +12,7 @@
  */
 
 import type { Row, ScoredPair, LLMScorerConfig } from "../types.js";
+import { makeScoredPair } from "../types.js";
 import { BudgetTracker, countTokensApprox } from "./budget.js";
 import type { BudgetSnapshot } from "./budget.js";
 
@@ -303,7 +304,7 @@ export async function llmScorePairs(
   // Build result scaffold: auto-accept promoted to 1.0, below untouched.
   const resultPairs: ScoredPair[] = [];
   for (const p of autoAccept) {
-    resultPairs.push({ idA: p.idA, idB: p.idB, score: 1.0 });
+    resultPairs.push(makeScoredPair(p.idA, p.idB, 1.0));
   }
   for (const p of below) {
     resultPairs.push(p);
@@ -336,7 +337,7 @@ export async function llmScorePairs(
   for (const p of candidates) {
     const decision = llmDecisions.get(pairIndex(p));
     if (decision === true) {
-      resultPairs.push({ idA: p.idA, idB: p.idB, score: 1.0 });
+      resultPairs.push(makeScoredPair(p.idA, p.idB, 1.0));
     } else {
       resultPairs.push(p);
     }

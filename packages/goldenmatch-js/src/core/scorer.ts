@@ -10,9 +10,12 @@ import type {
   Row,
   MatchkeyField,
   MatchkeyConfig,
+  PairKey,
   ScoredPair,
   BlockResult,
 } from "./types.js";
+import { makeScoredPair } from "./types.js";
+import { pairKey } from "./cluster.js";
 import { applyTransforms, soundex } from "./transforms.js";
 
 // ---------------------------------------------------------------------------
@@ -567,13 +570,7 @@ export function findExactMatches(
     if (members.length < 2) return;
     for (let i = 0; i < members.length; i++) {
       for (let j = i + 1; j < members.length; j++) {
-        const a = members[i]!;
-        const b = members[j]!;
-        pairs.push({
-          idA: Math.min(a, b),
-          idB: Math.max(a, b),
-          score: 1.0,
-        });
+        pairs.push(makeScoredPair(members[i]!, members[j]!, 1.0));
       }
     }
   });
@@ -597,10 +594,12 @@ export function findExactMatches(
 export function findFuzzyMatches(
   rows: readonly Row[],
   mk: MatchkeyConfig,
-  excludePairs?: ReadonlySet<string>,
+  excludePairs?: ReadonlySet<PairKey>,
   preScoredPairs?: readonly ScoredPair[],
 ): ScoredPair[] {
-  const threshold = mk.threshold ?? 0.85;
+  // findFuzzyMatches only runs for weighted/probabilistic matchkeys
+  // (exact is handled via findExactMatches). Exact has no threshold.
+  const threshold = mk.type === "exact" ? 1.0 : (mk.threshold ?? 0.85);
 
   // Fast path: pre-scored pairs (from ANN blocking)
   if (preScoredPairs !== undefined) {
@@ -609,9 +608,9 @@ export function findFuzzyMatches(
       if (p.score < threshold) continue;
       const idA = Math.min(p.idA, p.idB);
       const idB = Math.max(p.idA, p.idB);
-      const pairKey = `${idA}:${idB}`;
-      if (excludePairs !== undefined && excludePairs.has(pairKey)) continue;
-      results.push({ idA, idB, score: p.score });
+      const key = pairKey(idA, idB);
+      if (excludePairs !== undefined && excludePairs.has(key)) continue;
+      results.push(makeScoredPair(idA, idB, p.score));
     }
     return results;
   }
@@ -761,9 +760,9 @@ export function findFuzzyMatches(
       if (score < threshold) continue;
       const idA = Math.min(rowIds[i]!, rowIds[j]!);
       const idB = Math.max(rowIds[i]!, rowIds[j]!);
-      const pairKey = `${idA}:${idB}`;
-      if (excludePairs !== undefined && excludePairs.has(pairKey)) continue;
-      results.push({ idA, idB, score });
+      const key = pairKey(idA, idB);
+      if (excludePairs !== undefined && excludePairs.has(key)) continue;
+      results.push(makeScoredPair(idA, idB, score));
     }
   }
   return results;
@@ -791,7 +790,7 @@ export interface ScoreBlocksOptions {
 export function scoreBlocksSequential(
   blocks: readonly BlockResult[],
   mk: MatchkeyConfig,
-  matchedPairs: Set<string>,
+  matchedPairs: Set<PairKey>,
   options?: ScoreBlocksOptions,
 ): ScoredPair[] {
   if (blocks.length === 0) return [];
@@ -814,7 +813,7 @@ export function scoreBlocksSequential(
     }
 
     // Use a frozen copy of matchedPairs for consistency
-    const excludeSnapshot: ReadonlySet<string> = new Set(matchedPairs);
+    const excludeSnapshot: ReadonlySet<PairKey> = new Set(matchedPairs);
 
     let pairs = findFuzzyMatches(
       block.rows,
@@ -841,7 +840,7 @@ export function scoreBlocksSequential(
 
     for (const p of pairs) {
       allPairs.push(p);
-      matchedPairs.add(`${p.idA}:${p.idB}`);
+      matchedPairs.add(pairKey(p.idA, p.idB));
     }
   }
 
@@ -852,7 +851,5 @@ export function scoreBlocksSequential(
 // Utility: canonicalize pair key
 // ---------------------------------------------------------------------------
 
-/** Create a canonical pair key string "minId:maxId". */
-export function pairKey(idA: number, idB: number): string {
-  return idA < idB ? `${idA}:${idB}` : `${idB}:${idA}`;
-}
+// Re-export pairKey from cluster.ts — single canonical source of truth.
+export { pairKey };

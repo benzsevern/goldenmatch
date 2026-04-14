@@ -10,6 +10,9 @@
 export type ColumnValue = string | number | boolean | null;
 export type Row = Readonly<Record<string, unknown>>;
 
+/** A canonical pair key in the form "minId:maxId". Only produced by pairKey(). */
+export type PairKey = string & { readonly __brand: "PairKey" };
+
 // ---------------------------------------------------------------------------
 // Matchkey field config
 // ---------------------------------------------------------------------------
@@ -26,20 +29,38 @@ export interface MatchkeyField {
   readonly partialThreshold?: number;
 }
 
-export interface MatchkeyConfig {
+export interface ExactMatchkey {
   readonly name: string;
-  readonly type: "exact" | "weighted" | "probabilistic";
+  readonly type: "exact";
   readonly fields: readonly MatchkeyField[];
-  readonly threshold?: number;
+}
+
+export interface WeightedMatchkey {
+  readonly name: string;
+  readonly type: "weighted";
+  readonly fields: readonly MatchkeyField[];
+  readonly threshold: number;
   readonly autoThreshold?: boolean;
   readonly rerank?: boolean;
   readonly rerankModel?: string;
   readonly rerankBand?: number;
+}
+
+export interface ProbabilisticMatchkey {
+  readonly name: string;
+  readonly type: "probabilistic";
+  readonly fields: readonly MatchkeyField[];
+  readonly threshold?: number;
   readonly emIterations?: number;
   readonly convergenceThreshold?: number;
   readonly linkThreshold?: number;
   readonly reviewThreshold?: number;
 }
+
+export type MatchkeyConfig =
+  | ExactMatchkey
+  | WeightedMatchkey
+  | ProbabilisticMatchkey;
 
 // ---------------------------------------------------------------------------
 // Blocking config
@@ -283,7 +304,7 @@ export interface ClusterInfo {
   readonly members: readonly number[];
   readonly size: number;
   readonly oversized: boolean;
-  readonly pairScores: ReadonlyMap<string, number>;
+  readonly pairScores: ReadonlyMap<PairKey, number>;
   readonly confidence: number;
   readonly bottleneckPair: readonly [number, number] | null;
   readonly clusterQuality: "strong" | "weak" | "split";
@@ -394,6 +415,20 @@ export const VALID_STANDARDIZERS = new Set([
 // Factory functions
 // ---------------------------------------------------------------------------
 
+/**
+ * Create a ScoredPair guaranteeing idA <= idB (canonical order).
+ * Always use this instead of constructing `{ idA, idB, score }` directly.
+ */
+export function makeScoredPair(
+  a: number,
+  b: number,
+  score: number,
+): ScoredPair {
+  const lo = a < b ? a : b;
+  const hi = a < b ? b : a;
+  return { idA: lo, idB: hi, score };
+}
+
 /** Create a MatchkeyField with sensible defaults. */
 export function makeMatchkeyField(
   partial: Partial<MatchkeyField> & Pick<MatchkeyField, "field">,
@@ -406,16 +441,75 @@ export function makeMatchkeyField(
   };
 }
 
-/** Create a MatchkeyConfig with sensible defaults. */
+/**
+ * Shape accepted by `makeMatchkeyConfig`. All variant-specific fields are
+ * optional; the factory picks the right variant based on `type`.
+ */
+export interface MakeMatchkeyConfigInput {
+  readonly name: string;
+  readonly type?: "exact" | "weighted" | "probabilistic";
+  readonly fields?: readonly MatchkeyField[];
+  readonly threshold?: number;
+  readonly autoThreshold?: boolean;
+  readonly rerank?: boolean;
+  readonly rerankModel?: string;
+  readonly rerankBand?: number;
+  readonly emIterations?: number;
+  readonly convergenceThreshold?: number;
+  readonly linkThreshold?: number;
+  readonly reviewThreshold?: number;
+}
+
+/** Create a MatchkeyConfig with sensible defaults. Produces the correct variant. */
 export function makeMatchkeyConfig(
-  partial: Partial<MatchkeyConfig> & Pick<MatchkeyConfig, "name">,
+  partial: MakeMatchkeyConfigInput,
 ): MatchkeyConfig {
-  return {
+  const type = partial.type ?? "weighted";
+  const fields = partial.fields ?? [];
+  if (type === "exact") {
+    return { name: partial.name, type: "exact", fields };
+  }
+  if (type === "probabilistic") {
+    const out: ProbabilisticMatchkey = {
+      name: partial.name,
+      type: "probabilistic",
+      fields,
+      ...(partial.threshold !== undefined
+        ? { threshold: partial.threshold }
+        : {}),
+      ...(partial.emIterations !== undefined
+        ? { emIterations: partial.emIterations }
+        : {}),
+      ...(partial.convergenceThreshold !== undefined
+        ? { convergenceThreshold: partial.convergenceThreshold }
+        : {}),
+      ...(partial.linkThreshold !== undefined
+        ? { linkThreshold: partial.linkThreshold }
+        : {}),
+      ...(partial.reviewThreshold !== undefined
+        ? { reviewThreshold: partial.reviewThreshold }
+        : {}),
+    };
+    return out;
+  }
+  // weighted (default)
+  const out: WeightedMatchkey = {
+    name: partial.name,
     type: "weighted",
-    fields: [],
-    threshold: 0.85,
-    ...partial,
+    fields,
+    threshold: partial.threshold ?? 0.85,
+    ...(partial.autoThreshold !== undefined
+      ? { autoThreshold: partial.autoThreshold }
+      : {}),
+    ...(partial.rerank !== undefined ? { rerank: partial.rerank } : {}),
+    ...(partial.rerankModel !== undefined
+      ? { rerankModel: partial.rerankModel }
+      : {}),
+    ...(partial.rerankBand !== undefined
+      ? { rerankBand: partial.rerankBand }
+      : {}),
   };
+  return out;
 }
 
 /** Create a BlockingConfig with sensible defaults. */

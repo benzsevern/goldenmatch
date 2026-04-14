@@ -8,6 +8,7 @@
  */
 
 import type { Row, ScoredPair } from "../types.js";
+import { makeScoredPair } from "../types.js";
 import type { Correction, MemoryStore } from "./store.js";
 
 // ---------------------------------------------------------------------------
@@ -165,11 +166,13 @@ export function applyCorrections(
     }
 
     applied++;
-    out.push({
-      idA: pair.idA,
-      idB: pair.idB,
-      score: correction.verdict === "match" ? matchScore : noMatchScore,
-    });
+    out.push(
+      makeScoredPair(
+        pair.idA,
+        pair.idB,
+        correction.verdict === "match" ? matchScore : noMatchScore,
+      ),
+    );
   }
 
   return { pairs: out, applied, stale };

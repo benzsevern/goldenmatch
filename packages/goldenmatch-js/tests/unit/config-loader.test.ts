@@ -31,7 +31,11 @@ describe("parseConfig", () => {
       ],
     };
     const config = parseConfig(raw);
-    expect(config.matchkeys?.[0]?.threshold).toBe(0.85);
+    const mk0 = config.matchkeys?.[0];
+    expect(mk0?.type).toBe("weighted");
+    if (mk0?.type === "weighted") {
+      expect(mk0.threshold).toBe(0.85);
+    }
   });
 
   it("parses matchkeys fields array", () => {

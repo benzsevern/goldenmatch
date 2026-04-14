@@ -8,11 +8,13 @@
  */
 import { describe, it, expect } from "vitest";
 import { scoreBlocksParallel } from "../../src/node/backends/workers.js";
+import { pairKey } from "../../src/core/cluster.js";
 import type {
   BlockResult,
   MatchkeyConfig,
+  PairKey,
   Row,
-} from "../../src/core/index.js";
+} from "../../src/core/types.js";
 
 const mk: MatchkeyConfig = {
   name: "name_match",
@@ -69,12 +71,11 @@ describe("scoreBlocksParallel", () => {
         { __row_id__: i * 10 + 2, name: "Alyce" },
       ]),
     );
-    const matched = new Set<string>();
+    const matched = new Set<PairKey>();
     const result = await scoreBlocksParallel(blocks, mk, matched);
     // Every newly returned pair must be in matchedPairs.
     for (const p of result) {
-      const key =
-        p.idA < p.idB ? `${p.idA}:${p.idB}` : `${p.idB}:${p.idA}`;
+      const key = pairKey(p.idA, p.idB);
       expect(matched.has(key)).toBe(true);
     }
   });

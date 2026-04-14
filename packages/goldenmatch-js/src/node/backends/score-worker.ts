@@ -12,14 +12,15 @@ import { findFuzzyMatches } from "../../core/scorer.js";
 import type {
   BlockResult,
   MatchkeyConfig,
+  PairKey,
   ScoredPair,
 } from "../../core/types.js";
 
 export interface ScoreWorkerInput {
   readonly block: BlockResult;
   readonly mk: MatchkeyConfig;
-  /** Serialized Set<string> contents -- piscina can't transfer Sets. */
-  readonly matchedPairs: readonly string[];
+  /** Serialized Set<PairKey> contents -- piscina can't transfer Sets. */
+  readonly matchedPairs: readonly PairKey[];
 }
 
 export interface ScoreWorkerOutput {
@@ -29,7 +30,7 @@ export interface ScoreWorkerOutput {
 export default function scoreWorker(
   input: ScoreWorkerInput,
 ): ScoreWorkerOutput {
-  const excludeSet = new Set(input.matchedPairs);
+  const excludeSet = new Set<PairKey>(input.matchedPairs);
   const pairs = findFuzzyMatches(
     input.block.rows,
     input.mk,

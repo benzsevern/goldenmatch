@@ -14,6 +14,7 @@
  */
 
 import type { Row, ScoredPair, LLMScorerConfig } from "../types.js";
+import { makeScoredPair } from "../types.js";
 import { BudgetTracker, countTokensApprox } from "./budget.js";
 import type { BudgetSnapshot } from "./budget.js";
 import { llmScorePairs, LLMHttpError } from "./scorer.js";
@@ -68,7 +69,7 @@ export async function llmClusterPairs(
 
   // Result scaffold.
   const result: ScoredPair[] = [];
-  for (const p of autoAccept) result.push({ idA: p.idA, idB: p.idB, score: 1.0 });
+  for (const p of autoAccept) result.push(makeScoredPair(p.idA, p.idB, 1.0));
   for (const p of below) result.push(p);
 
   if (candidates.length === 0) {
@@ -528,10 +529,10 @@ function applyClusterResults(
     const cb = recordCluster.get(p.idB);
     if (ca !== undefined && cb !== undefined && ca.idx === cb.idx) {
       // Same cluster: use cluster confidence.
-      out.push({ idA: p.idA, idB: p.idB, score: ca.conf });
+      out.push(makeScoredPair(p.idA, p.idB, ca.conf));
     } else {
       // Different cluster or singleton: rejected.
-      out.push({ idA: p.idA, idB: p.idB, score: 0 });
+      out.push(makeScoredPair(p.idA, p.idB, 0));
     }
   }
   return out;

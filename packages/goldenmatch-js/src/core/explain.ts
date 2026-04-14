@@ -15,6 +15,7 @@ import type {
   ClusterInfo,
 } from "./types.js";
 import { scoreField, asString } from "./scorer.js";
+import { pairKey } from "./cluster.js";
 import { applyTransforms } from "./transforms.js";
 
 // ---------------------------------------------------------------------------
@@ -278,8 +279,7 @@ export function explainCluster(
 
   if (cluster.bottleneckPair !== null) {
     const [a, b] = cluster.bottleneckPair;
-    const key1 = `${Math.min(a, b)}:${Math.max(a, b)}`;
-    const bpScore = pairScores.get(key1) ?? pairScores.get(`${a}:${b}`) ?? 0;
+    const bpScore = pairScores.get(pairKey(a, b)) ?? 0;
     parts.push(
       `Weakest link: records ${a} and ${b} (score ${bpScore.toFixed(2)}).`,
     );

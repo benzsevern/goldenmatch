@@ -284,6 +284,7 @@ describe("findFuzzyMatches", () => {
     const mk: MatchkeyConfig = {
       name: "f",
       type: "weighted",
+      threshold: 0.85,
       fields: [{ field: "name", transforms: [], scorer: "jaro_winkler", weight: 1.0 }],
     };
     expect(findFuzzyMatches([], mk)).toEqual([]);
