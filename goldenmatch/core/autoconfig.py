@@ -140,7 +140,7 @@ def _classify_by_data(values: list[str]) -> tuple[str, float]:
     if col_type == "string":
         delim_density = sum(v.count(",") + v.count(";") for v in values) / max(len(values), 1)
         avg_len = sum(len(v) for v in values) / max(len(values), 1)
-        if avg_len > 10 and delim_density > 0.5:
+        if avg_len > 30 and delim_density > 0.5:
             return "multi_name", 0.7
 
     # Check for description (long freetext)
