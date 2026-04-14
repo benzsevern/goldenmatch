@@ -606,6 +606,18 @@ def build_matchkeys(
             len(all_weighted) + len(dropped), max_fuzzy_fields, dropped,
         )
 
+    # Confidence-gated weighting: when a profile's classification confidence
+    # is low (<0.5), cap the weight at 0.3 so noisy/ambiguous columns can't
+    # dominate a weighted matchkey. Profile lookup is by column name.
+    _profile_lookup = {p.name: p for p in profiles}
+    for f in all_weighted:
+        if f.field is None:
+            continue
+        prof = _profile_lookup.get(f.field)
+        if prof is not None and prof.confidence < 0.5:
+            if (f.weight or 0) > 0.3:
+                f.weight = 0.3
+
     if all_weighted:
         threshold = _adaptive_threshold(all_weighted)
         matchkeys.append(MatchkeyConfig(

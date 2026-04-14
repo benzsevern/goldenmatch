@@ -1268,3 +1268,19 @@ def test_build_matchkeys_multi_name_gets_token_sort():
     mks = cfg.get_matchkeys()
     authors_fields = [f for mk in mks for f in mk.fields if f.field == "authors"]
     assert any(f.scorer == "token_sort" and f.weight == 1.0 for f in authors_fields)
+
+
+def test_low_confidence_field_gets_capped_weight():
+    import polars as pl
+    from goldenmatch.core.autoconfig import auto_configure_df
+    df = pl.DataFrame({
+        "mystery_col": [f"xyz{i}abc" for i in range(50)],
+        "name": [f"person {i}" for i in range(50)],
+    })
+    cfg = auto_configure_df(df)
+    for mk in cfg.get_matchkeys():
+        if mk.type != "weighted":
+            continue
+        for f in mk.fields:
+            if f.field == "mystery_col":
+                assert (f.weight or 0) <= 0.3, f"low-conf field weight={f.weight}"
