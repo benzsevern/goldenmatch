@@ -30,7 +30,9 @@
 
 ## Testing
 - `pytest --tb=short` from project root — all tests must pass after every change
-- 1260 tests (+ 6 skipped for optional deps), run in ~60s
+- 1319 tests (+ 6 skipped for optional deps), run in ~60s
+- e2e tests calling `dedupe_df(df)` on auto-config: auto-config enables `rerank=True` for 3+ field weighted matchkeys, which loads a cross-encoder model from HuggingFace. Offline CI fails with download error. Pattern: pre-build config via `auto_configure_df(df)`, set `mk.rerank = False` on weighted matchkeys, then pass `dedupe_df(df, config=config)`. See `tests/test_autoconfig_regressions.py::test_dedupe_df_interaction_all_three_fixes_together`.
+- Synthetic person fixtures in `tests/test_autoconfig_regressions.py`: `_person_df(n)` for realistic person shape, `_gate_test_df(n)` for cheap row-count-only boundary tests (gates that only read `df.height`). Reuse rather than rewrite.
 - Coverage: 72% (with db/mcp/connectors excluded via pyproject.toml [tool.coverage.run] omit)
 - Key module coverage: scorer 87%, probabilistic 96%, pprl/autoconfig 95%, _api 85%, pipeline 82%
 - Fixtures in `tests/conftest.py`: `sample_csv`, `sample_csv_b`, `sample_parquet`
@@ -113,6 +115,9 @@
 - LLM+embedding benchmark: `python tests/benchmarks/run_llm_budget_bench.py` (requires OPENAI_API_KEY)
 
 ## Code Patterns
+- Auto-config exact matchkeys: `col_type in ("zip","geo")` NEVER backs an exact matchkey (blocking signal, not identity claim). Exact matchkeys require `cardinality_ratio >= 0.5`. Skipped columns still flow into `build_blocking()`.
+- Auto-config learned blocking: gated at `total_rows >= 50_000` in `autoconfig.py`. Sample size capped at `min(total_rows // 4, 5000)` so learner has held-out rows. Below 50K, static/multi_pass is default.
+- `DedupeResult.total_records` = `dupes.height + unique.height` (golden is a rollup, NOT a separate row population). Adding golden double-counts every multi-member cluster.
 - Internal columns prefixed with `__` (e.g. `__row_id__`, `__source__`, `__mk_*__`)
 - File specs are tuples: `(path, source_name)` or `(path, source_name, column_map)`
 - `GoldenMatchConfig.get_matchkeys()` returns matchkeys from either top-level or match_settings
@@ -203,6 +208,10 @@ Hosted on Railway, registered on Smithery:
 - `llm_scorer` and `backend` kwargs applied uniformly after config resolution (not inside zero-config branch)
 
 ## Gotchas
+- GoldenFlow (`date_iso8601`) runs BEFORE the inside-pipeline `auto_configure_df` call. This reshapes year-only columns into ISO date form, which then looks phone-shaped to the phone classifier. If auto-config misclassifies a date-ish column, check transform order, not just the classifier.
+- GitHub release → PyPI publish workflow: ~25s via trusted publishing. PyPI JSON API takes ~20s to reflect new version after workflow completes — don't check immediately. Trigger is `release: published`, not tag push.
+- `.github/workflows/*.yml` currently pin `actions/checkout@v4` and `actions/setup-python@v5` on Node.js 20, which deprecates Sep 2026. Bump or set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` before then.
+- `.profile_tmp/` is gitignored and used for local profiling artifacts (cProfile dumps, sampled parquet fixtures). `.profile_tmp/profile_ncvr.py` is the reference scorer profiling script — loads 200K NCVR voter sample and attributes scorer time across rapidfuzz vs. Python orchestration vs. Polars overhead.
 - Leipzig DBLP-ACM dataset: `DBLP2.csv` uses `latin-1` encoding (not UTF-8). `ACM.csv` also latin-1.
 - `recordlinkage.datasets.load_febrl3()` needs `return_links=True` to get ground truth pairs (default returns only DataFrame)
 - Auto-config fails on all standard benchmarks (Febrl, DBLP-ACM, NC Voter) — always use explicit config for non-trivial dedup. v1.2.7 cardinality guards improve but don't fully solve this.
