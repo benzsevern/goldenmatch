@@ -45,3 +45,10 @@ venv/
 .windsurfrules
 docs/superpowers/
 .profile_tmp/
+
+# Node / TypeScript port
+node_modules/
+packages/*/node_modules/
+packages/*/dist/
+packages/*/.tsbuildinfo
+*.tsbuildinfo

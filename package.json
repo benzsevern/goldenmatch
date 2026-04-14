@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "scripts": {
+    "install:js": "npm --prefix packages/goldenmatch-js install",
+    "build:js": "npm --prefix packages/goldenmatch-js run build",
+    "test:js": "npm --prefix packages/goldenmatch-js run test",
+    "typecheck:js": "npm --prefix packages/goldenmatch-js run typecheck"
+  }
+}

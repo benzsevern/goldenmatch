@@ -1,0 +1,66 @@
+{
+  "name": "goldenmatch",
+  "version": "0.1.0",
+  "description": "Entity resolution toolkit — deduplicate, match, and create golden records",
+  "type": "module",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs" },
+    "./core": { "types": "./dist/core/index.d.ts", "import": "./dist/core/index.js", "require": "./dist/core/index.cjs" },
+    "./node": { "types": "./dist/node/index.d.ts", "import": "./dist/node/index.js", "require": "./dist/node/index.cjs" }
+  },
+  "bin": { "goldenmatch-js": "./dist/cli.cjs" },
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^13.0.0"
+  },
+  "peerDependencies": {
+    "yaml": "*",
+    "ink": "^5.0.0",
+    "react": "^18.0.0",
+    "hnswlib-node": "^3.0.0",
+    "@huggingface/transformers": "^3.0.0",
+    "piscina": "^5.0.0",
+    "ink-table": "^4.0.0",
+    "ink-select-input": "^6.0.0",
+    "ink-text-input": "^6.0.0",
+    "ink-spinner": "^5.0.0",
+    "ink-gradient": "^3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "yaml": { "optional": true },
+    "ink": { "optional": true },
+    "react": { "optional": true },
+    "hnswlib-node": { "optional": true },
+    "@huggingface/transformers": { "optional": true },
+    "piscina": { "optional": true },
+    "ink-table": { "optional": true },
+    "ink-select-input": { "optional": true },
+    "ink-text-input": { "optional": true },
+    "ink-spinner": { "optional": true },
+    "ink-gradient": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "rimraf": "^5.0.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.0",
+    "yaml": "^2.7.0"
+  },
+  "keywords": [
+    "entity-resolution", "deduplication", "record-linkage", "fuzzy-matching",
+    "golden-record", "data-quality", "jaro-winkler", "levenshtein"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/benzsevern/goldenmatch"
+  }
+}
