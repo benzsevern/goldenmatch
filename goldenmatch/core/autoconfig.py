@@ -1383,7 +1383,7 @@ def auto_configure_df(
     # can nudge them without re-profiling. Matchkeys and blocking strategy/
     # keys/passes all flow through decisions; non-decision runtime attributes
     # on the transient `blocking` object (learned_sample_size, min_recall,
-    # skip_oversized, etc.) are preserved via model_copy below.
+    # skip_oversized, etc.) are preserved in the rebuild step below.
     decisions = AutoConfigDecisions(
         blocking_strategy=blocking.strategy if blocking is not None else "none",
         blocking_keys=list(blocking.keys) if (blocking is not None and blocking.keys) else [],
@@ -1395,21 +1395,57 @@ def auto_configure_df(
         allow_remote_assets=False,
     )
 
+    return _rebuild_from_decisions(
+        profiles,
+        decisions,
+        transient_blocking=blocking,
+        llm_scorer_config=llm_scorer_config,
+        memory_config=memory_config,
+    )
+
+
+def _rebuild_from_decisions(
+    profiles: list[ColumnProfile],
+    decisions: AutoConfigDecisions,
+    *,
+    transient_blocking: BlockingConfig | None,
+    llm_scorer_config: LLMScorerConfig | None,
+    memory_config: MemoryConfig | None,
+) -> GoldenMatchConfig:
+    """Assemble a GoldenMatchConfig from decisions (+ runtime hand-offs).
+
+    Pure function of (profiles, decisions) plus non-decision runtime values:
+      - `transient_blocking` carries non-decision attributes (learned_sample_size,
+        learned_min_recall, skip_oversized, ...) that survive the rebuild.
+      - `llm_scorer_config` / `memory_config` are runtime plumbing, not decisions.
+
+    Splitting this out lets a future iterative-tuning loop mutate `decisions`
+    and re-call `_rebuild_from_decisions` without re-running profile_columns /
+    build_matchkeys / build_blocking. See spec section 7.2.
+    """
     # Rebuild final blocking from decisions, preserving runtime-only attrs
     # (learned_sample_size, learned_min_recall, skip_oversized, etc.) from
     # the transient blocking object produced above.
     final_blocking: BlockingConfig | None
-    if blocking is None:
+    if transient_blocking is None:
         final_blocking = None
     else:
-        final_blocking = blocking.model_copy(update={
+        final_blocking = transient_blocking.model_copy(update={
             "strategy": decisions.blocking_strategy,
             "keys": decisions.blocking_keys,
-            "passes": decisions.blocking_passes if decisions.blocking_passes else blocking.passes,
+            "passes": (
+                decisions.blocking_passes
+                if decisions.blocking_passes
+                else transient_blocking.passes
+            ),
         })
 
-    # Build config
-    config = GoldenMatchConfig(
+    # `profiles` is retained in the signature for future iterative-tuning hooks
+    # (spec section 7.2) and reserved so tuning loops can re-examine column
+    # stats without threading them through the call chain. Currently unused.
+    del profiles
+
+    return GoldenMatchConfig(
         matchkeys=decisions.matchkeys,
         blocking=final_blocking,
         golden_rules=GoldenRulesConfig(default_strategy="most_complete"),
@@ -1417,8 +1453,6 @@ def auto_configure_df(
         llm_scorer=llm_scorer_config,
         memory=memory_config,
     )
-
-    return config
 
 
 def auto_configure(files: list[tuple[str, str]]) -> GoldenMatchConfig:
