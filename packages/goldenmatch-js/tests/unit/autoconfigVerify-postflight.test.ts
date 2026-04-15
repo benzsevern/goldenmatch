@@ -79,6 +79,27 @@ describe("postflight: score histogram", () => {
     expect(report.signals.blockingRecall).toBe("deferred");
   });
 
+  it("detects oversized cluster of 151 from a pair chain", () => {
+    // Chain: 0-1, 1-2, ..., 149-150 → one component of 151
+    const pairScores = Array.from({ length: 150 }, (_, i) => ({
+      idA: i, idB: i + 1, score: 0.9,
+    }));
+    const rows = Array.from({ length: 200 }, (_, i) => ({ name: `n${i}` }));
+    const report = postflight(rows, makeCfg(), { pairScores });
+    const oversized = report.signals.oversizedClusters;
+    expect(oversized.length).toBe(1);
+    expect(oversized[0]!.size).toBe(151);
+    expect(oversized[0]!.bottleneckPair.length).toBe(2);
+    const bp = oversized[0]!.bottleneckPair;
+    // bottleneckPair must be a real edge in the input (canonicalized)
+    const canonKey = (a: number, b: number) =>
+      a < b ? `${a}-${b}` : `${b}-${a}`;
+    const inputKeys = new Set(
+      pairScores.map((p) => canonKey(p.idA, p.idB)),
+    );
+    expect(inputKeys.has(canonKey(bp[0]!, bp[1]!))).toBe(true);
+  });
+
   it("strict mode: signal computed, adjustments empty", () => {
     const r = seeded(42);
     const pairScores: { idA: number; idB: number; score: number }[] = [];

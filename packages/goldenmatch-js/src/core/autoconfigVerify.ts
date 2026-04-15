@@ -635,6 +635,77 @@ function signalBlockingRecall(): "deferred" {
   return "deferred";
 }
 
+function signalClusterSizes(
+  pairScores: readonly { idA: number; idB: number; score: number }[],
+  threshold: number,
+): {
+  readonly percentiles: ClusterSizePercentiles;
+  readonly oversized: readonly OversizedCluster[];
+} {
+  const above = pairScores.filter((p) => p.score >= threshold);
+  const parent = new Map<number, number>();
+  const find = (x: number): number => {
+    let root = x;
+    while ((parent.get(root) ?? root) !== root) root = parent.get(root)!;
+    let y = x;
+    while ((parent.get(y) ?? y) !== root) {
+      const next = parent.get(y) ?? y;
+      parent.set(y, root);
+      y = next;
+    }
+    return root;
+  };
+  const union = (a: number, b: number) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  };
+  for (const p of above) {
+    if (!parent.has(p.idA)) parent.set(p.idA, p.idA);
+    if (!parent.has(p.idB)) parent.set(p.idB, p.idB);
+    union(p.idA, p.idB);
+  }
+  const sizeByRoot = new Map<number, number>();
+  const membersByRoot = new Map<number, Set<number>>();
+  for (const id of parent.keys()) {
+    const r = find(id);
+    sizeByRoot.set(r, (sizeByRoot.get(r) ?? 0) + 1);
+    if (!membersByRoot.has(r)) membersByRoot.set(r, new Set());
+    membersByRoot.get(r)!.add(id);
+  }
+  const sizes = Array.from(sizeByRoot.values()).sort((a, b) => a - b);
+  const pct = (q: number) =>
+    sizes.length === 0
+      ? 0
+      : sizes[Math.min(sizes.length - 1, Math.floor(sizes.length * q))] ?? 0;
+  const percentiles: ClusterSizePercentiles = {
+    p50: pct(0.5),
+    p95: pct(0.95),
+    p99: pct(0.99),
+    max: sizes.length === 0 ? 0 : sizes[sizes.length - 1]!,
+    count: sizes.length,
+  };
+  const oversized: OversizedCluster[] = [];
+  let clusterId = 0;
+  for (const [root, size] of sizeByRoot) {
+    if (size <= 100) continue;
+    const members = membersByRoot.get(root)!;
+    let bottleneckPair: [number, number] = [-1, -1];
+    let minScore = Infinity;
+    for (const p of above) {
+      if (members.has(p.idA) && members.has(p.idB) && p.score < minScore) {
+        minScore = p.score;
+        bottleneckPair = [
+          Math.min(p.idA, p.idB),
+          Math.max(p.idA, p.idB),
+        ];
+      }
+    }
+    oversized.push({ clusterId: clusterId++, size, bottleneckPair });
+  }
+  return { percentiles, oversized };
+}
+
 export function postflight(
   _rows: readonly Record<string, unknown>[],
   config: GoldenMatchConfig,
@@ -668,7 +739,12 @@ export function postflight(
     );
   }
 
-  // Placeholder values for signals added in Tasks 3.2-3.5.
+  const clusterResult = signalClusterSizes(
+    options.pairScores,
+    currentThreshold,
+  );
+
+  // Placeholder values for signals added in Tasks 3.4-3.5.
   const signals: PostflightSignals = {
     scoreHistogram: hist.histogram,
     blockingRecall: signalBlockingRecall(),
@@ -676,8 +752,8 @@ export function postflight(
     thresholdOverlapPct: 0,
     totalPairsScored: options.pairScores.length,
     currentThreshold,
-    preliminaryClusterSizes: { p50: 0, p95: 0, p99: 0, max: 0, count: 0 },
-    oversizedClusters: [],
+    preliminaryClusterSizes: clusterResult.percentiles,
+    oversizedClusters: clusterResult.oversized,
   };
 
   return { signals, adjustments, advisories };
