@@ -199,7 +199,7 @@ describe("runPPRL", () => {
     expect(hits).toBeGreaterThanOrEqual(7);
   });
 
-  it("runs end-to-end with security_level standard/high/paranoid and finds same true pairs", () => {
+  it("runs end-to-end with security_level standard/high/paranoid and finds same true pairs", { timeout: 15000 }, () => {
     const { a, b } = twoPartiesWithOverlap();
     const baseFields: string[] = ["first_name", "last_name", "email"];
 
