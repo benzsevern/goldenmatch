@@ -60,7 +60,18 @@ const DATE_NAME_PATTERNS = [
   /birth/i,
   /dob/i,
 ];
-const ID_NAME_PATTERNS = [/^id$/i, /_id$/i, /uuid/i, /guid/i];
+const ID_NAME_PATTERNS = [
+  /^id$/i,
+  /_id$/i,
+  /uuid/i,
+  /guid/i,
+  // v0.3 additions — targeted suffixes + whole-name anchors. Deliberately
+  // NOT adding /_(no|num)$/ alone — would false-positive on yes_no, num_kids.
+  /_(ref|ref_num|reg_num|account_no|account_num|account)$/i,
+  /^(account_no|account_num)$/i,
+  /^guid_/i,
+  /^uuid_/i,
+];
 
 // Re-exported for consumers that wanted the spec-level constants.
 export const EMAIL_PATTERNS = EMAIL_NAME_PATTERNS;
