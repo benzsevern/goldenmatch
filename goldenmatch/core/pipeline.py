@@ -692,6 +692,8 @@ def _run_match_pipeline(
     output_scores: bool = False,
     output_report: bool = False,
     match_mode: str = "best",
+    auto_config: bool = False,
+    auto_config_llm_provider: str | None = None,
 ) -> dict:
     """Shared match pipeline logic (post-ingest).
 
@@ -703,6 +705,34 @@ def _run_match_pipeline(
         combined_df_tmp = combined_lf.collect()
         combined_df_tmp, fix_log = auto_fix_dataframe(combined_df_tmp)
         logger.info("Auto-fix applied: %d fix type(s)", len(fix_log))
+        combined_lf = combined_df_tmp.lazy()
+
+    # ── Step 2.5a': AUTO-CONFIG ON CLEANED DATA (if zero-config) ──
+    if auto_config:
+        from goldenmatch.core.autoconfig import auto_configure_df
+        combined_df_tmp = combined_lf.collect()
+        auto_cfg = auto_configure_df(
+            combined_df_tmp,
+            llm_provider=auto_config_llm_provider,
+            llm_auto=config.llm_auto,
+        )
+        config.matchkeys = auto_cfg.matchkeys
+        config.match_settings = auto_cfg.match_settings
+        config.blocking = auto_cfg.blocking
+        config.golden_rules = auto_cfg.golden_rules
+        config.llm_scorer = auto_cfg.llm_scorer
+        config.memory = auto_cfg.memory
+        if auto_cfg.domain is not None:
+            config.domain = auto_cfg.domain
+        # Propagate preflight-verification markers so postflight (later in
+        # this function) knows auto-config was used and whether strict mode
+        # is on. These are underscore-private attrs, not Pydantic fields.
+        if getattr(auto_cfg, "_preflight_report", None) is not None:
+            config._preflight_report = auto_cfg._preflight_report
+        if getattr(auto_cfg, "_strict_autoconfig", False):
+            config._strict_autoconfig = True
+        matchkeys = config.get_matchkeys()
+        logger.info("Auto-configured from cleaned data: %d matchkeys", len(matchkeys))
         combined_lf = combined_df_tmp.lazy()
 
     if config.validation and config.validation.rules:
@@ -810,6 +840,20 @@ def _run_match_pipeline(
             all_pairs = llm_score_pairs(all_pairs, combined_df, config=config.llm_scorer)
         all_pairs = [(a, b, s) for a, b, s in all_pairs if s > 0.5]
 
+    # ── Step 4.7: POSTFLIGHT (auto-config only) ──
+    # Postflight verification (spec §6). Signals are computed from the
+    # unadjusted pair list; threshold adjustments (if any, non-strict only)
+    # are then applied to all_pairs before downstream grouping. Documented
+    # in spec §6.1.
+    postflight_report = None
+    if getattr(config, "_preflight_report", None) is not None:
+        from goldenmatch.core.autoconfig_verify import postflight as _postflight
+        postflight_report = _postflight(combined_df, config, pair_scores=all_pairs)
+        if not getattr(config, "_strict_autoconfig", False):
+            for adj in postflight_report.adjustments:
+                if adj.field == "threshold":
+                    all_pairs = [p for p in all_pairs if p[2] >= adj.to_value]
+
     # ── Step 5: Normalize pairs so target ID is always first ──
     normalized: list[tuple[int, int, float]] = []
     for a, b, score in all_pairs:
@@ -885,6 +929,7 @@ def _run_match_pipeline(
         "unmatched": unmatched_df,
         "report": report,
         "quarantine": quarantine_df_match,
+        "postflight_report": postflight_report,
     }
 
 
@@ -894,12 +939,23 @@ def run_match_df(
     config: GoldenMatchConfig,
     target_name: str = "target",
     reference_name: str = "reference",
+    auto_config: bool = False,
+    auto_config_llm_provider: str | None = None,
 ) -> dict:
     """Run match pipeline on DataFrames directly (no file I/O)."""
-    matchkeys = config.get_matchkeys()
-    required = _get_required_columns(config)
-    validate_columns(target_df.lazy(), required)
-    validate_columns(reference_df.lazy(), required)
+    # Cast all columns to string to keep schema consistent with dedupe_df's
+    # pre-pipeline behaviour — prevents mixed-type errors in zero-config paths.
+    target_df = target_df.cast(
+        {col: pl.Utf8 for col in target_df.columns if not col.startswith("__")}
+    )
+    reference_df = reference_df.cast(
+        {col: pl.Utf8 for col in reference_df.columns if not col.startswith("__")}
+    )
+    matchkeys = [] if auto_config else config.get_matchkeys()
+    if not auto_config:
+        required = _get_required_columns(config)
+        validate_columns(target_df.lazy(), required)
+        validate_columns(reference_df.lazy(), required)
 
     target_lf = target_df.lazy()
     target_lf = target_lf.with_columns(pl.lit(target_name).alias("__source__"))
@@ -914,4 +970,8 @@ def run_match_df(
 
     combined_lf = pl.concat([target_collected, ref_collected]).lazy()
 
-    return _run_match_pipeline(combined_lf, config, matchkeys, target_ids)
+    return _run_match_pipeline(
+        combined_lf, config, matchkeys, target_ids,
+        auto_config=auto_config,
+        auto_config_llm_provider=auto_config_llm_provider,
+    )

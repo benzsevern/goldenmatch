@@ -392,20 +392,31 @@ def match_df(
     """
     from goldenmatch.core.pipeline import run_match_df
 
+    _auto_config = False
+
     if isinstance(config, str):
         config = load_config(config)
     elif config is None:
-        config = _build_config(exact, fuzzy, blocking, threshold, backend=backend)
+        if exact or fuzzy:
+            config = _build_config(exact, fuzzy, blocking, threshold, backend=backend)
+        else:
+            # Zero-config: defer auto-config to inside pipeline (same pattern
+            # as dedupe_df). auto_configure_df runs on the combined target +
+            # reference frame so matchkeys/blocking apply uniformly.
+            from goldenmatch.config.schemas import GoldenMatchConfig
+            config = GoldenMatchConfig()
+            _auto_config = True
 
     if backend and hasattr(config, "backend"):
         config.backend = backend
 
-    result = run_match_df(target, reference, config)
+    result = run_match_df(target, reference, config, auto_config=_auto_config)
 
     return MatchResult(
         matched=result.get("matched"),
         unmatched=result.get("unmatched"),
         stats=_extract_stats(result),
+        postflight_report=result.get("postflight_report"),
     )
 
 
