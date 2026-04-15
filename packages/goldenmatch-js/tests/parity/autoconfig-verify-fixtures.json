@@ -1,0 +1,1147 @@
+[
+  {
+    "name": "small_synthetic_names",
+    "rows_count": 30,
+    "rows_json": [
+      {
+        "name": "person 0",
+        "email": "p0@example.com"
+      },
+      {
+        "name": "person 1",
+        "email": "p1@example.com"
+      },
+      {
+        "name": "person 2",
+        "email": "p2@example.com"
+      },
+      {
+        "name": "person 3",
+        "email": "p3@example.com"
+      },
+      {
+        "name": "person 4",
+        "email": "p4@example.com"
+      },
+      {
+        "name": "person 5",
+        "email": "p5@example.com"
+      },
+      {
+        "name": "person 6",
+        "email": "p6@example.com"
+      },
+      {
+        "name": "person 7",
+        "email": "p7@example.com"
+      },
+      {
+        "name": "person 8",
+        "email": "p8@example.com"
+      },
+      {
+        "name": "person 9",
+        "email": "p9@example.com"
+      },
+      {
+        "name": "person 10",
+        "email": "p10@example.com"
+      },
+      {
+        "name": "person 11",
+        "email": "p11@example.com"
+      },
+      {
+        "name": "person 12",
+        "email": "p12@example.com"
+      },
+      {
+        "name": "person 13",
+        "email": "p13@example.com"
+      },
+      {
+        "name": "person 14",
+        "email": "p14@example.com"
+      },
+      {
+        "name": "person 15",
+        "email": "p15@example.com"
+      },
+      {
+        "name": "person 16",
+        "email": "p16@example.com"
+      },
+      {
+        "name": "person 17",
+        "email": "p17@example.com"
+      },
+      {
+        "name": "person 18",
+        "email": "p18@example.com"
+      },
+      {
+        "name": "person 19",
+        "email": "p19@example.com"
+      },
+      {
+        "name": "person 20",
+        "email": "p20@example.com"
+      },
+      {
+        "name": "person 21",
+        "email": "p21@example.com"
+      },
+      {
+        "name": "person 22",
+        "email": "p22@example.com"
+      },
+      {
+        "name": "person 23",
+        "email": "p23@example.com"
+      },
+      {
+        "name": "person 24",
+        "email": "p24@example.com"
+      },
+      {
+        "name": "person 25",
+        "email": "p25@example.com"
+      },
+      {
+        "name": "person 26",
+        "email": "p26@example.com"
+      },
+      {
+        "name": "person 27",
+        "email": "p27@example.com"
+      },
+      {
+        "name": "person 28",
+        "email": "p28@example.com"
+      },
+      {
+        "name": "person 29",
+        "email": "p29@example.com"
+      }
+    ],
+    "preflight_findings": [
+      {
+        "check": "cardinality_high",
+        "severity": "warning",
+        "subject": "exact_email",
+        "message": "exact matchkey 'exact_email' dropped: column(s) ['email'] have cardinality_ratio >= 0.99 (near-unique, never agree)",
+        "repaired": true,
+        "repair_note": "matchkey dropped from config"
+      },
+      {
+        "check": "block_size",
+        "severity": "warning",
+        "subject": "name",
+        "message": "blocking key ['name']: P50=1, P99=1, n_blocks=30 (sampled 30 rows). P50=1 < 2 (most blocks too small to produce pairs)",
+        "repaired": false,
+        "repair_note": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "near_unique_id",
+    "rows_count": 100,
+    "rows_json": [
+      {
+        "voter_reg_num": "REG0",
+        "last_name": "name0"
+      },
+      {
+        "voter_reg_num": "REG1",
+        "last_name": "name1"
+      },
+      {
+        "voter_reg_num": "REG2",
+        "last_name": "name2"
+      },
+      {
+        "voter_reg_num": "REG3",
+        "last_name": "name3"
+      },
+      {
+        "voter_reg_num": "REG4",
+        "last_name": "name4"
+      },
+      {
+        "voter_reg_num": "REG5",
+        "last_name": "name5"
+      },
+      {
+        "voter_reg_num": "REG6",
+        "last_name": "name6"
+      },
+      {
+        "voter_reg_num": "REG7",
+        "last_name": "name7"
+      },
+      {
+        "voter_reg_num": "REG8",
+        "last_name": "name8"
+      },
+      {
+        "voter_reg_num": "REG9",
+        "last_name": "name9"
+      },
+      {
+        "voter_reg_num": "REG10",
+        "last_name": "name10"
+      },
+      {
+        "voter_reg_num": "REG11",
+        "last_name": "name11"
+      },
+      {
+        "voter_reg_num": "REG12",
+        "last_name": "name12"
+      },
+      {
+        "voter_reg_num": "REG13",
+        "last_name": "name13"
+      },
+      {
+        "voter_reg_num": "REG14",
+        "last_name": "name14"
+      },
+      {
+        "voter_reg_num": "REG15",
+        "last_name": "name15"
+      },
+      {
+        "voter_reg_num": "REG16",
+        "last_name": "name16"
+      },
+      {
+        "voter_reg_num": "REG17",
+        "last_name": "name17"
+      },
+      {
+        "voter_reg_num": "REG18",
+        "last_name": "name18"
+      },
+      {
+        "voter_reg_num": "REG19",
+        "last_name": "name19"
+      },
+      {
+        "voter_reg_num": "REG20",
+        "last_name": "name0"
+      },
+      {
+        "voter_reg_num": "REG21",
+        "last_name": "name1"
+      },
+      {
+        "voter_reg_num": "REG22",
+        "last_name": "name2"
+      },
+      {
+        "voter_reg_num": "REG23",
+        "last_name": "name3"
+      },
+      {
+        "voter_reg_num": "REG24",
+        "last_name": "name4"
+      },
+      {
+        "voter_reg_num": "REG25",
+        "last_name": "name5"
+      },
+      {
+        "voter_reg_num": "REG26",
+        "last_name": "name6"
+      },
+      {
+        "voter_reg_num": "REG27",
+        "last_name": "name7"
+      },
+      {
+        "voter_reg_num": "REG28",
+        "last_name": "name8"
+      },
+      {
+        "voter_reg_num": "REG29",
+        "last_name": "name9"
+      },
+      {
+        "voter_reg_num": "REG30",
+        "last_name": "name10"
+      },
+      {
+        "voter_reg_num": "REG31",
+        "last_name": "name11"
+      },
+      {
+        "voter_reg_num": "REG32",
+        "last_name": "name12"
+      },
+      {
+        "voter_reg_num": "REG33",
+        "last_name": "name13"
+      },
+      {
+        "voter_reg_num": "REG34",
+        "last_name": "name14"
+      },
+      {
+        "voter_reg_num": "REG35",
+        "last_name": "name15"
+      },
+      {
+        "voter_reg_num": "REG36",
+        "last_name": "name16"
+      },
+      {
+        "voter_reg_num": "REG37",
+        "last_name": "name17"
+      },
+      {
+        "voter_reg_num": "REG38",
+        "last_name": "name18"
+      },
+      {
+        "voter_reg_num": "REG39",
+        "last_name": "name19"
+      },
+      {
+        "voter_reg_num": "REG40",
+        "last_name": "name0"
+      },
+      {
+        "voter_reg_num": "REG41",
+        "last_name": "name1"
+      },
+      {
+        "voter_reg_num": "REG42",
+        "last_name": "name2"
+      },
+      {
+        "voter_reg_num": "REG43",
+        "last_name": "name3"
+      },
+      {
+        "voter_reg_num": "REG44",
+        "last_name": "name4"
+      },
+      {
+        "voter_reg_num": "REG45",
+        "last_name": "name5"
+      },
+      {
+        "voter_reg_num": "REG46",
+        "last_name": "name6"
+      },
+      {
+        "voter_reg_num": "REG47",
+        "last_name": "name7"
+      },
+      {
+        "voter_reg_num": "REG48",
+        "last_name": "name8"
+      },
+      {
+        "voter_reg_num": "REG49",
+        "last_name": "name9"
+      },
+      {
+        "voter_reg_num": "REG50",
+        "last_name": "name10"
+      },
+      {
+        "voter_reg_num": "REG51",
+        "last_name": "name11"
+      },
+      {
+        "voter_reg_num": "REG52",
+        "last_name": "name12"
+      },
+      {
+        "voter_reg_num": "REG53",
+        "last_name": "name13"
+      },
+      {
+        "voter_reg_num": "REG54",
+        "last_name": "name14"
+      },
+      {
+        "voter_reg_num": "REG55",
+        "last_name": "name15"
+      },
+      {
+        "voter_reg_num": "REG56",
+        "last_name": "name16"
+      },
+      {
+        "voter_reg_num": "REG57",
+        "last_name": "name17"
+      },
+      {
+        "voter_reg_num": "REG58",
+        "last_name": "name18"
+      },
+      {
+        "voter_reg_num": "REG59",
+        "last_name": "name19"
+      },
+      {
+        "voter_reg_num": "REG60",
+        "last_name": "name0"
+      },
+      {
+        "voter_reg_num": "REG61",
+        "last_name": "name1"
+      },
+      {
+        "voter_reg_num": "REG62",
+        "last_name": "name2"
+      },
+      {
+        "voter_reg_num": "REG63",
+        "last_name": "name3"
+      },
+      {
+        "voter_reg_num": "REG64",
+        "last_name": "name4"
+      },
+      {
+        "voter_reg_num": "REG65",
+        "last_name": "name5"
+      },
+      {
+        "voter_reg_num": "REG66",
+        "last_name": "name6"
+      },
+      {
+        "voter_reg_num": "REG67",
+        "last_name": "name7"
+      },
+      {
+        "voter_reg_num": "REG68",
+        "last_name": "name8"
+      },
+      {
+        "voter_reg_num": "REG69",
+        "last_name": "name9"
+      },
+      {
+        "voter_reg_num": "REG70",
+        "last_name": "name10"
+      },
+      {
+        "voter_reg_num": "REG71",
+        "last_name": "name11"
+      },
+      {
+        "voter_reg_num": "REG72",
+        "last_name": "name12"
+      },
+      {
+        "voter_reg_num": "REG73",
+        "last_name": "name13"
+      },
+      {
+        "voter_reg_num": "REG74",
+        "last_name": "name14"
+      },
+      {
+        "voter_reg_num": "REG75",
+        "last_name": "name15"
+      },
+      {
+        "voter_reg_num": "REG76",
+        "last_name": "name16"
+      },
+      {
+        "voter_reg_num": "REG77",
+        "last_name": "name17"
+      },
+      {
+        "voter_reg_num": "REG78",
+        "last_name": "name18"
+      },
+      {
+        "voter_reg_num": "REG79",
+        "last_name": "name19"
+      },
+      {
+        "voter_reg_num": "REG80",
+        "last_name": "name0"
+      },
+      {
+        "voter_reg_num": "REG81",
+        "last_name": "name1"
+      },
+      {
+        "voter_reg_num": "REG82",
+        "last_name": "name2"
+      },
+      {
+        "voter_reg_num": "REG83",
+        "last_name": "name3"
+      },
+      {
+        "voter_reg_num": "REG84",
+        "last_name": "name4"
+      },
+      {
+        "voter_reg_num": "REG85",
+        "last_name": "name5"
+      },
+      {
+        "voter_reg_num": "REG86",
+        "last_name": "name6"
+      },
+      {
+        "voter_reg_num": "REG87",
+        "last_name": "name7"
+      },
+      {
+        "voter_reg_num": "REG88",
+        "last_name": "name8"
+      },
+      {
+        "voter_reg_num": "REG89",
+        "last_name": "name9"
+      },
+      {
+        "voter_reg_num": "REG90",
+        "last_name": "name10"
+      },
+      {
+        "voter_reg_num": "REG91",
+        "last_name": "name11"
+      },
+      {
+        "voter_reg_num": "REG92",
+        "last_name": "name12"
+      },
+      {
+        "voter_reg_num": "REG93",
+        "last_name": "name13"
+      },
+      {
+        "voter_reg_num": "REG94",
+        "last_name": "name14"
+      },
+      {
+        "voter_reg_num": "REG95",
+        "last_name": "name15"
+      },
+      {
+        "voter_reg_num": "REG96",
+        "last_name": "name16"
+      },
+      {
+        "voter_reg_num": "REG97",
+        "last_name": "name17"
+      },
+      {
+        "voter_reg_num": "REG98",
+        "last_name": "name18"
+      },
+      {
+        "voter_reg_num": "REG99",
+        "last_name": "name19"
+      }
+    ],
+    "preflight_findings": [],
+    "error": null
+  },
+  {
+    "name": "all_same_state",
+    "rows_count": 100,
+    "rows_json": [
+      {
+        "state": "NC",
+        "last_name": "name0"
+      },
+      {
+        "state": "NC",
+        "last_name": "name1"
+      },
+      {
+        "state": "NC",
+        "last_name": "name2"
+      },
+      {
+        "state": "NC",
+        "last_name": "name3"
+      },
+      {
+        "state": "NC",
+        "last_name": "name4"
+      },
+      {
+        "state": "NC",
+        "last_name": "name5"
+      },
+      {
+        "state": "NC",
+        "last_name": "name6"
+      },
+      {
+        "state": "NC",
+        "last_name": "name7"
+      },
+      {
+        "state": "NC",
+        "last_name": "name8"
+      },
+      {
+        "state": "NC",
+        "last_name": "name9"
+      },
+      {
+        "state": "NC",
+        "last_name": "name10"
+      },
+      {
+        "state": "NC",
+        "last_name": "name11"
+      },
+      {
+        "state": "NC",
+        "last_name": "name12"
+      },
+      {
+        "state": "NC",
+        "last_name": "name13"
+      },
+      {
+        "state": "NC",
+        "last_name": "name14"
+      },
+      {
+        "state": "NC",
+        "last_name": "name15"
+      },
+      {
+        "state": "NC",
+        "last_name": "name16"
+      },
+      {
+        "state": "NC",
+        "last_name": "name17"
+      },
+      {
+        "state": "NC",
+        "last_name": "name18"
+      },
+      {
+        "state": "NC",
+        "last_name": "name19"
+      },
+      {
+        "state": "NC",
+        "last_name": "name20"
+      },
+      {
+        "state": "NC",
+        "last_name": "name21"
+      },
+      {
+        "state": "NC",
+        "last_name": "name22"
+      },
+      {
+        "state": "NC",
+        "last_name": "name23"
+      },
+      {
+        "state": "NC",
+        "last_name": "name24"
+      },
+      {
+        "state": "NC",
+        "last_name": "name25"
+      },
+      {
+        "state": "NC",
+        "last_name": "name26"
+      },
+      {
+        "state": "NC",
+        "last_name": "name27"
+      },
+      {
+        "state": "NC",
+        "last_name": "name28"
+      },
+      {
+        "state": "NC",
+        "last_name": "name29"
+      },
+      {
+        "state": "NC",
+        "last_name": "name30"
+      },
+      {
+        "state": "NC",
+        "last_name": "name31"
+      },
+      {
+        "state": "NC",
+        "last_name": "name32"
+      },
+      {
+        "state": "NC",
+        "last_name": "name33"
+      },
+      {
+        "state": "NC",
+        "last_name": "name34"
+      },
+      {
+        "state": "NC",
+        "last_name": "name35"
+      },
+      {
+        "state": "NC",
+        "last_name": "name36"
+      },
+      {
+        "state": "NC",
+        "last_name": "name37"
+      },
+      {
+        "state": "NC",
+        "last_name": "name38"
+      },
+      {
+        "state": "NC",
+        "last_name": "name39"
+      },
+      {
+        "state": "NC",
+        "last_name": "name40"
+      },
+      {
+        "state": "NC",
+        "last_name": "name41"
+      },
+      {
+        "state": "NC",
+        "last_name": "name42"
+      },
+      {
+        "state": "NC",
+        "last_name": "name43"
+      },
+      {
+        "state": "NC",
+        "last_name": "name44"
+      },
+      {
+        "state": "NC",
+        "last_name": "name45"
+      },
+      {
+        "state": "NC",
+        "last_name": "name46"
+      },
+      {
+        "state": "NC",
+        "last_name": "name47"
+      },
+      {
+        "state": "NC",
+        "last_name": "name48"
+      },
+      {
+        "state": "NC",
+        "last_name": "name49"
+      },
+      {
+        "state": "NC",
+        "last_name": "name50"
+      },
+      {
+        "state": "NC",
+        "last_name": "name51"
+      },
+      {
+        "state": "NC",
+        "last_name": "name52"
+      },
+      {
+        "state": "NC",
+        "last_name": "name53"
+      },
+      {
+        "state": "NC",
+        "last_name": "name54"
+      },
+      {
+        "state": "NC",
+        "last_name": "name55"
+      },
+      {
+        "state": "NC",
+        "last_name": "name56"
+      },
+      {
+        "state": "NC",
+        "last_name": "name57"
+      },
+      {
+        "state": "NC",
+        "last_name": "name58"
+      },
+      {
+        "state": "NC",
+        "last_name": "name59"
+      },
+      {
+        "state": "NC",
+        "last_name": "name60"
+      },
+      {
+        "state": "NC",
+        "last_name": "name61"
+      },
+      {
+        "state": "NC",
+        "last_name": "name62"
+      },
+      {
+        "state": "NC",
+        "last_name": "name63"
+      },
+      {
+        "state": "NC",
+        "last_name": "name64"
+      },
+      {
+        "state": "NC",
+        "last_name": "name65"
+      },
+      {
+        "state": "NC",
+        "last_name": "name66"
+      },
+      {
+        "state": "NC",
+        "last_name": "name67"
+      },
+      {
+        "state": "NC",
+        "last_name": "name68"
+      },
+      {
+        "state": "NC",
+        "last_name": "name69"
+      },
+      {
+        "state": "NC",
+        "last_name": "name70"
+      },
+      {
+        "state": "NC",
+        "last_name": "name71"
+      },
+      {
+        "state": "NC",
+        "last_name": "name72"
+      },
+      {
+        "state": "NC",
+        "last_name": "name73"
+      },
+      {
+        "state": "NC",
+        "last_name": "name74"
+      },
+      {
+        "state": "NC",
+        "last_name": "name75"
+      },
+      {
+        "state": "NC",
+        "last_name": "name76"
+      },
+      {
+        "state": "NC",
+        "last_name": "name77"
+      },
+      {
+        "state": "NC",
+        "last_name": "name78"
+      },
+      {
+        "state": "NC",
+        "last_name": "name79"
+      },
+      {
+        "state": "NC",
+        "last_name": "name80"
+      },
+      {
+        "state": "NC",
+        "last_name": "name81"
+      },
+      {
+        "state": "NC",
+        "last_name": "name82"
+      },
+      {
+        "state": "NC",
+        "last_name": "name83"
+      },
+      {
+        "state": "NC",
+        "last_name": "name84"
+      },
+      {
+        "state": "NC",
+        "last_name": "name85"
+      },
+      {
+        "state": "NC",
+        "last_name": "name86"
+      },
+      {
+        "state": "NC",
+        "last_name": "name87"
+      },
+      {
+        "state": "NC",
+        "last_name": "name88"
+      },
+      {
+        "state": "NC",
+        "last_name": "name89"
+      },
+      {
+        "state": "NC",
+        "last_name": "name90"
+      },
+      {
+        "state": "NC",
+        "last_name": "name91"
+      },
+      {
+        "state": "NC",
+        "last_name": "name92"
+      },
+      {
+        "state": "NC",
+        "last_name": "name93"
+      },
+      {
+        "state": "NC",
+        "last_name": "name94"
+      },
+      {
+        "state": "NC",
+        "last_name": "name95"
+      },
+      {
+        "state": "NC",
+        "last_name": "name96"
+      },
+      {
+        "state": "NC",
+        "last_name": "name97"
+      },
+      {
+        "state": "NC",
+        "last_name": "name98"
+      },
+      {
+        "state": "NC",
+        "last_name": "name99"
+      }
+    ],
+    "preflight_findings": [
+      {
+        "check": "block_size",
+        "severity": "warning",
+        "subject": "state,last_name",
+        "message": "blocking key ['state', 'last_name']: P50=1, P99=1, n_blocks=100 (sampled 100 rows). P50=1 < 2 (most blocks too small to produce pairs)",
+        "repaired": false,
+        "repair_note": null
+      },
+      {
+        "check": "block_size",
+        "severity": "warning",
+        "subject": "state,last_name",
+        "message": "blocking key ['state', 'last_name']: P50=1, P99=1, n_blocks=100 (sampled 100 rows). P50=1 < 2 (most blocks too small to produce pairs)",
+        "repaired": false,
+        "repair_note": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "multi_author_biblio",
+    "rows_count": 30,
+    "rows_json": [
+      {
+        "title": "paper 0",
+        "authors": "Alice Smith0, Bob Jones0, Carol White0, Dave Brown0",
+        "year": "2000"
+      },
+      {
+        "title": "paper 1",
+        "authors": "Alice Smith1, Bob Jones1, Carol White1, Dave Brown1",
+        "year": "2001"
+      },
+      {
+        "title": "paper 2",
+        "authors": "Alice Smith2, Bob Jones2, Carol White2, Dave Brown2",
+        "year": "2002"
+      },
+      {
+        "title": "paper 3",
+        "authors": "Alice Smith3, Bob Jones3, Carol White3, Dave Brown3",
+        "year": "2003"
+      },
+      {
+        "title": "paper 4",
+        "authors": "Alice Smith4, Bob Jones4, Carol White4, Dave Brown4",
+        "year": "2004"
+      },
+      {
+        "title": "paper 5",
+        "authors": "Alice Smith5, Bob Jones5, Carol White5, Dave Brown5",
+        "year": "2005"
+      },
+      {
+        "title": "paper 6",
+        "authors": "Alice Smith6, Bob Jones6, Carol White6, Dave Brown6",
+        "year": "2006"
+      },
+      {
+        "title": "paper 7",
+        "authors": "Alice Smith7, Bob Jones7, Carol White7, Dave Brown7",
+        "year": "2007"
+      },
+      {
+        "title": "paper 8",
+        "authors": "Alice Smith8, Bob Jones8, Carol White8, Dave Brown8",
+        "year": "2008"
+      },
+      {
+        "title": "paper 9",
+        "authors": "Alice Smith9, Bob Jones9, Carol White9, Dave Brown9",
+        "year": "2009"
+      },
+      {
+        "title": "paper 10",
+        "authors": "Alice Smith10, Bob Jones10, Carol White10, Dave Brown10",
+        "year": "2010"
+      },
+      {
+        "title": "paper 11",
+        "authors": "Alice Smith11, Bob Jones11, Carol White11, Dave Brown11",
+        "year": "2011"
+      },
+      {
+        "title": "paper 12",
+        "authors": "Alice Smith12, Bob Jones12, Carol White12, Dave Brown12",
+        "year": "2012"
+      },
+      {
+        "title": "paper 13",
+        "authors": "Alice Smith13, Bob Jones13, Carol White13, Dave Brown13",
+        "year": "2013"
+      },
+      {
+        "title": "paper 14",
+        "authors": "Alice Smith14, Bob Jones14, Carol White14, Dave Brown14",
+        "year": "2014"
+      },
+      {
+        "title": "paper 15",
+        "authors": "Alice Smith15, Bob Jones15, Carol White15, Dave Brown15",
+        "year": "2015"
+      },
+      {
+        "title": "paper 16",
+        "authors": "Alice Smith16, Bob Jones16, Carol White16, Dave Brown16",
+        "year": "2016"
+      },
+      {
+        "title": "paper 17",
+        "authors": "Alice Smith17, Bob Jones17, Carol White17, Dave Brown17",
+        "year": "2017"
+      },
+      {
+        "title": "paper 18",
+        "authors": "Alice Smith18, Bob Jones18, Carol White18, Dave Brown18",
+        "year": "2018"
+      },
+      {
+        "title": "paper 19",
+        "authors": "Alice Smith19, Bob Jones19, Carol White19, Dave Brown19",
+        "year": "2019"
+      },
+      {
+        "title": "paper 20",
+        "authors": "Alice Smith20, Bob Jones20, Carol White20, Dave Brown20",
+        "year": "2000"
+      },
+      {
+        "title": "paper 21",
+        "authors": "Alice Smith21, Bob Jones21, Carol White21, Dave Brown21",
+        "year": "2001"
+      },
+      {
+        "title": "paper 22",
+        "authors": "Alice Smith22, Bob Jones22, Carol White22, Dave Brown22",
+        "year": "2002"
+      },
+      {
+        "title": "paper 23",
+        "authors": "Alice Smith23, Bob Jones23, Carol White23, Dave Brown23",
+        "year": "2003"
+      },
+      {
+        "title": "paper 24",
+        "authors": "Alice Smith24, Bob Jones24, Carol White24, Dave Brown24",
+        "year": "2004"
+      },
+      {
+        "title": "paper 25",
+        "authors": "Alice Smith25, Bob Jones25, Carol White25, Dave Brown25",
+        "year": "2005"
+      },
+      {
+        "title": "paper 26",
+        "authors": "Alice Smith26, Bob Jones26, Carol White26, Dave Brown26",
+        "year": "2006"
+      },
+      {
+        "title": "paper 27",
+        "authors": "Alice Smith27, Bob Jones27, Carol White27, Dave Brown27",
+        "year": "2007"
+      },
+      {
+        "title": "paper 28",
+        "authors": "Alice Smith28, Bob Jones28, Carol White28, Dave Brown28",
+        "year": "2008"
+      },
+      {
+        "title": "paper 29",
+        "authors": "Alice Smith29, Bob Jones29, Carol White29, Dave Brown29",
+        "year": "2009"
+      }
+    ],
+    "preflight_findings": [
+      {
+        "check": "missing_column",
+        "severity": "error",
+        "subject": "__title_key__",
+        "message": "column '__title_key__' is produced by domain extraction; enabled config.domain (mode=bibliographic)",
+        "repaired": true,
+        "repair_note": "config.domain enabled so the pipeline's domain-extraction step produces this column at runtime"
+      }
+    ],
+    "error": null
+  }
+]

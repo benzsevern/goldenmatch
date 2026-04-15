@@ -22,6 +22,8 @@ import {
   makeGoldenRulesConfig,
 } from "./types.js";
 import { profileRows, type ColumnProfile, type DatasetProfile } from "./profiler.js";
+import { detectDomain } from "./domain.js";
+import { preflight, ConfigValidationError } from "./autoconfigVerify.js";
 
 // ---------------------------------------------------------------------------
 // Options
@@ -30,6 +32,13 @@ import { profileRows, type ColumnProfile, type DatasetProfile } from "./profiler
 export interface AutoconfigOptions {
   readonly llmProvider?: string;
   readonly llmAuto?: boolean;
+  /** If true, stamps `_strictAutoconfig: true` onto the returned config so
+   *  postflight skips threshold auto-adjustment. */
+  readonly strict?: boolean;
+  /** If true, preflight preserves `embedding` / `record_embedding` scorers
+   *  instead of demoting them. Use when callers have opted into remote
+   *  model downloads. */
+  readonly allowRemoteAssets?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -57,10 +66,22 @@ const DATE_NAME_PATTERNS = [
   /modified/i,
   /updated/i,
   /_at$/i,
-  /birth/i,
+  /birth(?!_year)/i, // "birth" but not "birth_year" — year takes precedence
   /dob/i,
 ];
-const ID_NAME_PATTERNS = [/^id$/i, /_id$/i, /uuid/i, /guid/i];
+const YEAR_NAME_PATTERNS = [/(^|_)(year|yr)(_|$)/i];
+const ID_NAME_PATTERNS = [
+  /^id$/i,
+  /_id$/i,
+  /uuid/i,
+  /guid/i,
+  // v0.3 additions — targeted suffixes + whole-name anchors. Deliberately
+  // NOT adding /_(no|num)$/ alone — would false-positive on yes_no, num_kids.
+  /_(ref|ref_num|reg_num|account_no|account_num|account)$/i,
+  /^(account_no|account_num)$/i,
+  /^guid_/i,
+  /^uuid_/i,
+];
 
 // Re-exported for consumers that wanted the spec-level constants.
 export const EMAIL_PATTERNS = EMAIL_NAME_PATTERNS;
@@ -85,13 +106,42 @@ type ClassifiedKind =
   | "zip"
   | "geo"
   | "date"
+  | "year"
   | "name"
+  | "multi_name"
   | "id"
   | "numeric"
   | "text";
 
 function classifyColumn(profile: ColumnProfile): ClassifiedKind {
   const name = profile.name;
+
+  // Cardinality guard (spec §5.2) — a column where virtually every value is
+  // unique cannot be a phone, zip, or numeric feature UNLESS its name
+  // explicitly asserts it (e.g. "phone" or "zip"). Scoped to samples >= 10
+  // to avoid false positives on tiny fixtures. Only overrides data-heuristic
+  // classifications; explicit name patterns still win below.
+  if (
+    profile.totalCount >= 10 &&
+    profile.cardinalityRatio >= 0.95 &&
+    !nameMatches(name, EMAIL_NAME_PATTERNS) &&
+    !nameMatches(name, PHONE_NAME_PATTERNS) &&
+    !nameMatches(name, ZIP_NAME_PATTERNS) &&
+    !nameMatches(name, NAME_NAME_PATTERNS) &&
+    !nameMatches(name, GEO_NAME_PATTERNS) &&
+    !nameMatches(name, DATE_NAME_PATTERNS) &&
+    !nameMatches(name, YEAR_NAME_PATTERNS) &&
+    profile.inferredType !== "year" &&
+    (profile.inferredType === "phone" ||
+      profile.inferredType === "zip" ||
+      profile.inferredType === "numeric")
+  ) {
+    return "id";
+  }
+
+  // Year checked before date so "birth_year" routes to year, not date.
+  if (nameMatches(name, YEAR_NAME_PATTERNS)) return "year";
+  if (profile.inferredType === "year") return "year";
 
   // Date is checked first so that date-like columns never get misclassified
   // as phones by the profiler's value heuristic.
@@ -110,6 +160,10 @@ function classifyColumn(profile: ColumnProfile): ClassifiedKind {
   if (nameMatches(name, ZIP_NAME_PATTERNS) || profile.inferredType === "zip") {
     return "zip";
   }
+  // Multi-name (delimited author/entity list) checked before plain name so
+  // "authors" column with comma-separated values routes to token_sort, not
+  // jaro_winkler.
+  if (profile.inferredType === "multi_name") return "multi_name";
   if (nameMatches(name, NAME_NAME_PATTERNS) || profile.inferredType === "name") {
     return "name";
   }
@@ -130,8 +184,18 @@ function buildExactMatchkeys(
   const out: MatchkeyConfig[] = [];
   for (const p of profiles) {
     const kind = classifyColumn(p);
-    // zip/geo are blocking signals, NOT identity claims.
-    if (kind === "zip" || kind === "geo" || kind === "date" || kind === "text") {
+    // zip/geo/year are blocking signals, NOT identity claims.
+    // id/numeric/date are skipped from scoring (Python parity: id is a
+    // primary-key column, not a match signal).
+    if (
+      kind === "zip" ||
+      kind === "geo" ||
+      kind === "date" ||
+      kind === "year" ||
+      kind === "text" ||
+      kind === "id" ||
+      kind === "numeric"
+    ) {
       continue;
     }
 
@@ -139,9 +203,8 @@ function buildExactMatchkeys(
     if (p.nullRate > 0.4) continue;
     if (p.cardinalityRatio < 0.01) continue;
 
-    // Only identifier-like columns get exact matchkeys with >=0.5 cardinality.
-    const isIdentifier =
-      kind === "email" || kind === "phone" || kind === "id";
+    // Only identifier-like columns (email, phone) get exact matchkeys with >=0.5 cardinality.
+    const isIdentifier = kind === "email" || kind === "phone";
     if (!isIdentifier) continue;
     if (p.cardinalityRatio < 0.5) continue;
 
@@ -180,7 +243,16 @@ function buildWeightedMatchkey(
     const kind = classifyColumn(p);
     if (p.nullRate > 0.5) continue;
 
-    if (kind === "name") {
+    if (kind === "multi_name") {
+      fields.push(
+        makeMatchkeyField({
+          field: p.name,
+          transforms: ["lowercase", "strip", "normalize_whitespace"],
+          scorer: "token_sort",
+          weight: 1.0,
+        }),
+      );
+    } else if (kind === "name") {
       fields.push(
         makeMatchkeyField({
           field: p.name,
@@ -240,10 +312,27 @@ function buildWeightedMatchkey(
 
   if (fields.length === 0) return null;
 
+  // Confidence-gated weight cap (spec §5.5). Only cap when existing weight
+  // would exceed 0.3 — don't lift lower weights. Look up each field's
+  // profile by name to check classifier confidence.
+  const profileByName: Record<string, ColumnProfile> = {};
+  for (const p of profiles) profileByName[p.name] = p;
+  const cappedFields: MatchkeyField[] = fields.map((f) => {
+    const profile = profileByName[f.field];
+    if (
+      profile !== undefined &&
+      profile.confidence < 0.5 &&
+      (f.weight ?? 0) > 0.3
+    ) {
+      return { ...f, weight: 0.3 };
+    }
+    return f;
+  });
+
   return makeMatchkeyConfig({
     name: "weighted_identity",
     type: "weighted",
-    fields,
+    fields: cappedFields,
     threshold: 0.85,
     rerank: false,
   });
@@ -263,6 +352,20 @@ function buildBlocking(profiles: readonly ColumnProfile[]): BlockingConfig {
       transforms: ["digits_only", "substring:0:5"],
     });
     break;
+  }
+
+  if (keys.length === 0) {
+    for (const p of profiles) {
+      const kind = classifyColumn(p);
+      if (kind !== "year") continue;
+      if (p.nullRate > 0.2) continue;
+      if (p.cardinalityRatio >= 0.95) continue;
+      keys.push({
+        fields: [p.name],
+        transforms: ["strip"],
+      });
+      break;
+    }
   }
 
   if (keys.length === 0) {
@@ -348,7 +451,27 @@ export function autoConfigureRows(
     ...(options?.llmAuto !== undefined ? { llmAuto: options.llmAuto } : {}),
   });
 
-  return config;
+  // Stash domain profile for preflight's domain-extracted column auto-repair
+  // (Check 1). Confidence threshold matches Python — below 0.7 we do not
+  // trust the detection enough to flip on config.domain automatically.
+  const rowColumns = rows.length > 0 ? Object.keys(rows[0] as object) : [];
+  const domainProfile = rowColumns.length > 0 ? detectDomain(rowColumns) : null;
+  if (domainProfile !== null && domainProfile.confidence > 0.7) {
+    (config as GoldenMatchConfig)._domainProfile = domainProfile;
+  }
+
+  const { report, config: repaired } = preflight(rows, config, {
+    profiles,
+    allowRemoteAssets: options?.allowRemoteAssets ?? false,
+  });
+  if (report.hasErrors) {
+    throw new ConfigValidationError(report);
+  }
+  (repaired as GoldenMatchConfig)._preflightReport = report;
+  if (options?.strict === true) {
+    (repaired as GoldenMatchConfig)._strictAutoconfig = true;
+  }
+  return repaired;
 }
 
 /**

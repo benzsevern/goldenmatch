@@ -3,6 +3,11 @@
  * Edge-safe: no Node.js imports, no `process`.
  */
 
+import type {
+  PreflightReport,
+  PostflightReport,
+} from "./autoconfigVerify.js";
+
 // ---------------------------------------------------------------------------
 // Primitive types
 // ---------------------------------------------------------------------------
@@ -288,6 +293,17 @@ export interface GoldenMatchConfig {
   readonly backend?: string;
   readonly llmAuto?: boolean;
   readonly llmBoost?: boolean;
+
+  /** Internal: auto-config hand-off. Do not read from outside the library.
+   *  Non-readonly so preflight / postflight can populate. Stripped by
+   *  stripConventionPrivate before YAML/JSON export.
+   *
+   *  This list is CLOSED. Future internal state should use a side-table
+   *  pattern (WeakMap) instead — see spec §11 risks. Adding more underscore
+   *  fields here weakens the readonly contract for every consumer. */
+  _preflightReport?: PreflightReport;
+  _strictAutoconfig?: boolean;
+  _domainProfile?: import("./domain.js").DomainProfile;
 }
 
 // ---------------------------------------------------------------------------
@@ -326,12 +342,14 @@ export interface DedupeResult {
   readonly stats: DedupeStats;
   readonly scoredPairs: readonly ScoredPair[];
   readonly config: GoldenMatchConfig;
+  readonly postflightReport?: PostflightReport;
 }
 
 export interface MatchResult {
   readonly matched: readonly Row[];
   readonly unmatched: readonly Row[];
   readonly stats: Readonly<Record<string, unknown>>;
+  readonly postflightReport?: PostflightReport;
 }
 
 export interface FieldProvenance {

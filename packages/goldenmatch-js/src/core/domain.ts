@@ -20,6 +20,15 @@ export interface DomainProfile {
   readonly featureColumns: readonly string[];
 }
 
+/** Columns that extractFeatures may add to a Row. Used by preflight Check 1
+ *  to identify "missing but producible" column references and auto-repair
+ *  config.domain. If a future PR adds more extraction outputs, append here. */
+export const DOMAIN_EXTRACTED_COLS: ReadonlySet<string> = new Set([
+  "__brand__",
+  "__model__",
+  "__version__",
+]);
+
 // ---------------------------------------------------------------------------
 // Domain signature tables
 // ---------------------------------------------------------------------------

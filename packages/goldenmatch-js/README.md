@@ -9,7 +9,7 @@ npm install goldenmatch
 [![npm](https://img.shields.io/npm/v/goldenmatch?color=d4a017)](https://www.npmjs.com/package/goldenmatch)
 [![Node](https://img.shields.io/node/v/goldenmatch?color=339933)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://github.com/benzsevern/goldenmatch/blob/main/LICENSE)
-[![Tests](https://img.shields.io/badge/tests-478%20passing-brightgreen)](https://github.com/benzsevern/goldenmatch/tree/main/packages/goldenmatch-js/tests)
+[![Tests](https://img.shields.io/badge/tests-590%20passing-brightgreen)](https://github.com/benzsevern/goldenmatch/tree/main/packages/goldenmatch-js/tests)
 
 ---
 
@@ -18,7 +18,7 @@ npm install goldenmatch
 - **Edge-safe core** — the matching engine runs in browsers, Workers, Vercel Edge Runtime, Deno
 - **Pure TypeScript** — no native dependencies required; peer deps unlock performance (hnswlib, ONNX, piscina)
 - **Feature parity with Python goldenmatch** — same scorers, same clustering, same YAML configs
-- **478 tests, strict TypeScript** — `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`
+- **590 tests, strict TypeScript** — `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`
 
 ## Quick Start
 
@@ -44,6 +44,58 @@ for (const record of result.goldenRecords) {
   console.log(record);
 }
 ```
+
+## Auto-Config Verification (v0.3)
+
+Auto-generated configs are now checked both before the pipeline runs and after
+scoring finishes, so you get actionable diagnostics instead of silent failures
+on edge-case data.
+
+### Preflight — six static checks
+
+When you call `autoConfigureRows(rows)`, the returned config ships with a
+`_preflightReport` summarising six config-time checks:
+
+1. **missing_column** — matchkey/blocking references a column not in the data
+2. **cardinality_high** — a column is near-unique (poor blocking signal)
+3. **cardinality_low** — a column has too few distinct values to discriminate
+4. **block_size** — a blocking key would produce oversized blocks
+5. **remote_asset** — a scorer requires a model download (gated offline)
+6. **weight_confidence** — a weighted matchkey's weights look unbalanced
+
+Many findings trigger **auto-repairs** (field dropped, scorer swapped,
+weight clamped). `hasErrors === true` on unrepairable errors raises
+`ConfigValidationError` with the full report attached.
+
+```ts
+import { autoConfigureRows, ConfigValidationError } from "goldenmatch";
+
+const cfg = autoConfigureRows(rows);
+for (const f of cfg._preflightReport!.findings) {
+  console.log(`[${f.severity}] ${f.check}/${f.subject}: ${f.message}`);
+}
+```
+
+Defaults are **offline-safe**: remote-asset scorers (cross-encoder, remote
+embeddings) are dropped unless you opt in with `allowRemoteAssets: true`.
+
+### Postflight — four runtime signals
+
+Inside `dedupe()` / `match()`, after scoring but before clustering, the
+pipeline computes four signals attached as `result.postflightReport`:
+
+1. **scoreHistogram** — 100-bin pair-score distribution
+2. **blockSizePercentiles** + **preliminaryClusterSizes** — p50/p95/p99/max
+3. **thresholdOverlapPct** — fraction of pairs near the current threshold
+4. **oversizedClusters** — components above size limit, with bottleneck pair
+
+If the score distribution is clearly bimodal, postflight proposes a
+threshold adjustment. In **strict mode** (`autoConfigureRows(rows, { strict: true })`
+or manual `_strictAutoconfig: true`) the signals are still emitted but the
+threshold is never touched — use this for reproducible CI pipelines.
+
+See `examples/verificationInspection.ts` and `examples/strictModeParity.ts`
+for runnable demos.
 
 ## Three entrypoints
 

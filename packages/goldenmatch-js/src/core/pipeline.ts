@@ -28,6 +28,11 @@ import {
 } from "./scorer.js";
 import { buildClusters, pairKey } from "./cluster.js";
 import { buildGoldenRecord } from "./golden.js";
+import { postflight } from "./autoconfigVerify.js";
+import type {
+  PreflightReport,
+  PostflightReport,
+} from "./autoconfigVerify.js";
 
 // ---------------------------------------------------------------------------
 // Options
@@ -79,6 +84,62 @@ function assignClusterIds(
     const cid = rowToCluster.get(rowId);
     return cid !== undefined ? { ...row, __cluster_id__: cid } : row;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Postflight integration (mirrors Python _apply_postflight).
+// ---------------------------------------------------------------------------
+
+/**
+ * Lax guard: shape drift would slip through. Acceptable for v0.3 since only
+ * autoConfigureRows sets this field. Tighten (e.g. brand check) if another
+ * producer appears.
+ */
+function isPreflightReport(v: unknown): v is PreflightReport {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    "findings" in v &&
+    Array.isArray((v as PreflightReport).findings)
+  );
+}
+
+function applyPostflight(
+  rows: readonly Row[],
+  config: GoldenMatchConfig,
+  pairScores: readonly ScoredPair[],
+): {
+  readonly pairScores: readonly ScoredPair[];
+  readonly report: PostflightReport | undefined;
+} {
+  const pre = config._preflightReport;
+  if (!isPreflightReport(pre)) {
+    return { pairScores, report: undefined };
+  }
+  const report = postflight(rows, config, {
+    pairScores: pairScores.map((p) => ({
+      idA: p.idA,
+      idB: p.idB,
+      score: p.score,
+    })),
+  });
+
+  let filtered: readonly ScoredPair[] = pairScores;
+  if (config._strictAutoconfig !== true) {
+    for (const adj of report.adjustments) {
+      if (adj.field === "threshold") {
+        const newThreshold = adj.toValue as number;
+        const prev = filtered.length;
+        filtered = filtered.filter((p) => p.score >= newThreshold);
+        if (prev > 0 && filtered.length === 0) {
+          (report.advisories as string[]).push(
+            `threshold adjustment to ${newThreshold.toFixed(3)} dropped all ${prev} pairs`,
+          );
+        }
+      }
+    }
+  }
+  return { pairScores: filtered, report };
 }
 
 // ---------------------------------------------------------------------------
@@ -171,9 +232,16 @@ export function runDedupePipeline(
     }
   }
 
+  // ---- Step 5.5: Postflight verification ----
+  const { pairScores: finalPairs, report: postflightReport } = applyPostflight(
+    processed,
+    config,
+    allPairs,
+  );
+
   // ---- Step 6: Cluster ----
   const allIds = collectRowIds(processed);
-  const pairTuples: [number, number, number][] = allPairs.map((p) => [
+  const pairTuples: [number, number, number][] = finalPairs.map((p) => [
     p.idA,
     p.idB,
     p.score,
@@ -257,8 +325,9 @@ export function runDedupePipeline(
     dupes,
     unique,
     stats,
-    scoredPairs: allPairs,
+    scoredPairs: finalPairs,
     config,
+    ...(postflightReport !== undefined ? { postflightReport } : {}),
   };
 }
 
@@ -340,6 +409,9 @@ export function runMatchPipeline(
       matchRate:
         targetRows.length > 0 ? matched.length / targetRows.length : 0,
     },
+    ...(result.postflightReport !== undefined
+      ? { postflightReport: result.postflightReport }
+      : {}),
   };
 }
 

@@ -312,3 +312,28 @@ export type { LearnedParams } from "./memory/learner.js";
 
 export { runPPRL, autoConfigurePPRL } from "./pprl/protocol.js";
 export type { PPRLConfig, PPRLResult } from "./pprl/protocol.js";
+
+// ---------------------------------------------------------------------------
+// Auto-config verification (preflight + postflight)
+// ---------------------------------------------------------------------------
+
+export {
+  preflight,
+  postflight,
+  makePreflightReport,
+  stripConventionPrivate,
+  ConfigValidationError,
+} from "./autoconfigVerify.js";
+export type {
+  PreflightCheckName,
+  Severity,
+  PreflightFinding,
+  PreflightReport,
+  PostflightSignals,
+  ScoreHistogram,
+  BlockSizePercentiles,
+  ClusterSizePercentiles,
+  OversizedCluster,
+  PostflightAdjustment,
+  PostflightReport,
+} from "./autoconfigVerify.js";
