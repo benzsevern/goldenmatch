@@ -303,10 +303,27 @@ function buildWeightedMatchkey(
 
   if (fields.length === 0) return null;
 
+  // Confidence-gated weight cap (spec §5.5). Only cap when existing weight
+  // would exceed 0.3 — don't lift lower weights. Look up each field's
+  // profile by name to check classifier confidence.
+  const profileByName: Record<string, ColumnProfile> = {};
+  for (const p of profiles) profileByName[p.name] = p;
+  const cappedFields: MatchkeyField[] = fields.map((f) => {
+    const profile = profileByName[f.field];
+    if (
+      profile !== undefined &&
+      profile.confidence < 0.5 &&
+      (f.weight ?? 0) > 0.3
+    ) {
+      return { ...f, weight: 0.3 };
+    }
+    return f;
+  });
+
   return makeMatchkeyConfig({
     name: "weighted_identity",
     type: "weighted",
-    fields,
+    fields: cappedFields,
     threshold: 0.85,
     rerank: false,
   });
