@@ -72,6 +72,13 @@ describe("postflight: score histogram", () => {
     expect(report.adjustments.some((a) => a.field === "threshold")).toBe(false);
   });
 
+  it("returns 'deferred' sentinel for blockingRecall", () => {
+    const rows = Array.from({ length: 500 }, (_, i) => ({ name: `x${i}` }));
+    const pairScores = [{ idA: 0, idB: 1, score: 0.9 }];
+    const report = postflight(rows, makeCfg(), { pairScores });
+    expect(report.signals.blockingRecall).toBe("deferred");
+  });
+
   it("strict mode: signal computed, adjustments empty", () => {
     const r = seeded(42);
     const pairScores: { idA: number; idB: number; score: number }[] = [];

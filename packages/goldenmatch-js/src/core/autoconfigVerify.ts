@@ -627,6 +627,14 @@ function getFirstWeightedThreshold(
   return null;
 }
 
+// TODO(autoconfig-iterative): full brute-force recall estimation lands with
+// the iterative auto-config loop (separate future spec). For v0.3 we ship
+// the sentinel so the schema contract is stable while the implementation is
+// deferred.
+function signalBlockingRecall(): "deferred" {
+  return "deferred";
+}
+
 export function postflight(
   _rows: readonly Record<string, unknown>[],
   config: GoldenMatchConfig,
@@ -663,7 +671,7 @@ export function postflight(
   // Placeholder values for signals added in Tasks 3.2-3.5.
   const signals: PostflightSignals = {
     scoreHistogram: hist.histogram,
-    blockingRecall: "deferred",
+    blockingRecall: signalBlockingRecall(),
     blockSizePercentiles: { p50: 0, p95: 0, p99: 0, max: 0 },
     thresholdOverlapPct: 0,
     totalPairsScored: options.pairScores.length,
