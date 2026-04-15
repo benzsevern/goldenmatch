@@ -3,7 +3,30 @@ import polars as pl
 import pytest
 from goldenmatch.core.autoconfig_verify import (
     PreflightReport, PreflightFinding, ConfigValidationError,
+    PostflightReport, PostflightAdjustment,
 )
+
+
+def test_postflight_report_dataclass_shape():
+    adj = PostflightAdjustment(
+        field="threshold", from_value=0.7, to_value=0.5,
+        reason="valley at 0.5", signal="score_histogram",
+    )
+    r = PostflightReport(
+        signals={"score_histogram": {"bins": [], "counts": []}},
+        adjustments=[adj],
+        advisories=["nudge the LLM"],
+    )
+    assert r.signals["score_histogram"] == {"bins": [], "counts": []}
+    assert r.adjustments[0].signal == "score_histogram"
+    assert r.advisories == ["nudge the LLM"]
+
+
+def test_postflight_report_defaults_empty():
+    r = PostflightReport()
+    assert r.signals == {}
+    assert r.adjustments == []
+    assert r.advisories == []
 
 
 def test_preflight_report_dataclass_shape():

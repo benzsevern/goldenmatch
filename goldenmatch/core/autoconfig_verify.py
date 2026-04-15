@@ -15,7 +15,7 @@ downstream introspection (Postflight, diagnostics, tests).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     import polars as pl
@@ -49,6 +49,35 @@ class PreflightReport:
         return any(
             f.severity == "error" and not f.repaired for f in self.findings
         )
+
+
+@dataclass
+class PostflightAdjustment:
+    """A single auto-applied adjustment produced by postflight.
+
+    Each adjustment is keyed by the ``signal`` that motivated it so callers
+    can trace which signal drove a change.
+    """
+
+    field: str
+    from_value: Any
+    to_value: Any
+    reason: str
+    signal: str
+
+
+@dataclass
+class PostflightReport:
+    """Aggregated result of running all postflight signals.
+
+    ``signals`` is the stable schema from spec §6.3. ``adjustments`` is the
+    list of auto-applied config tweaks (suppressed in strict mode). ``advisories``
+    are human-readable hints (e.g. "consider --llm-auto").
+    """
+
+    signals: dict[str, Any] = field(default_factory=dict)
+    adjustments: list[PostflightAdjustment] = field(default_factory=list)
+    advisories: list[str] = field(default_factory=list)
 
 
 class ConfigValidationError(Exception):
