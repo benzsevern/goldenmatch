@@ -532,6 +532,145 @@ export function preflight(
   return { report, config: current };
 }
 
-export function postflight(): never {
-  throw new Error("postflight not yet implemented — see Phase 3 of the plan");
+// ---------------------------------------------------------------------------
+// postflight — score histogram + bimodality threshold nudge (Task 3.1)
+// ---------------------------------------------------------------------------
+
+interface HistResult {
+  readonly histogram: ScoreHistogram;
+  readonly valleyLocation: number | null;
+  readonly isBimodal: boolean;
+}
+
+function signalScoreHistogram(
+  pairScores: readonly { score: number }[],
+): HistResult {
+  const bins: number[] = [];
+  for (let i = 0; i <= 100; i++) bins.push(i / 100);
+  const counts = new Array<number>(100).fill(0);
+  for (const p of pairScores) {
+    const idx = Math.min(99, Math.max(0, Math.floor(p.score * 100)));
+    counts[idx]! += 1;
+  }
+  // 5-bin smoothing
+  const smoothed = counts.map((_, i) => {
+    let sum = 0;
+    let n = 0;
+    for (let j = -2; j <= 2; j++) {
+      const k = i + j;
+      if (k >= 0 && k < counts.length) {
+        sum += counts[k]!;
+        n += 1;
+      }
+    }
+    return sum / Math.max(1, n);
+  });
+  const max = Math.max(...smoothed, 0);
+  const mean =
+    smoothed.reduce((a, b) => a + b, 0) / Math.max(1, smoothed.length);
+  const minHeight = Math.max(max * 0.3, mean * 2);
+  const peaks: number[] = [];
+  for (let i = 1; i < smoothed.length - 1; i++) {
+    if (
+      smoothed[i]! >= minHeight &&
+      smoothed[i]! > smoothed[i - 1]! &&
+      smoothed[i]! >= smoothed[i + 1]!
+    ) {
+      peaks.push(i);
+    }
+  }
+  if (peaks.length < 2) {
+    return {
+      histogram: { bins, counts },
+      valleyLocation: null,
+      isBimodal: false,
+    };
+  }
+  const first = peaks[0]!;
+  const last = peaks[peaks.length - 1]!;
+  if (last - first <= 10) {
+    return {
+      histogram: { bins, counts },
+      valleyLocation: null,
+      isBimodal: false,
+    };
+  }
+  let valleyIdx = first;
+  let valleyVal = smoothed[first]!;
+  for (let i = first + 1; i < last; i++) {
+    if (smoothed[i]! < valleyVal) {
+      valleyVal = smoothed[i]!;
+      valleyIdx = i;
+    }
+  }
+  const depthRatio = valleyVal / Math.min(smoothed[first]!, smoothed[last]!);
+  if (depthRatio >= 0.5) {
+    return {
+      histogram: { bins, counts },
+      valleyLocation: null,
+      isBimodal: false,
+    };
+  }
+  return {
+    histogram: { bins, counts },
+    valleyLocation: valleyIdx / 100,
+    isBimodal: true,
+  };
+}
+
+function getFirstWeightedThreshold(
+  config: GoldenMatchConfig,
+): number | null {
+  for (const mk of config.matchkeys ?? []) {
+    if (mk.type === "weighted") return mk.threshold;
+  }
+  return null;
+}
+
+export function postflight(
+  _rows: readonly Record<string, unknown>[],
+  config: GoldenMatchConfig,
+  options: {
+    readonly pairScores: readonly { idA: number; idB: number; score: number }[];
+    readonly currentThreshold?: number;
+  },
+): PostflightReport {
+  const currentThreshold =
+    options.currentThreshold ?? getFirstWeightedThreshold(config) ?? 0.7;
+  const hist = signalScoreHistogram(options.pairScores);
+  const adjustments: PostflightAdjustment[] = [];
+  const advisories: string[] = [];
+
+  if (hist.isBimodal && hist.valleyLocation !== null) {
+    if (
+      !config._strictAutoconfig &&
+      Math.abs(hist.valleyLocation - currentThreshold) > 0.05
+    ) {
+      adjustments.push({
+        field: "threshold",
+        fromValue: currentThreshold,
+        toValue: hist.valleyLocation,
+        reason: "histogram valley location differs from current threshold",
+        signal: "scoreHistogram",
+      });
+    }
+  } else {
+    advisories.push(
+      "score distribution is unimodal; threshold cannot be auto-set",
+    );
+  }
+
+  // Placeholder values for signals added in Tasks 3.2-3.5.
+  const signals: PostflightSignals = {
+    scoreHistogram: hist.histogram,
+    blockingRecall: "deferred",
+    blockSizePercentiles: { p50: 0, p95: 0, p99: 0, max: 0 },
+    thresholdOverlapPct: 0,
+    totalPairsScored: options.pairScores.length,
+    currentThreshold,
+    preliminaryClusterSizes: { p50: 0, p95: 0, p99: 0, max: 0, count: 0 },
+    oversizedClusters: [],
+  };
+
+  return { signals, adjustments, advisories };
 }
