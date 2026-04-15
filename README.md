@@ -29,6 +29,8 @@ goldenmatch dedupe customers.csv
 [![DQBench ER](https://img.shields.io/badge/DQBench%20ER-95.30-gold)](https://github.com/benzsevern/dqbench)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/benzsevern/goldenmatch/blob/main/scripts/gpu_colab_notebook.ipynb)
 
+> **v1.5.0 is out** — auto-config now runs a preflight + postflight verification layer. Bibliographic and domain-extracted schemas no longer crash under zero-config, remote-asset scorers are demoted by default, and every `DedupeResult` carries an inspectable `postflight_report`. See [Auto-Config Verification](#auto-config-verification-v150).
+
 ---
 
 ## Why GoldenMatch?
@@ -190,6 +192,70 @@ result = gm.dedupe("products.csv", fuzzy={"title": 0.80}, llm_scorer=True)
 # With Ray backend for large datasets
 result = gm.dedupe("huge.parquet", exact=["email"], backend="ray")
 ```
+
+### Auto-Config Verification (v1.5.0)
+
+Zero-config used to crash on bibliographic and domain-extracted schemas — auto-config would emit a matchkey referencing `__title_key__` without enabling `config.domain`, and the pipeline would raise `ValueError: Missing required columns`. v1.5.0 closes the gap with a preflight + postflight verification layer that runs automatically around `auto_configure_df`.
+
+**Preflight** (`gm.preflight`) runs 6 checks at the end of `auto_configure_df`:
+
+- column resolution (auto-repairs missing domain-extracted columns by enabling `config.domain`)
+- cardinality bounds on exact matchkeys (drops near-unique and near-constant keys)
+- block-size sanity (flags blocks that would stall the scorer)
+- remote-asset demotion (any `embedding`, `record_embedding`, or cross-encoder rerank is demoted unless you pass `allow_remote_assets=True`)
+- confidence-gated weight capping (low-confidence fields cap at weight 0.3)
+
+Unrepairable issues raise `ConfigValidationError` with the full `PreflightReport` attached as `err.report`. Repaired issues stay on the report as `findings` with `repaired=True`.
+
+**Postflight** (`gm.postflight`) runs 4 signals after scoring, before clustering:
+
+- score-distribution histogram + bimodality detection (auto-nudges threshold on clear bimodality)
+- blocking-recall estimate (gated at 10K+ rows)
+- preliminary cluster sizes + oversized-cluster bottleneck pair
+- threshold-band overlap percentage (advises `--llm-auto` when overlap > 20% and LLM is off)
+
+The report attaches to `DedupeResult.postflight_report` / `MatchResult.postflight_report`.
+
+```python
+import goldenmatch as gm
+import polars as pl
+
+df = pl.read_csv("bibliography.csv")
+
+# Zero-config -- preflight + postflight run automatically
+result = gm.dedupe_df(df)
+
+# Inspect the preflight report (private-by-convention underscore)
+for finding in result.config._preflight_report.findings:
+    print(f"[{finding.severity}] {finding.check}: {finding.message}")
+
+# Inspect postflight signals (public)
+sig = result.postflight_report.signals
+print(f"Scored {sig['total_pairs_scored']} pairs")
+print(f"Threshold overlap: {sig['threshold_overlap_pct']:.1%}")
+print(f"Oversized clusters: {len(sig['oversized_clusters'])}")
+```
+
+**Offline by default.** Remote-asset scorers are demoted unless you opt in:
+
+```python
+cfg = gm.auto_configure_df(df, allow_remote_assets=True)  # loads cross-encoder etc.
+```
+
+**Strict mode for parity runs.** `strict=True` still computes postflight signals and emits advisories, but skips threshold adjustments — use it for DQBench, regression suites, and any reproducible output:
+
+```python
+cfg = gm.auto_configure_df(df, strict=True)
+```
+
+**New classifier smarts in v1.5.0:**
+
+- Columns with cardinality ≥ 0.95 are classified as `identifier`, not `phone` / `zip` / `numeric`.
+- New `year` col_type routes to blocking, not scoring.
+- New `multi_name` col_type handles comma/semicolon-delimited author-style fields.
+- Low-confidence fields (< 0.5) cap at weight 0.3.
+
+See `examples/verification_inspection.py` and `examples/strict_mode_parity.py` for runnable walkthroughs.
 
 ### Privacy-Preserving Linkage
 

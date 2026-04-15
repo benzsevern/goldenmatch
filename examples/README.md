@@ -26,6 +26,8 @@ python basic_dedupe.py
 | `agent_demo.py` | Autonomous ER agent with confidence gating and review queue | goldenmatch |
 | `benchmark.py` | DQBench ER benchmark (precision, recall, F1, throughput) | goldenmatch, dqbench |
 | `equipment_dedup.py` | Equipment/auction dedup: multi-pass blocking, ANN fallback, weighted fuzzy, LLM calibration | goldenmatch, OPENAI_API_KEY |
+| `verification_inspection.py` | v1.5.0 preflight + postflight walkthrough -- inspect findings, signals, advisories, and adjustments | goldenmatch |
+| `strict_mode_parity.py` | v1.5.0 `strict=True` for deterministic parity / regression runs | goldenmatch |
 
 ## For Coding AIs
 

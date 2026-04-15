@@ -364,3 +364,36 @@ Or auto-generate from data:
 ```python
 config = gm.auto_configure([("data.csv", "source")])
 ```
+
+---
+
+## Verification (v1.5.0)
+
+`auto_configure_df` runs **preflight** at the end of config generation — 6 checks that auto-repair missing domain-extracted columns, drop useless-cardinality exact matchkeys, flag oversized blocks, demote remote-asset scorers, and cap low-confidence weights. Unrepairable issues raise `ConfigValidationError`; the full report is attached to the exception as `err.report`.
+
+The pipeline runs **postflight** after scoring and before clustering — 4 signals (score histogram + bimodality, blocking recall, cluster sizes + bottleneck pairs, threshold-band overlap) that can auto-nudge the threshold on clear bimodality and attach the report to `DedupeResult.postflight_report` / `MatchResult.postflight_report`.
+
+Two new kwargs on `auto_configure_df`:
+
+```python
+import goldenmatch as gm
+
+# Offline-safe (default): remote-asset scorers demoted, postflight may adjust threshold
+cfg = gm.auto_configure_df(df)
+
+# Opt in to cross-encoder rerank / embedding scorers
+cfg = gm.auto_configure_df(df, allow_remote_assets=True)
+
+# Strict: compute signals + advisories, but suppress auto-adjustments (DQBench, regression)
+cfg = gm.auto_configure_df(df, strict=True)
+```
+
+The preflight report is available on the returned config (underscore is private-by-convention but stable across v1.5.x):
+
+```python
+cfg = gm.auto_configure_df(df)
+for finding in cfg._preflight_report.findings:
+    print(f"[{finding.severity}] {finding.check}: {finding.message}")
+```
+
+See the [Verification section in the Python API docs](python-api.html#verification-v150) for the full `preflight` / `postflight` signatures and the `PostflightSignals` schema.
