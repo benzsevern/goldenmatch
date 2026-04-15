@@ -831,7 +831,90 @@ def run_amazon_google():
     return results
 
 
-def main():
+def _run_ncvr_synth_f1() -> float:
+    """Run zero-config dedupe on the NCVR synth fixture; return F1."""
+    from tests.fixtures.ncvr_synth_dupes import build_ncvr_synth_df
+    from goldenmatch._api import dedupe_df
+
+    df, gt_pairs = build_ncvr_synth_df()
+    result = dedupe_df(df)
+    predicted = set()
+    for cluster in result.clusters.values():
+        m = sorted(cluster["members"])
+        for i in range(len(m)):
+            for j in range(i + 1, len(m)):
+                predicted.add((m[i], m[j]))
+    tp = len(predicted & gt_pairs)
+    fp = len(predicted - gt_pairs)
+    fn = len(gt_pairs - predicted)
+    p = tp / (tp + fp) if (tp + fp) else 0.0
+    r = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = 2 * p * r / (p + r) if (p + r) else 0.0
+    print(f"\n  NCVR synth: F1={f1:.4f}  P={p:.4f}  R={r:.4f}  TP={tp} FP={fp} FN={fn}")
+    return f1
+
+
+def _check_floors(all_results, ncvr_f1: float) -> int:
+    """Compare measured F1s against floors. Return exit code (0 pass, 1 fail)."""
+    import json
+
+    floors_path = Path(__file__).parent.parent / "parity" / "autoconfig-f1-floors.json"
+    with open(floors_path) as f:
+        floors = json.load(f)
+
+    # Map benchmark dataset names to floor keys. Use the MAX F1 across
+    # strategies for each dataset (best result the suite achieved).
+    dataset_to_floor_key = {
+        "DBLP-ACM": "dblp_acm",
+        "Abt-Buy": "abt_buy_no_llm",
+    }
+    measured: dict[str, float] = {}
+    for r in all_results:
+        key = dataset_to_floor_key.get(r.dataset)
+        if key is None:
+            continue
+        measured[key] = max(measured.get(key, 0.0), r.f1)
+    measured["ncvr_synth"] = ncvr_f1
+
+    print("\n\n" + "=" * 70)
+    print("F1 FLOOR CHECK")
+    print("=" * 70)
+    print(f"\n  {'Benchmark':<20} {'Measured':>10} {'Floor':>8} {'Status':>8}")
+    print(f"  {'-'*20} {'-'*10} {'-'*8} {'-'*8}")
+    failures = []
+    for key, floor in floors.items():
+        m = measured.get(key)
+        if m is None:
+            status = "MISSING"
+            failures.append((key, None, floor))
+            print(f"  {key:<20} {'n/a':>10} {floor:>8.2f} {status:>8}")
+            continue
+        ok = m >= floor
+        status = "PASS" if ok else "FAIL"
+        print(f"  {key:<20} {m:>10.4f} {floor:>8.2f} {status:>8}")
+        if not ok:
+            failures.append((key, m, floor))
+    if failures:
+        print("\n  FLOOR CHECK FAILED:")
+        for key, m, floor in failures:
+            m_str = f"{m:.4f}" if m is not None else "MISSING"
+            print(f"    - {key}: measured={m_str}, floor={floor}")
+        return 1
+    print("\n  All floors met.")
+    return 0
+
+
+def main(argv=None):
+    import argparse
+
+    parser = argparse.ArgumentParser(description="GoldenMatch Leipzig benchmark suite")
+    parser.add_argument(
+        "--check-floors",
+        action="store_true",
+        help="After running benchmarks, compare F1s against tests/parity/autoconfig-f1-floors.json and exit non-zero on violation.",
+    )
+    args = parser.parse_args(argv)
+
     print("=" * 70)
     print("GOLDENMATCH — Leipzig Benchmark Suite")
     print("=" * 70)
@@ -850,6 +933,11 @@ def main():
     print(f"  {'-'*20} {'-'*30} {'-'*6} {'-'*6} {'-'*6} {'-'*6}")
     for r in all_results:
         print(f"  {r.dataset:<20} {r.strategy:<30} {r.precision:>5.1%} {r.recall:>5.1%} {r.f1:>5.1%} {r.time_seconds:>5.1f}s")
+
+    if args.check_floors:
+        ncvr_f1 = _run_ncvr_synth_f1()
+        code = _check_floors(all_results, ncvr_f1)
+        sys.exit(code)
 
 
 if __name__ == "__main__":
