@@ -333,3 +333,78 @@ describe("preflight Check 5: remote_asset", () => {
     ).toBe(true);
   });
 });
+
+describe("preflight Check 6: weight_confidence", () => {
+  it("caps weight at 0.5 for low-confidence fields", () => {
+    const rows = [{ addr: "x", email: "a@b.c" }];
+    const cfg: GoldenMatchConfig = {
+      matchkeys: [
+        {
+          name: "mk",
+          type: "weighted",
+          fields: [
+            { field: "addr", transforms: [], scorer: "token_sort", weight: 1.0 },
+            { field: "email", transforms: [], scorer: "jaro_winkler", weight: 0.9 },
+          ],
+          threshold: 0.7,
+        },
+      ],
+    };
+    const { report, config: repaired } = preflight(rows, cfg, {
+      profiles: [
+        {
+          name: "addr",
+          nullRate: 0,
+          nullCount: 0,
+          totalCount: 1,
+          distinctCount: 1,
+          cardinalityRatio: 1,
+          inferredType: "text",
+          avgLength: 1,
+          maxLength: 1,
+          sampleValues: ["x"],
+          confidence: 0.3,
+        },
+        {
+          name: "email",
+          nullRate: 0,
+          nullCount: 0,
+          totalCount: 1,
+          distinctCount: 1,
+          cardinalityRatio: 1,
+          inferredType: "email",
+          avgLength: 5,
+          maxLength: 5,
+          sampleValues: ["a@b.c"],
+          confidence: 0.9,
+        },
+      ],
+    });
+    const mk = repaired.matchkeys![0]!;
+    const addr = mk.fields.find((f) => f.field === "addr")!;
+    const email = mk.fields.find((f) => f.field === "email")!;
+    expect(addr.weight).toBe(0.5);
+    expect(email.weight).toBe(0.9);
+    const warn = report.findings.find((f) => f.check === "weight_confidence");
+    expect(warn?.repaired).toBe(true);
+    expect(warn?.subject).toContain("addr");
+  });
+
+  it("no-op when profiles not supplied", () => {
+    const rows = [{ a: 1 }];
+    const cfg: GoldenMatchConfig = {
+      matchkeys: [
+        {
+          name: "mk",
+          type: "weighted",
+          fields: [{ field: "a", transforms: [], scorer: "exact", weight: 1 }],
+          threshold: 0.7,
+        },
+      ],
+    };
+    const { report } = preflight(rows, cfg);
+    expect(
+      report.findings.some((f) => f.check === "weight_confidence"),
+    ).toBe(false);
+  });
+});

@@ -457,6 +457,59 @@ function checkRemoteAssets(
   return { ...config, matchkeys: newMatchkeys };
 }
 
+function checkWeightConfidence(
+  config: GoldenMatchConfig,
+  profiles: readonly ColumnProfile[] | undefined,
+  findings: PreflightFinding[],
+): GoldenMatchConfig {
+  if (profiles === undefined) return config;
+  const matchkeys = config.matchkeys;
+  if (matchkeys === undefined || matchkeys.length === 0) return config;
+
+  const byName = new Map<string, ColumnProfile>();
+  for (const p of profiles) byName.set(p.name, p);
+
+  const newMatchkeys: MatchkeyConfig[] = [];
+  let changed = false;
+
+  for (const mk of matchkeys) {
+    if (mk.type !== "weighted") {
+      newMatchkeys.push(mk);
+      continue;
+    }
+    let mkChanged = false;
+    const newFields: MatchkeyField[] = mk.fields.map((f) => {
+      const profile = byName.get(f.field);
+      if (
+        profile !== undefined &&
+        profile.confidence < 0.5 &&
+        f.weight > 0.5
+      ) {
+        mkChanged = true;
+        findings.push({
+          check: "weight_confidence",
+          severity: "warning",
+          subject: `${mk.name}.${f.field}`,
+          message: `field ${f.field} has classifier confidence ${profile.confidence.toFixed(2)} — weight capped from ${f.weight} to 0.5`,
+          repaired: true,
+          repairNote: `weight ${f.weight} -> 0.5`,
+        });
+        return { ...f, weight: 0.5 };
+      }
+      return f;
+    });
+    if (mkChanged) {
+      changed = true;
+      newMatchkeys.push({ ...mk, fields: newFields });
+    } else {
+      newMatchkeys.push(mk);
+    }
+  }
+
+  if (!changed) return config;
+  return { ...config, matchkeys: newMatchkeys };
+}
+
 export function preflight(
   rows: readonly Record<string, unknown>[],
   config: GoldenMatchConfig,
@@ -473,7 +526,7 @@ export function preflight(
     findings,
     options?.allowRemoteAssets ?? false,
   );
-  // Check 6 added in subsequent task.
+  current = checkWeightConfidence(current, options?.profiles, findings);
 
   const report = makePreflightReport(findings, current !== config);
   return { report, config: current };
