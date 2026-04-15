@@ -71,9 +71,8 @@ class AutoConfigDecisions:
     Captures the *choices* auto_configure_df makes from profiled data.
 
     Separating decisions from the GoldenMatchConfig enables future iterative
-    tuning (see spec docs/superpowers/specs/2026-04-14-autoconfig-verification-design.md
-    section 7.2): a future loop can nudge these decisions without re-profiling
-    and then rebuild the config via `_rebuild_from_decisions`.
+    tuning: a future loop can nudge these decisions without re-profiling and
+    then rebuild the config via `_rebuild_from_decisions`.
 
     Populated only by auto_configure_df; not persisted to YAML.
     """
@@ -654,8 +653,9 @@ def build_matchkeys(
     # is low (<0.5), cap the weight at 0.3 so noisy/ambiguous columns can't
     # dominate a weighted matchkey. Profile lookup is by column name.
     # Ordering note: this cap runs AFTER field-utility truncation above.
-    # Reordering (cap before truncate) would distort utility-based selection
-    # because _field_utility reads f.weight as input.
+    # _field_utility uses f.weight only as a fallback when a profile is
+    # missing; more importantly, we don't want the cap to skew the utility
+    # ranking used by the truncation step. Reorder at your peril.
     _profile_lookup = {p.name: p for p in profiles}
     for f in all_weighted:
         if f.field is None:
@@ -1182,17 +1182,19 @@ def auto_configure_df(
 
     Profiles columns by name heuristics and data sampling, then builds
     matchkeys, blocking, and golden rules automatically. Runs preflight
-    verification (spec §4) on the resulting config before returning, attaching
-    the `PreflightReport` to the config as ``config._preflight_report``.
+    verification on the resulting config before returning, attaching the
+    `PreflightReport` to the config as ``config._preflight_report``.
 
     Args:
         df: Polars DataFrame to auto-configure for.
         llm_provider: Optional LLM provider for profiling (openai/anthropic).
         domain_config: Manual domain override; skips auto-detection.
         llm_auto: Auto-enable the LLM scorer when an API key is present.
-        strict: Reserved for future use (currently auto_configure_df always
-            raises ConfigValidationError on unrepaired errors). Stashed on the
-            config as ``_strict_autoconfig`` for downstream consumers.
+        strict: When True, postflight computes signals and emits advisories
+            but does not apply any adjustments (keeps output deterministic for
+            parity runs). Preflight always raises ``ConfigValidationError`` on
+            unrepairable errors regardless. Stashed on the config as
+            ``_strict_autoconfig`` for downstream consumers.
         allow_remote_assets: When True, keep embedding/record_embedding/
             rerank scorers. When False (default), preflight demotes them to
             offline-safe alternatives.
@@ -1435,7 +1437,7 @@ def auto_configure_df(
         memory_config=memory_config,
     )
 
-    # ── Preflight verification (spec §4) ──
+    # ── Preflight verification ──
     #
     # Stash the domain profile so preflight Check 1 can auto-repair
     # `config.domain` when the generated config references
@@ -1475,7 +1477,7 @@ def _rebuild_from_decisions(
 
     Splitting this out lets a future iterative-tuning loop mutate `decisions`
     and re-call `_rebuild_from_decisions` without re-running profile_columns /
-    build_matchkeys / build_blocking. See spec section 7.2.
+    build_matchkeys / build_blocking.
     """
     # Rebuild final blocking from decisions, preserving runtime-only attrs
     # (learned_sample_size, learned_min_recall, skip_oversized, etc.) from
@@ -1490,9 +1492,9 @@ def _rebuild_from_decisions(
             "passes": decisions.blocking_passes,
         })
 
-    # `profiles` is retained in the signature for future iterative-tuning hooks
-    # (spec section 7.2) and reserved so tuning loops can re-examine column
-    # stats without threading them through the call chain. Currently unused.
+    # `profiles` is retained in the signature for future iterative-tuning
+    # hooks: reserved so tuning loops can re-examine column stats without
+    # threading them through the call chain. Currently unused.
     del profiles
 
     return GoldenMatchConfig(

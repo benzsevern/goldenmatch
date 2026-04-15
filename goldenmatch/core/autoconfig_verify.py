@@ -1,6 +1,6 @@
-"""Auto-configuration verification: preflight (and later, postflight) checks.
+"""Auto-configuration verification: preflight + postflight checks.
 
-See spec: docs/superpowers/specs/2026-04-14-autoconfig-verification-design.md §4.
+See PR #44 design notes for the broader context.
 
 Preflight runs right before `auto_configure_df` returns. It validates that the
 generated `GoldenMatchConfig` is internally consistent with the DataFrame it
@@ -70,9 +70,10 @@ class PostflightAdjustment:
 class PostflightReport:
     """Aggregated result of running all postflight signals.
 
-    ``signals`` is the stable schema from spec §6.3. ``adjustments`` is the
-    list of auto-applied config tweaks (suppressed in strict mode). ``advisories``
-    are human-readable hints (e.g. "consider --llm-auto").
+    ``signals`` is the stable schema documented in ``PostflightSignals``.
+    ``adjustments`` is the list of auto-applied config tweaks (suppressed in
+    strict mode). ``advisories`` are human-readable hints (e.g. "consider
+    --llm-auto").
     """
 
     signals: dict[str, Any] = field(default_factory=dict)
@@ -313,8 +314,9 @@ def _check_block_sizes(
     import polars as pl
     from goldenmatch.core.blocker import _build_block_key_expr
 
-    # Cap sample at 10K rows — block-size distribution converges well below
-    # full-dataset sizes and the transforms are O(n).
+    # Cap sample at 10K rows for speed. Sample via ``df.head(n)`` (not random)
+    # for determinism — for pre-sorted inputs the distribution may over-
+    # represent the head's block skew; acceptable as a first-line indicator.
     n = min(df.height, 10_000)
     sample = df.head(n) if df.height > n else df
 
@@ -387,9 +389,21 @@ def _check_remote_assets(
     *,
     allow_remote_assets: bool,
 ) -> None:
-    """Check 5: demote scorers that require downloading models or hitting the
-    network, unless the caller explicitly allowed them or an LLM scorer is
-    already enabled (which implies online operation is fine).
+    """Check 5: demote or drop matchkey fields that would load remote assets
+    (embedding models, cross-encoders) unless explicitly opted in.
+
+    Behaviors:
+      - ``scorer='embedding'`` → demoted to ``'ensemble'`` (offline-safe).
+      - ``scorer='record_embedding'`` → the field is REMOVED (not demoted —
+        it relies on the synthetic ``__record__`` placeholder column with
+        ``columns=[...]`` and has no ensemble-compatible fallback).
+      - ``rerank=True`` → disabled (cross-encoder download).
+      - If a matchkey's only fields were ``record_embedding`` and they all
+        get removed, the matchkey itself is dropped (separate
+        ``remote_asset_matchkey_empty`` finding).
+
+    Skipped entirely when ``allow_remote_assets`` is True, or when an LLM
+    scorer is already enabled (implies online operation is fine).
     """
     if allow_remote_assets:
         return
@@ -778,8 +792,11 @@ def _signal_block_size_percentiles(
     """Compute P50/P95/P99/max block sizes across all blocking keys.
 
     Mirrors the sampling approach in _check_block_sizes (Preflight Check 4):
-    sample min(df.height, 10_000), build the blocking key expr, group, count.
-    Returns zeros on failure or when blocking is absent.
+    sample ``min(df.height, 10_000)`` via ``df.head(n)`` (deterministic, not
+    random — for pre-sorted inputs the distribution may over-represent the
+    head's block skew; acceptable as a first-line indicator), build the
+    blocking key expr, group, count. Returns zeros on failure or when
+    blocking is absent.
     """
     zero = {"p50": 0, "p95": 0, "p99": 0, "max": 0}
     if config.blocking is None or df.height == 0:
@@ -834,7 +851,8 @@ def postflight(
 ) -> PostflightReport:
     """Run all postflight signals on (df, config, pair_scores).
 
-    Populates ``report.signals`` with the stable schema from spec §6.3.
+    Populates ``report.signals`` with the stable schema documented in
+    ``PostflightSignals``.
     When ``config._strict_autoconfig`` is True, signals are still computed
     but no adjustments are emitted (advisories may still accrue).
     """

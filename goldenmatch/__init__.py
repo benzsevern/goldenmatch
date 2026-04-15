@@ -152,7 +152,7 @@ from goldenmatch.core.autoconfig import auto_configure, auto_configure_df
 from goldenmatch.core.threshold import suggest_threshold
 
 # ── Auto-config verification ────────────────────────────────────────────
-# Spec: docs/superpowers/specs/2026-04-14-autoconfig-verification-design.md
+# See PR #44 for design notes.
 from goldenmatch.core.autoconfig_verify import (
     preflight,
     postflight,
