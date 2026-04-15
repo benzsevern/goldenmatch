@@ -71,6 +71,26 @@ def test_postflight_unimodal_histogram_no_adjustment():
     assert not any(adj.field == "threshold" for adj in report.adjustments)
 
 
+def test_postflight_cluster_sizes_identifies_oversized():
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    from goldenmatch.core.autoconfig_verify import postflight
+    # Force one big component of 150 rows via chain of edges.
+    pair_scores = [(i, i+1, 0.9) for i in range(149)]
+    df = pl.DataFrame({"name": [f"n{i}" for i in range(200)]})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["name"])]),
+        matchkeys=[MatchkeyConfig(name="mk", type="weighted", threshold=0.7, fields=[
+            MatchkeyField(field="name", scorer="token_sort", weight=1.0)])],
+    )
+    report = postflight(df, cfg, pair_scores=pair_scores)
+    oversized = report.signals["oversized_clusters"]
+    assert len(oversized) == 1
+    assert oversized[0]["size"] == 150
+    assert len(oversized[0]["bottleneck_pair"]) == 2
+
+
 def test_postflight_blocking_recall_gated_below_10k():
     from goldenmatch.config.schemas import (
         GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
