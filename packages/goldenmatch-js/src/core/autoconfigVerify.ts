@@ -364,19 +364,116 @@ function checkBlockSizes(
   return config;
 }
 
+function checkRemoteAssets(
+  config: GoldenMatchConfig,
+  findings: PreflightFinding[],
+  allowRemoteAssets: boolean,
+): GoldenMatchConfig {
+  // Opt-in escape hatches: explicit caller permission or an LLM scorer
+  // already committed to remote round-trips.
+  if (allowRemoteAssets) return config;
+  if (config.llmScorer?.enabled === true) return config;
+
+  const matchkeys = config.matchkeys;
+  if (matchkeys === undefined || matchkeys.length === 0) return config;
+
+  const newMatchkeys: MatchkeyConfig[] = [];
+  let changed = false;
+
+  for (const mk of matchkeys) {
+    const keptFields: MatchkeyField[] = [];
+    let mkChanged = false;
+
+    for (const f of mk.fields) {
+      if (f.scorer === "embedding") {
+        keptFields.push({ ...f, scorer: "ensemble" });
+        mkChanged = true;
+        findings.push({
+          check: "remote_asset",
+          severity: "warning",
+          subject: `${mk.name}.${f.field}`,
+          message: `scorer 'embedding' requires network + model download — demoted to 'ensemble'`,
+          repaired: true,
+          repairNote: "scorer embedding -> ensemble",
+        });
+      } else if (f.scorer === "record_embedding") {
+        mkChanged = true;
+        findings.push({
+          check: "remote_asset",
+          severity: "warning",
+          subject: `${mk.name}.${f.field}`,
+          message: `scorer 'record_embedding' requires network + model download — field dropped`,
+          repaired: true,
+          repairNote: "field removed (record_embedding)",
+        });
+        // drop field
+      } else {
+        keptFields.push(f);
+      }
+    }
+
+    if (!mkChanged) {
+      newMatchkeys.push(mk);
+      continue;
+    }
+    changed = true;
+
+    if (keptFields.length === 0) {
+      findings.push({
+        check: "remote_asset_matchkey_empty",
+        severity: "info",
+        subject: mk.name,
+        message: `matchkey ${mk.name} dropped: all fields depended on remote-asset scorers`,
+        repaired: true,
+        repairNote: "matchkey removed",
+      });
+      continue;
+    }
+
+    if (mk.type === "weighted") {
+      const next: MatchkeyConfig = {
+        ...mk,
+        fields: keptFields,
+        // Rerank requires a cross-encoder model download too.
+        ...(mk.rerank === true ? { rerank: false } : {}),
+      };
+      if (mk.rerank === true) {
+        findings.push({
+          check: "remote_asset",
+          severity: "warning",
+          subject: mk.name,
+          message: `matchkey ${mk.name} rerank=true requires cross-encoder download — disabled`,
+          repaired: true,
+          repairNote: "rerank true -> false",
+        });
+      }
+      newMatchkeys.push(next);
+    } else {
+      newMatchkeys.push({ ...mk, fields: keptFields });
+    }
+  }
+
+  if (!changed) return config;
+  return { ...config, matchkeys: newMatchkeys };
+}
+
 export function preflight(
   rows: readonly Record<string, unknown>[],
   config: GoldenMatchConfig,
   options?: PreflightOptions,
 ): { readonly report: PreflightReport; readonly config: GoldenMatchConfig } {
-  void options;
   const findings: PreflightFinding[] = [];
   let current = config;
 
   current = checkColumns(rows, current, findings);
   current = checkCardinality(rows, current, findings);
   current = checkBlockSizes(rows, current, findings);
-  // Checks 5-6 added in subsequent tasks.
+  current = checkRemoteAssets(
+    current,
+    findings,
+    options?.allowRemoteAssets ?? false,
+  );
+  // Check 6 added in subsequent task.
 
   const report = makePreflightReport(findings, current !== config);
   return { report, config: current };

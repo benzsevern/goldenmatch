@@ -251,3 +251,85 @@ describe("preflight Check 4: block_size", () => {
     expect(report.findings.some((f) => f.check === "block_size")).toBe(false);
   });
 });
+
+describe("preflight Check 5: remote_asset", () => {
+  it("demotes embedding scorer to ensemble by default", () => {
+    const rows = [{ name: "alice", desc: "a" }];
+    const cfg: GoldenMatchConfig = {
+      matchkeys: [
+        {
+          name: "mk",
+          type: "weighted",
+          fields: [
+            { field: "desc", transforms: [], scorer: "embedding", weight: 1 },
+          ],
+          threshold: 0.7,
+        },
+      ],
+    };
+    const { report, config: repaired } = preflight(rows, cfg);
+    const mk = repaired.matchkeys![0]!;
+    expect(mk.fields[0]!.scorer).toBe("ensemble");
+    const warn = report.findings.find((f) => f.check === "remote_asset");
+    expect(warn?.repaired).toBe(true);
+  });
+
+  it("respects allowRemoteAssets=true opt-in", () => {
+    const rows = [{ desc: "a" }];
+    const cfg: GoldenMatchConfig = {
+      matchkeys: [
+        {
+          name: "mk",
+          type: "weighted",
+          fields: [
+            { field: "desc", transforms: [], scorer: "embedding", weight: 1 },
+          ],
+          threshold: 0.7,
+        },
+      ],
+    };
+    const { report, config: repaired } = preflight(rows, cfg, {
+      allowRemoteAssets: true,
+    });
+    expect(repaired.matchkeys![0]!.fields[0]!.scorer).toBe("embedding");
+    expect(report.findings.some((f) => f.check === "remote_asset")).toBe(false);
+  });
+
+  it("drops record_embedding fields and emits remote_asset_matchkey_empty", () => {
+    const rows = [{ name: "alice" }];
+    const cfg: GoldenMatchConfig = {
+      matchkeys: [
+        {
+          name: "mk_rec",
+          type: "weighted",
+          fields: [
+            {
+              field: "__record__",
+              transforms: [],
+              scorer: "record_embedding",
+              weight: 1,
+            },
+          ],
+          threshold: 0.7,
+        },
+        {
+          name: "mk_name",
+          type: "weighted",
+          fields: [
+            { field: "name", transforms: [], scorer: "jaro_winkler", weight: 1 },
+          ],
+          threshold: 0.7,
+        },
+      ],
+    };
+    const { report, config: repaired } = preflight(rows, cfg);
+    const names = (repaired.matchkeys ?? []).map((mk) => mk.name);
+    expect(names).not.toContain("mk_rec");
+    expect(names).toContain("mk_name");
+    expect(
+      report.findings.some(
+        (f) => f.check === "remote_asset_matchkey_empty",
+      ),
+    ).toBe(true);
+  });
+});
