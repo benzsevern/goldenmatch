@@ -71,6 +71,25 @@ def test_postflight_unimodal_histogram_no_adjustment():
     assert not any(adj.field == "threshold" for adj in report.adjustments)
 
 
+def test_postflight_threshold_overlap_triggers_llm_advisory():
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    from goldenmatch.core.autoconfig_verify import postflight
+    # 30% of pairs in 0.70 ± 0.02 band.
+    pair_scores = [(i, i+1, 0.69) for i in range(300)]
+    pair_scores += [(i, i+5000, 0.2) for i in range(700)]
+    df = pl.DataFrame({"name": [f"n{i}" for i in range(100)]})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["name"])]),
+        matchkeys=[MatchkeyConfig(name="mk", type="weighted", threshold=0.7, fields=[
+            MatchkeyField(field="name", scorer="token_sort", weight=1.0)])],
+    )
+    report = postflight(df, cfg, pair_scores=pair_scores)
+    assert any("llm" in adv.lower() or "auto" in adv.lower() for adv in report.advisories)
+    assert report.signals["threshold_overlap_pct"] > 0.20
+
+
 def test_postflight_cluster_sizes_identifies_oversized():
     from goldenmatch.config.schemas import (
         GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
