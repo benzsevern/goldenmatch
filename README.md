@@ -22,11 +22,15 @@
 [![DQBench ER](https://img.shields.io/badge/DQBench%20ER-95.30-d4a017?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSIjZmZmIj48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI4Ii8+PC9zdmc+)](https://github.com/benzsevern/dqbench)
 [![F1: 97.2%](https://img.shields.io/badge/DBLP--ACM%20F1-97.2%25-d4a017)](#benchmarks)
 
+<!-- Downloads -->
+[![PyPI downloads](https://img.shields.io/pypi/dm/goldenmatch?color=d4a017&label=pypi%20dl%2Fmo&logo=pypi&logoColor=white)](https://pepy.tech/project/goldenmatch)
+[![npm downloads](https://img.shields.io/npm/dm/goldenmatch?color=cb3837&label=npm%20dl%2Fmo&logo=npm&logoColor=white)](https://www.npmjs.com/package/goldenmatch)
+[![GitHub stars](https://img.shields.io/github/stars/benzsevern/goldenmatch?style=flat&color=d4a017&logo=github)](https://github.com/benzsevern/goldenmatch/stargazers)
+
 <!-- Ecosystem -->
-[![Downloads](https://static.pepy.tech/badge/goldenmatch/month)](https://pepy.tech/project/goldenmatch)
-[![GitHub stars](https://img.shields.io/github/stars/benzsevern/goldenmatch?style=flat&color=d4a017)](https://github.com/benzsevern/goldenmatch/stargazers)
 [![Docs](https://img.shields.io/badge/docs-github.io-d4a017)](https://benzsevern.github.io/goldenmatch/)
 [![Smithery MCP](https://img.shields.io/badge/MCP-smithery-6e40c9)](https://smithery.ai/servers/benzsevern/goldenmatch)
+[![MCP Marketplace](https://img.shields.io/badge/MCP-marketplace-0ea5e9)](https://mcp-marketplace.io/)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/benzsevern/goldenmatch/blob/main/scripts/gpu_colab_notebook.ipynb)
 
 </div>
