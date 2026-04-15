@@ -462,6 +462,7 @@ class DedupeResult:
     stats: dict                       # total_records, total_clusters, match_rate
     scored_pairs: list[tuple]         # (id_a, id_b, score) tuples
     config: GoldenMatchConfig
+    postflight_report: PostflightReport | None  # v1.5.0: signals + advisories + adjustments
 
     def to_csv(path, which="golden")  # Write results to CSV
     match_rate: float                 # Property: percentage of dupes
@@ -479,6 +480,7 @@ class MatchResult:
     matched: pl.DataFrame | None      # Matched target records with scores
     unmatched: pl.DataFrame | None    # Unmatched target records
     stats: dict
+    postflight_report: PostflightReport | None  # v1.5.0: signals + advisories + adjustments
 
     def to_csv(path)
 ```
@@ -680,8 +682,147 @@ gm.profile_dataframe(df) -> dict
 
 ```python
 gm.auto_configure(file_specs) -> GoldenMatchConfig
+gm.auto_configure_df(
+    df,
+    llm_provider=None,
+    domain_config=None,
+    llm_auto=False,
+    strict=False,              # v1.5.0
+    allow_remote_assets=False, # v1.5.0
+) -> GoldenMatchConfig
 gm.suggest_threshold(df, matchkey) -> float
 ```
+
+New v1.5.0 kwargs on `auto_configure_df`:
+
+- `strict` — compute postflight signals and emit advisories, but suppress auto-adjustments (threshold nudges, etc.). Use for DQBench / regression / reproducibility runs.
+- `allow_remote_assets` — permit `embedding`, `record_embedding`, and cross-encoder rerank scorers. Default `False` demotes them so auto-config is offline-safe and never triggers a surprise HuggingFace download.
+
+The returned config carries `config._preflight_report: PreflightReport` (underscore — private-by-convention but stable across v1.5.x).
+
+---
+
+## Verification (v1.5.0)
+
+The preflight + postflight layer validates an auto-generated config against the data it was built for. `auto_configure_df` runs preflight automatically at the end; the pipeline runs postflight automatically after scoring. Both are also callable directly.
+
+### preflight
+
+```python
+gm.preflight(
+    df: pl.DataFrame,
+    config: GoldenMatchConfig,
+    *,
+    profiles: list[ColumnProfile] | None = None,
+    allow_remote_assets: bool = False,
+) -> PreflightReport
+```
+
+Runs 6 checks on `(df, config)`:
+
+1. **Column resolution** — every column referenced by blocking/matchkeys exists, or is a pipeline-synthesized `__mk_*`, or is a domain-extracted column recoverable by enabling `config.domain` (auto-repaired when a domain profile was stashed during auto-config).
+2. **Exact-matchkey cardinality** — drops keys with ratio >= 0.99 (near-unique, no pair ever agrees) or < 0.01 (near-constant, produces giant blocks).
+3. **Block-size sanity** — samples blocking keys and flags blocks that would stall the scorer.
+4. **Remote-asset demotion** — `embedding` / `record_embedding` / cross-encoder rerank scorers are demoted unless `allow_remote_assets=True`.
+5. **Weight confidence capping** — matchkey fields with profile confidence < 0.5 cap at weight 0.3 (requires `profiles` kwarg).
+6. **Domain auto-repair** — when a column like `__title_key__` is missing but a domain profile is available, enables `config.domain` so the pipeline produces the column at runtime.
+
+Auto-repairs what it can (setting `finding.repaired = True`) and records unrepairable issues as `severity="error"` findings. `auto_configure_df` raises `ConfigValidationError` if `report.has_errors`.
+
+```python
+report = gm.preflight(df, config)
+for f in report.findings:
+    print(f"[{f.severity}] {f.check}: {f.message} (repaired={f.repaired})")
+```
+
+### postflight
+
+```python
+gm.postflight(
+    df: pl.DataFrame,
+    config: GoldenMatchConfig,
+    *,
+    pair_scores: list[tuple[int, int, float]],
+    current_threshold: float | None = None,
+) -> PostflightReport
+```
+
+Runs 4 signals on scored pairs:
+
+- **Score histogram + bimodality** — if the score distribution is clearly bimodal (valley depth ratio < 0.5) and the valley is > 0.05 away from the current threshold, emits a `PostflightAdjustment` nudging the threshold to the valley. Suppressed under `strict=True`.
+- **Blocking recall estimate** — gated at >= 10K rows; returns `"deferred"` below that.
+- **Preliminary cluster sizes + oversized-cluster bottleneck pair** — p50/p95/p99/max plus a list of oversized clusters with their weakest edge.
+- **Threshold-band overlap** — fraction of pairs within 0.02 of the threshold. Advises `--llm-auto` when > 20% and LLM scorer is off.
+
+```python
+report = gm.postflight(df, config, pair_scores=scored, current_threshold=0.85)
+print(report.signals["threshold_overlap_pct"])
+for adj in report.adjustments:
+    print(f"{adj.field}: {adj.from_value} -> {adj.to_value} ({adj.reason})")
+```
+
+### Report shapes
+
+```python
+@dataclass
+class PreflightFinding:
+    check: str                    # "missing_column" | "cardinality" | "block_size" |
+                                  # "remote_asset" | "weight_confidence"
+    severity: str                 # "error" | "warning" | "info"
+    subject: str                  # column / matchkey name
+    message: str
+    repaired: bool
+    repair_note: str | None
+
+@dataclass
+class PreflightReport:
+    findings: list[PreflightFinding]
+    config_was_modified: bool
+    has_errors: bool              # property: True if any unrepaired error
+
+class ConfigValidationError(Exception):
+    report: PreflightReport       # full report attached for programmatic inspection
+
+@dataclass
+class PostflightAdjustment:
+    field: str                    # e.g. "threshold"
+    from_value: Any
+    to_value: Any
+    reason: str
+    signal: str                   # which signal motivated the change
+
+@dataclass
+class PostflightReport:
+    signals: PostflightSignals    # TypedDict, schema below
+    adjustments: list[PostflightAdjustment]
+    advisories: list[str]
+```
+
+### PostflightSignals schema
+
+The `signals` dict is a stable TypedDict contract (defined in `goldenmatch/core/autoconfig_verify.py`):
+
+```python
+class PostflightSignals(TypedDict):
+    score_histogram: ScoreHistogram           # {"bins": list[float], "counts": list[int]}
+    blocking_recall: float | Literal["deferred"]  # "deferred" when <10K rows
+    block_size_percentiles: BlockSizePercentiles  # {"p50", "p95", "p99", "max"}
+    threshold_overlap_pct: float              # fraction of pairs within 0.02 of threshold
+    total_pairs_scored: int
+    current_threshold: float
+    preliminary_cluster_sizes: ClusterSizePercentiles
+        # {"p50", "p95", "p99", "max", "count"}
+    oversized_clusters: list[OversizedCluster]
+        # each: {"cluster_id": int, "size": int, "bottleneck_pair": [int, int]}
+```
+
+`ScoreHistogram`, `BlockSizePercentiles`, `ClusterSizePercentiles`, `OversizedCluster` are all TypedDicts — import them from `goldenmatch.core.autoconfig_verify` if you want to type-check consumer code.
+
+### Where the reports live
+
+- `config._preflight_report: PreflightReport | None` — set by `auto_configure_df`. Underscore-prefixed, documented as private-by-convention; stable contract.
+- `DedupeResult.postflight_report: PostflightReport | None` — set by the pipeline after scoring.
+- `MatchResult.postflight_report: PostflightReport | None` — same for match flows.
 
 ---
 

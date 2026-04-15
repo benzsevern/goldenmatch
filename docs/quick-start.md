@@ -49,6 +49,30 @@ result.golden  # Polars DataFrame of canonical records
 
 ---
 
+## Inspecting the verification report (v1.5.0)
+
+Zero-config runs attach a `PostflightReport` to the result — score-distribution signals, cluster-size percentiles, threshold-band overlap, plus any auto-applied adjustments and human-readable advisories.
+
+```python
+result = gm.dedupe_df(df)
+if result.postflight_report:
+    for adv in result.postflight_report.advisories:
+        print(f"advisory: {adv}")
+    for adj in result.postflight_report.adjustments:
+        print(f"adjusted {adj.field}: {adj.from_value} -> {adj.to_value} ({adj.reason})")
+```
+
+The auto-generated config also carries a `PreflightReport` for the checks that ran during `auto_configure_df`:
+
+```python
+for finding in result.config._preflight_report.findings:
+    print(f"[{finding.severity}] {finding.check}: {finding.message}")
+```
+
+See [Verification](python-api.html#verification-v150) in the Python API docs for the full signatures and signal schema.
+
+---
+
 ## Match two files
 
 ```python
