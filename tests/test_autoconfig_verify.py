@@ -408,9 +408,18 @@ def test_preflight_check5_drops_empty_matchkey_after_record_embedding_removal():
 
 
 def test_auto_configure_df_dblp_acm_does_not_crash():
+    """Regression test for the v1.5.0 preflight fix: zero-config dedupe_df
+    on biblio-style data no longer crashes with 'Missing required columns'.
+
+    Benchmark datasets are gitignored; CI skips gracefully. Full integration
+    coverage lives in tests/test_autoconfig_benchmarks.py (marked @benchmark).
+    """
     from pathlib import Path
+    import pytest
     from goldenmatch._api import dedupe_df
     d = Path("tests/benchmarks/datasets/DBLP-ACM")
+    if not (d / "DBLP2.csv").exists():
+        pytest.skip("DBLP-ACM dataset not present (gitignored, local-dev only)")
     dblp = pl.read_csv(d / "DBLP2.csv", encoding="utf8-lossy", ignore_errors=True)
     acm  = pl.read_csv(d / "ACM.csv", encoding="utf8-lossy", ignore_errors=True)
     df = pl.concat([dblp, acm], how="diagonal_relaxed")
