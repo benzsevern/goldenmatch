@@ -412,3 +412,31 @@ def test_auto_configure_df_dblp_acm_does_not_crash():
     df = pl.concat([dblp, acm], how="diagonal_relaxed")
     result = dedupe_df(df)
     assert result is not None
+
+
+def test_dedupe_result_has_postflight_report_field():
+    from goldenmatch._api import DedupeResult, MatchResult
+    assert "postflight_report" in DedupeResult.__annotations__
+    assert "postflight_report" in MatchResult.__annotations__
+
+
+def test_postflight_attached_after_dedupe_via_autoconfig():
+    import polars as pl
+    from goldenmatch._api import dedupe_df
+    df = pl.DataFrame({
+        "name": [f"alice{i}" for i in range(50)] + [f"bob{i}" for i in range(50)],
+        "zip": ["90210"] * 100,
+    })
+    result = dedupe_df(df)  # zero-config -> postflight must run
+    assert result.postflight_report is not None
+    assert "score_histogram" in result.postflight_report.signals
+
+
+def test_postflight_attached_after_match_via_autoconfig():
+    import polars as pl
+    from goldenmatch._api import match_df
+    target = pl.DataFrame({"name": [f"alice{i}" for i in range(50)]})
+    reference = pl.DataFrame({"name": [f"alice{i}" for i in range(50)]})
+    result = match_df(target, reference)  # zero-config
+    assert result.postflight_report is not None
+    assert "score_histogram" in result.postflight_report.signals

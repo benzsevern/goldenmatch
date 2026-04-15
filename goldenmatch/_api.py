@@ -19,6 +19,8 @@ from typing import Any
 
 import polars as pl
 
+from goldenmatch.core.autoconfig_verify import PostflightReport
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,6 +53,7 @@ class DedupeResult:
     stats: dict = field(default_factory=dict)
     scored_pairs: list[tuple[int, int, float]] = field(default_factory=list)
     config: Any = None
+    postflight_report: PostflightReport | None = None
 
     def to_csv(self, path: str, which: str = "golden") -> Path:
         """Write results to CSV.
@@ -142,6 +145,7 @@ class MatchResult:
     matched: pl.DataFrame | None = None
     unmatched: pl.DataFrame | None = None
     stats: dict = field(default_factory=dict)
+    postflight_report: PostflightReport | None = None
 
     def to_csv(self, path: str) -> Path:
         """Write matched results to CSV."""
@@ -294,6 +298,15 @@ def dedupe_df(
 
     Returns:
         DedupeResult with golden records, clusters, dupes, unique, and stats.
+
+    Notes:
+        Zero-config paths call ``auto_configure_df`` internally. If preflight
+        finds an unrepairable issue, ``ConfigValidationError`` (from
+        ``goldenmatch.core.autoconfig_verify``) propagates unchanged —
+        callers that want a partial config can catch it and inspect
+        ``err.report.findings``. The returned result's ``postflight_report``
+        is populated when auto-config was used; ``None`` for hand-written
+        configs.
     """
     from goldenmatch.core.pipeline import run_dedupe_df
 
@@ -365,6 +378,15 @@ def match_df(
 
     Returns:
         MatchResult with matched and unmatched DataFrames.
+
+    Notes:
+        Zero-config paths call ``auto_configure_df`` internally. If preflight
+        finds an unrepairable issue, ``ConfigValidationError`` (from
+        ``goldenmatch.core.autoconfig_verify``) propagates unchanged —
+        callers that want a partial config can catch it and inspect
+        ``err.report.findings``. The returned result's ``postflight_report``
+        is populated when auto-config was used; ``None`` for hand-written
+        configs.
     """
     from goldenmatch.core.pipeline import run_match_df
 
