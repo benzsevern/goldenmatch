@@ -71,6 +71,21 @@ def test_postflight_unimodal_histogram_no_adjustment():
     assert not any(adj.field == "threshold" for adj in report.adjustments)
 
 
+def test_postflight_blocking_recall_gated_below_10k():
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    from goldenmatch.core.autoconfig_verify import postflight
+    df = pl.DataFrame({"name": [f"n{i}" for i in range(500)]})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["name"])]),
+        matchkeys=[MatchkeyConfig(name="mk", type="weighted", threshold=0.7, fields=[
+            MatchkeyField(field="name", scorer="token_sort", weight=1.0)])],
+    )
+    report = postflight(df, cfg, pair_scores=[(0, 1, 0.9)])
+    assert report.signals.get("blocking_recall") is None  # gated below 10K
+
+
 def test_postflight_strict_mode_no_adjustment():
     """Strict mode: all signals computed, zero adjustments."""
     import random
