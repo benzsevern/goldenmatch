@@ -4,7 +4,9 @@ import {
   stripConventionPrivate,
   ConfigValidationError,
   type PreflightFinding,
+  type PostflightReport,
 } from "../../src/core/autoconfigVerify.js";
+import type { GoldenMatchConfig } from "../../src/core/types.js";
 
 describe("PreflightReport shape", () => {
   it("makePreflightReport computes hasErrors from findings", () => {
@@ -53,6 +55,46 @@ describe("PreflightReport shape", () => {
     expect(exception.message).toContain("missing_column");
   });
 });
+
+describe("GoldenMatchConfig + result types", () => {
+  it("GoldenMatchConfig allows _preflightReport assignment", () => {
+    const cfg: GoldenMatchConfig = { matchkeys: [] };
+    const report = makePreflightReport([], false);
+    cfg._preflightReport = report;
+    expect(cfg._preflightReport).toBe(report);
+  });
+});
+
+// Type-level compile check — no runtime assertion. If these fail to compile,
+// DedupeResult/MatchResult is missing `postflightReport`.
+const _postflightReportTypeCheck = (r: PostflightReport) => {
+  type DedupeResultShape = import("../../src/core/types.js").DedupeResult;
+  type MatchResultShape = import("../../src/core/types.js").MatchResult;
+  const _d: DedupeResultShape = {
+    config: {} as GoldenMatchConfig,
+    duplicates: [],
+    unique: [],
+    golden: [],
+    stats: {
+      totalRecords: 0,
+      duplicateGroups: 0,
+      duplicates: 0,
+      unique: 0,
+      matchRate: 0,
+      runtime: 0,
+    },
+    clusters: {} as Record<number, unknown>,
+    postflightReport: r,
+  } as unknown as DedupeResultShape;
+  const _m: MatchResultShape = {
+    matched: [],
+    unmatched: [],
+    stats: {} as unknown,
+    postflightReport: r,
+  } as unknown as MatchResultShape;
+  return [_d, _m];
+};
+void _postflightReportTypeCheck;
 
 describe("stripConventionPrivate", () => {
   it("removes underscore-prefixed keys", () => {
