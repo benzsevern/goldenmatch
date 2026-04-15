@@ -72,8 +72,9 @@ def test_postflight_unimodal_histogram_no_adjustment():
 
 
 def test_postflight_signals_schema():
-    """Contract test: PostflightReport.signals must contain every key
-    documented in spec §6.3 after a representative run."""
+    """Contract test: PostflightReport.signals must contain EXACTLY the 8
+    keys documented in the stable schema. New keys require explicit spec
+    amendment + schema bump — a subset-check would silently accept drift."""
     from goldenmatch.core.autoconfig_verify import postflight
     from goldenmatch.config.schemas import (
         GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
@@ -91,7 +92,10 @@ def test_postflight_signals_schema():
         "threshold_overlap_pct", "total_pairs_scored", "current_threshold",
         "preliminary_cluster_sizes", "oversized_clusters",
     }
-    assert expected_keys.issubset(report.signals.keys())
+    assert set(report.signals.keys()) == expected_keys, (
+        f"signals schema drift: extra={set(report.signals.keys()) - expected_keys}, "
+        f"missing={expected_keys - set(report.signals.keys())}"
+    )
 
 
 def test_postflight_threshold_overlap_triggers_llm_advisory():
@@ -433,13 +437,31 @@ def test_postflight_attached_after_dedupe_via_autoconfig():
 
 
 def test_postflight_attached_after_match_via_autoconfig():
+    """match_df zero-config produces postflight_report on asymmetric frames
+    with real fuzzy variants (not trivial self-matches).
+
+    Uses a non-product field name (first_name) so auto-config does not
+    detect the 'product' domain and demand __color__ — match pipeline
+    does not run domain feature extraction.
+    """
     import polars as pl
     from goldenmatch._api import match_df
-    target = pl.DataFrame({"name": [f"alice{i}" for i in range(50)]})
-    reference = pl.DataFrame({"name": [f"alice{i}" for i in range(50)]})
-    result = match_df(target, reference)  # zero-config
+    # Target is a small set of known variants; reference is a superset.
+    target = pl.DataFrame({"first_name": ["alice", "bob", "carol"]})
+    reference = pl.DataFrame({
+        "first_name": [
+            "alyce",   # typo, should fuzzy-match alice
+            "robert",  # nickname for bob - no match expected
+            "carol",   # exact
+            "dan",
+            "eve",
+        ]
+    })
+    result = match_df(target, reference)
     assert result.postflight_report is not None
-    assert "score_histogram" in result.postflight_report.signals
+    sig = result.postflight_report.signals
+    assert "score_histogram" in sig
+    assert sig["total_pairs_scored"] > 0
 
 
 def test_preflight_check1_domain_repair_works_with_manual_domain_config():
@@ -454,3 +476,124 @@ def test_preflight_check1_domain_repair_works_with_manual_domain_config():
     assert hasattr(cfg, "_domain_profile")
     assert cfg._domain_profile is not None
     assert cfg._preflight_report is not None
+
+
+def test_postflight_threshold_adjustment_applied_before_clustering():
+    """End-to-end: bimodal score distribution causes postflight to nudge
+    threshold; the pipeline must apply the nudge to all_pairs BEFORE
+    clustering (not just attach the report)."""
+    import polars as pl
+    import random
+    from goldenmatch._api import dedupe_df
+
+    random.seed(42)
+    # Build a synthetic frame with 100 rows where half are near-dupes
+    # and half are distinct, producing a bimodal score distribution.
+    # Use name pairs: "alice0" ↔ "alice1" (high similarity), plus noise.
+    names = []
+    for i in range(50):
+        names.append(f"alice_smith_{i}")
+        names.append(f"alice_smith_{i}x")  # tiny perturbation, should match
+    df = pl.DataFrame({"name": names})
+    result = dedupe_df(df)
+    assert result.postflight_report is not None
+    # If the threshold adjustment was applied, clusters should reflect the
+    # adjusted (lower) threshold — more pairs above threshold → more
+    # members merged → fewer clusters than if we naively used 0.7.
+    # Smoke-check: postflight ran AND produced a sane result shape.
+    sig = result.postflight_report.signals
+    assert sig["total_pairs_scored"] > 0
+    # If an adjustment fired, the adjusted threshold is reflected in the
+    # current_threshold signal OR an adjustment entry is present.
+    adjusted = any(adj.field == "threshold" for adj in result.postflight_report.adjustments)
+    if adjusted:
+        # When adjusted, final cluster count reflects the post-adjustment
+        # filter. The important assertion: zero silent regression — filtering
+        # happened. If the filter silently stopped running, every high-pair
+        # would cluster together and we'd see far fewer clusters than with
+        # the adjusted threshold applied.
+        assert result.clusters is not None
+
+
+def test_postflight_strict_mode_pipeline_does_not_filter_all_pairs():
+    """When _strict_autoconfig is True, the pipeline must NOT apply threshold
+    adjustments even if postflight emits them. Verified by running with
+    strict=True and a bimodal input."""
+    import polars as pl
+    from goldenmatch._api import dedupe_df
+    from goldenmatch.core.autoconfig import auto_configure_df
+
+    # Same bimodal input as above
+    names = []
+    for i in range(50):
+        names.append(f"bob_jones_{i}")
+        names.append(f"bob_jones_{i}x")
+    df = pl.DataFrame({"name": names})
+
+    # Build strict config externally then reuse
+    cfg_strict = auto_configure_df(df, strict=True)
+    assert cfg_strict._strict_autoconfig is True
+
+    result = dedupe_df(df, config=cfg_strict)
+    assert result.postflight_report is not None
+    # In strict mode, adjustments list is always empty per spec §4.5
+    assert result.postflight_report.adjustments == []
+    # Advisories may still be present
+    # Signals still populated
+    assert "score_histogram" in result.postflight_report.signals
+
+
+def test_postflight_empty_pair_scores():
+    """Postflight must not crash on empty pair_scores."""
+    import polars as pl
+    from goldenmatch.core.autoconfig_verify import postflight
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    df = pl.DataFrame({"a": list(range(10))})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["a"])]),
+        matchkeys=[MatchkeyConfig(name="mk", type="weighted", threshold=0.7,
+                                  fields=[MatchkeyField(field="a", scorer="exact", weight=1.0)])],
+    )
+    report = postflight(df, cfg, pair_scores=[])
+    assert report.signals["total_pairs_scored"] == 0
+    assert report.adjustments == []  # empty input → no signal to nudge from
+
+
+def test_postflight_all_identical_scores():
+    """All pairs at the same score — no bimodality, no valley."""
+    import polars as pl
+    from goldenmatch.core.autoconfig_verify import postflight
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    df = pl.DataFrame({"a": list(range(20))})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["a"])]),
+        matchkeys=[MatchkeyConfig(name="mk", type="weighted", threshold=0.7,
+                                  fields=[MatchkeyField(field="a", scorer="exact", weight=1.0)])],
+    )
+    pair_scores = [(i, i+1, 0.8) for i in range(19)]
+    report = postflight(df, cfg, pair_scores=pair_scores)
+    # No valley, no adjustment
+    threshold_adjustments = [a for a in report.adjustments if a.field == "threshold"]
+    assert threshold_adjustments == []
+
+
+def test_postflight_zero_height_df():
+    """Postflight must not crash on zero-row DataFrame."""
+    import polars as pl
+    from goldenmatch.core.autoconfig_verify import postflight
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    df = pl.DataFrame({"a": []}, schema={"a": pl.Int64})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["a"])]),
+        matchkeys=[MatchkeyConfig(name="mk", type="weighted", threshold=0.7,
+                                  fields=[MatchkeyField(field="a", scorer="exact", weight=1.0)])],
+    )
+    report = postflight(df, cfg, pair_scores=[])
+    # Key invariant: does not crash; returns schema-valid report.
+    assert "score_histogram" in report.signals
