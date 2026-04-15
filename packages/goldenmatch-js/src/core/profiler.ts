@@ -16,6 +16,7 @@ export type ColumnType =
   | "phone"
   | "zip"
   | "date"
+  | "year"
   | "name"
   | "geo"
   | "id"
@@ -61,6 +62,18 @@ const DATE_VALUE_RES: readonly RegExp[] = [
 ];
 const ZIP_VALUE_RE = /^\d{5}(-?\d{4})?$/;
 const NAME_VALUE_RE = /^[A-Za-z][A-Za-z \-']{0,28}[A-Za-z]$|^[A-Za-z]{2,3}$/;
+const YEAR_NAME_RE = /(^|_)(year|yr)(_|$)/i;
+
+/**
+ * Returns true if the value looks like a 4-digit year in [1900, 2100].
+ * Accepts integer-shaped strings and float-promoted forms like "1999.0".
+ */
+function isYearValue(v: string): boolean {
+  const normalized = v.replace(/\.0+$/, "");
+  const n = Number(normalized);
+  if (Number.isNaN(n) || !Number.isFinite(n) || !Number.isInteger(n)) return false;
+  return n >= 1900 && n <= 2100;
+}
 
 // ---------------------------------------------------------------------------
 // Per-column profiling
@@ -84,6 +97,8 @@ function guessTypeByName(columnName: string): ColumnType | null {
   if (/email|e_mail|e-mail/i.test(lname)) return "email";
   if (/phone|tel(?!e)|mobile|cell/i.test(lname)) return "phone";
   if (/zip|postal|postcode/i.test(lname)) return "zip";
+  // Year name heuristic checked BEFORE date to avoid "birth_year" -> "date".
+  if (YEAR_NAME_RE.test(lname)) return "year";
   if (/date|created|modified|updated|_at$|birth|dob/i.test(lname)) return "date";
   if (/^(city|state|county|country|region|province)/i.test(lname)) return "geo";
   if (/city_desc|state_cd|country_code|state_code/i.test(lname)) return "geo";
@@ -123,6 +138,14 @@ function guessTypeByData(values: readonly string[]): ColumnType | null {
     0,
   );
   if (zipCount / n > 0.6) return "zip";
+
+  // Year: 4-digit integers in [1900, 2100] (also accepts "1999.0").
+  // Checked before "date" and "numeric" so 4-digit years don't fall through.
+  let yearCount = 0;
+  for (const v of values) {
+    if (isYearValue(v)) yearCount++;
+  }
+  if (yearCount / n >= 0.95) return "year";
 
   // Date
   let dateCount = 0;
@@ -172,6 +195,7 @@ function guessTypeAndConfidence(
     // data heuristic wins otherwise. Confidence 0.7 either way (only one "source of truth").
     const nameAuthoritative =
       nameType === "date" ||
+      nameType === "year" ||
       nameType === "geo" ||
       nameType === "id" ||
       nameType === "email" ||

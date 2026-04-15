@@ -57,9 +57,10 @@ const DATE_NAME_PATTERNS = [
   /modified/i,
   /updated/i,
   /_at$/i,
-  /birth/i,
+  /birth(?!_year)/i, // "birth" but not "birth_year" — year takes precedence
   /dob/i,
 ];
+const YEAR_NAME_PATTERNS = [/(^|_)(year|yr)(_|$)/i];
 const ID_NAME_PATTERNS = [
   /^id$/i,
   /_id$/i,
@@ -96,6 +97,7 @@ type ClassifiedKind =
   | "zip"
   | "geo"
   | "date"
+  | "year"
   | "name"
   | "id"
   | "numeric"
@@ -118,12 +120,18 @@ function classifyColumn(profile: ColumnProfile): ClassifiedKind {
     !nameMatches(name, NAME_NAME_PATTERNS) &&
     !nameMatches(name, GEO_NAME_PATTERNS) &&
     !nameMatches(name, DATE_NAME_PATTERNS) &&
+    !nameMatches(name, YEAR_NAME_PATTERNS) &&
+    profile.inferredType !== "year" &&
     (profile.inferredType === "phone" ||
       profile.inferredType === "zip" ||
       profile.inferredType === "numeric")
   ) {
     return "id";
   }
+
+  // Year checked before date so "birth_year" routes to year, not date.
+  if (nameMatches(name, YEAR_NAME_PATTERNS)) return "year";
+  if (profile.inferredType === "year") return "year";
 
   // Date is checked first so that date-like columns never get misclassified
   // as phones by the profiler's value heuristic.
@@ -162,13 +170,14 @@ function buildExactMatchkeys(
   const out: MatchkeyConfig[] = [];
   for (const p of profiles) {
     const kind = classifyColumn(p);
-    // zip/geo are blocking signals, NOT identity claims.
+    // zip/geo/year are blocking signals, NOT identity claims.
     // id/numeric/date are skipped from scoring (Python parity: id is a
     // primary-key column, not a match signal).
     if (
       kind === "zip" ||
       kind === "geo" ||
       kind === "date" ||
+      kind === "year" ||
       kind === "text" ||
       kind === "id" ||
       kind === "numeric"
@@ -303,6 +312,20 @@ function buildBlocking(profiles: readonly ColumnProfile[]): BlockingConfig {
       transforms: ["digits_only", "substring:0:5"],
     });
     break;
+  }
+
+  if (keys.length === 0) {
+    for (const p of profiles) {
+      const kind = classifyColumn(p);
+      if (kind !== "year") continue;
+      if (p.nullRate > 0.2) continue;
+      if (p.cardinalityRatio >= 0.95) continue;
+      keys.push({
+        fields: [p.name],
+        transforms: ["strip"],
+      });
+      break;
+    }
   }
 
   if (keys.length === 0) {
