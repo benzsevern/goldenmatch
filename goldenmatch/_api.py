@@ -264,6 +264,7 @@ def dedupe(
         stats=_extract_stats(result),
         scored_pairs=_extract_pairs(result),
         config=cfg,
+        postflight_report=result.get("postflight_report"),
     )
 
 
@@ -348,6 +349,7 @@ def dedupe_df(
         stats=_extract_stats(result),
         scored_pairs=_extract_pairs(result),
         config=config,
+        postflight_report=result.get("postflight_report"),
     )
 
 

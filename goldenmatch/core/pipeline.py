@@ -242,6 +242,13 @@ def _run_dedupe_pipeline(
         # when auto_configure_df (via preflight Check 1) decided it should.
         if auto_cfg.domain is not None:
             config.domain = auto_cfg.domain
+        # Propagate preflight-verification markers so postflight (later in
+        # this function) knows auto-config was used and whether strict mode
+        # is on. These are underscore-private attrs, not Pydantic fields.
+        if getattr(auto_cfg, "_preflight_report", None) is not None:
+            config._preflight_report = auto_cfg._preflight_report
+        if getattr(auto_cfg, "_strict_autoconfig", False):
+            config._strict_autoconfig = True
         matchkeys = config.get_matchkeys()
         logger.info("Auto-configured from cleaned data: %d matchkeys", len(matchkeys))
         combined_lf = combined_df_tmp.lazy()
@@ -422,6 +429,21 @@ def _run_dedupe_pipeline(
         except ImportError as e:
             logger.warning("LLM boost unavailable: %s", e)
 
+    # ── Step 3.6: POSTFLIGHT (auto-config only) ──
+    # Postflight verification (spec §6). Signals are computed from the
+    # unadjusted pair list; threshold adjustments (if any, non-strict only)
+    # are then applied to all_pairs before clustering. This is intentional:
+    # signals reflect what postflight actually observed; downstream clustering
+    # reflects the adjusted threshold. Documented in spec §6.1.
+    postflight_report = None
+    if getattr(config, "_preflight_report", None) is not None:
+        from goldenmatch.core.autoconfig_verify import postflight as _postflight
+        postflight_report = _postflight(collected_df, config, pair_scores=all_pairs)
+        if not getattr(config, "_strict_autoconfig", False):
+            for adj in postflight_report.adjustments:
+                if adj.field == "threshold":
+                    all_pairs = [p for p in all_pairs if p[2] >= adj.to_value]
+
     # ── Step 4: CLUSTER ──
     all_ids = collected_df["__row_id__"].to_list()
     max_cluster_size = 100
@@ -549,6 +571,7 @@ def _run_dedupe_pipeline(
         "dupes": dupes_df,
         "report": report,
         "quarantine": quarantine_df,
+        "postflight_report": postflight_report,
     }
 
     return results
