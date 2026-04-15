@@ -635,6 +635,20 @@ function signalBlockingRecall(): "deferred" {
   return "deferred";
 }
 
+function signalThresholdOverlap(
+  pairScores: readonly { score: number }[],
+  threshold: number,
+): number {
+  if (pairScores.length === 0) return 0;
+  const lo = threshold - 0.02;
+  const hi = threshold + 0.02;
+  let inBand = 0;
+  for (const p of pairScores) {
+    if (p.score >= lo && p.score <= hi) inBand += 1;
+  }
+  return inBand / pairScores.length;
+}
+
 function signalClusterSizes(
   pairScores: readonly { idA: number; idB: number; score: number }[],
   threshold: number,
@@ -743,13 +757,22 @@ export function postflight(
     options.pairScores,
     currentThreshold,
   );
+  const overlapPct = signalThresholdOverlap(
+    options.pairScores,
+    currentThreshold,
+  );
+  if (overlapPct > 0.2 && config.llmScorer?.enabled !== true) {
+    advisories.push(
+      `${(overlapPct * 100).toFixed(1)}% of pairs within threshold ±0.02 — consider enabling LLM auto mode for calibration`,
+    );
+  }
 
-  // Placeholder values for signals added in Tasks 3.4-3.5.
+  // Placeholder values for signals added in Task 3.5.
   const signals: PostflightSignals = {
     scoreHistogram: hist.histogram,
     blockingRecall: signalBlockingRecall(),
     blockSizePercentiles: { p50: 0, p95: 0, p99: 0, max: 0 },
-    thresholdOverlapPct: 0,
+    thresholdOverlapPct: overlapPct,
     totalPairsScored: options.pairScores.length,
     currentThreshold,
     preliminaryClusterSizes: clusterResult.percentiles,

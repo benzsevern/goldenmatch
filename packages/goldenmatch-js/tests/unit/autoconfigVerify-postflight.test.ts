@@ -100,6 +100,23 @@ describe("postflight: score histogram", () => {
     expect(inputKeys.has(canonKey(bp[0]!, bp[1]!))).toBe(true);
   });
 
+  it("emits llm advisory when >20% of pairs in threshold band and llm disabled", () => {
+    const inBand = Array.from({ length: 300 }, (_, i) => ({
+      idA: i, idB: i + 10000, score: 0.69,
+    }));
+    const outBand = Array.from({ length: 700 }, (_, i) => ({
+      idA: i + 20000, idB: i + 30000, score: 0.2,
+    }));
+    const rows = Array.from({ length: 50 }, (_, i) => ({ name: `x${i}` }));
+    const report = postflight(rows, makeCfg(), {
+      pairScores: [...inBand, ...outBand],
+    });
+    expect(report.signals.thresholdOverlapPct).toBeGreaterThan(0.2);
+    expect(
+      report.advisories.some((a) => a.toLowerCase().includes("llm")),
+    ).toBe(true);
+  });
+
   it("strict mode: signal computed, adjustments empty", () => {
     const r = seeded(42);
     const pairScores: { idA: number; idB: number; score: number }[] = [];
