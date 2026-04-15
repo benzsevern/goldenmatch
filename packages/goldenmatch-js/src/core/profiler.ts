@@ -18,6 +18,7 @@ export type ColumnType =
   | "date"
   | "year"
   | "name"
+  | "multi_name"
   | "geo"
   | "id"
   | "numeric"
@@ -167,6 +168,28 @@ function guessTypeByData(values: readonly string[]): ColumnType | null {
     if (/^-?\d+(\.\d+)?$/.test(v)) numericCount++;
   }
   if (numericCount / n > 0.8) return "numeric";
+
+  // Multi-name (delimited author/entity list): long text with consistent
+  // comma/semicolon separators. E.g., "Alice Smith, Bob Jones, Carol White".
+  let totalLen = 0;
+  let delimRows = 0;
+  let totalDelims = 0;
+  for (const v of values) {
+    totalLen += v.length;
+    const commas = (v.match(/,/g) ?? []).length;
+    const semis = (v.match(/;/g) ?? []).length;
+    const count = commas + semis;
+    if (count > 0) {
+      delimRows++;
+      totalDelims += count;
+    }
+  }
+  const avgLen = totalLen / n;
+  const delimFraction = delimRows / n;
+  const avgDelimsPerDelimRow = delimRows > 0 ? totalDelims / delimRows : 0;
+  if (avgLen > 30 && delimFraction >= 0.7 && avgDelimsPerDelimRow >= 2) {
+    return "multi_name";
+  }
 
   return null;
 }

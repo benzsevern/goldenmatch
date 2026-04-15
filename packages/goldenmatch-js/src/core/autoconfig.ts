@@ -99,6 +99,7 @@ type ClassifiedKind =
   | "date"
   | "year"
   | "name"
+  | "multi_name"
   | "id"
   | "numeric"
   | "text";
@@ -150,6 +151,10 @@ function classifyColumn(profile: ColumnProfile): ClassifiedKind {
   if (nameMatches(name, ZIP_NAME_PATTERNS) || profile.inferredType === "zip") {
     return "zip";
   }
+  // Multi-name (delimited author/entity list) checked before plain name so
+  // "authors" column with comma-separated values routes to token_sort, not
+  // jaro_winkler.
+  if (profile.inferredType === "multi_name") return "multi_name";
   if (nameMatches(name, NAME_NAME_PATTERNS) || profile.inferredType === "name") {
     return "name";
   }
@@ -229,7 +234,16 @@ function buildWeightedMatchkey(
     const kind = classifyColumn(p);
     if (p.nullRate > 0.5) continue;
 
-    if (kind === "name") {
+    if (kind === "multi_name") {
+      fields.push(
+        makeMatchkeyField({
+          field: p.name,
+          transforms: ["lowercase", "strip", "normalize_whitespace"],
+          scorer: "token_sort",
+          weight: 1.0,
+        }),
+      );
+    } else if (kind === "name") {
       fields.push(
         makeMatchkeyField({
           field: p.name,
