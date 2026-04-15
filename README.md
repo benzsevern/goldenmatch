@@ -1,35 +1,47 @@
 <!-- mcp-name: io.github.benzsevern/goldenmatch -->
-# GoldenMatch
+<div align="center">
+
+# 🟡 GoldenMatch
 
 **Find duplicate records in 30 seconds. No rules to write, no models to train.**
-Built by [Ben Severn](https://bensevern.dev).
+
+*Zero-config entity resolution for Python & TypeScript — with a self-verifying auto-config that tells you when it's unsure.*
+
+<br>
+
+<!-- Packages -->
+[![PyPI](https://img.shields.io/pypi/v/goldenmatch?color=d4a017&label=pypi&logo=pypi&logoColor=white)](https://pypi.org/project/goldenmatch/)
+[![npm](https://img.shields.io/npm/v/goldenmatch?color=cb3837&label=npm&logo=npm&logoColor=white)](https://www.npmjs.com/package/goldenmatch)
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)](https://python.org)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-5fa04e?logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+<!-- Quality -->
+[![CI](https://github.com/benzsevern/goldenmatch/actions/workflows/ci.yml/badge.svg)](https://github.com/benzsevern/goldenmatch/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/benzsevern/goldenmatch/graph/badge.svg)](https://codecov.io/gh/benzsevern/goldenmatch)
+[![DQBench ER](https://img.shields.io/badge/DQBench%20ER-95.30-d4a017?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSIjZmZmIj48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI4Ii8+PC9zdmc+)](https://github.com/benzsevern/dqbench)
+[![F1: 97.2%](https://img.shields.io/badge/DBLP--ACM%20F1-97.2%25-d4a017)](#benchmarks)
+
+<!-- Ecosystem -->
+[![Downloads](https://static.pepy.tech/badge/goldenmatch/month)](https://pepy.tech/project/goldenmatch)
+[![GitHub stars](https://img.shields.io/github/stars/benzsevern/goldenmatch?style=flat&color=d4a017)](https://github.com/benzsevern/goldenmatch/stargazers)
+[![Docs](https://img.shields.io/badge/docs-github.io-d4a017)](https://benzsevern.github.io/goldenmatch/)
+[![Smithery MCP](https://img.shields.io/badge/MCP-smithery-6e40c9)](https://smithery.ai/servers/benzsevern/goldenmatch)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/benzsevern/goldenmatch/blob/main/scripts/gpu_colab_notebook.ipynb)
+
+</div>
 
 ![GoldenMatch Demo](docs/screenshots/demo.svg)
 
 ```bash
 # Python
-pip install goldenmatch
+pip install goldenmatch && goldenmatch dedupe customers.csv
 
 # TypeScript / Node.js
 npm install goldenmatch
 ```
 
-```bash
-goldenmatch dedupe customers.csv
-```
-
-[![PyPI](https://img.shields.io/pypi/v/goldenmatch?color=d4a017)](https://pypi.org/project/goldenmatch/)
-[![npm](https://img.shields.io/npm/v/goldenmatch?color=339933&label=npm)](https://www.npmjs.com/package/goldenmatch)
-[![CI](https://github.com/benzsevern/goldenmatch/actions/workflows/ci.yml/badge.svg)](https://github.com/benzsevern/goldenmatch/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/benzsevern/goldenmatch/graph/badge.svg)](https://codecov.io/gh/benzsevern/goldenmatch)
-[![Downloads](https://static.pepy.tech/badge/goldenmatch/month)](https://pepy.tech/project/goldenmatch)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Docs](https://img.shields.io/badge/docs-benzsevern.github.io%2Fgoldenmatch-d4a017)](https://benzsevern.github.io/goldenmatch/)
-[![DQBench ER](https://img.shields.io/badge/DQBench%20ER-95.30-gold)](https://github.com/benzsevern/dqbench)
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/benzsevern/goldenmatch/blob/main/scripts/gpu_colab_notebook.ipynb)
-
-> **v1.5.0 is out** — auto-config now runs a preflight + postflight verification layer. Bibliographic and domain-extracted schemas no longer crash under zero-config, remote-asset scorers are demoted by default, and every `DedupeResult` carries an inspectable `postflight_report`. See [Auto-Config Verification](#auto-config-verification-v150).
+> **🆕 v1.5.0 (Python) · v0.3.1 (npm)** — Auto-config now runs a **preflight + postflight verification layer**. Biblio / domain-extracted schemas no longer crash under zero-config, remote-asset scorers are demoted by default (offline-safe CI), strict mode for deterministic parity runs, and every `DedupeResult` carries an inspectable `postflight_report`. See [Auto-Config Verification](#auto-config-verification-v150). Built by [Ben Severn](https://bensevern.dev).
 
 ---
 
