@@ -29,6 +29,73 @@ def test_postflight_report_defaults_empty():
     assert r.advisories == []
 
 
+def test_postflight_bimodal_histogram_adjusts_threshold():
+    import random
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    from goldenmatch.core.autoconfig_verify import postflight
+    random.seed(42)
+    pair_scores = []
+    for i in range(500):
+        pair_scores.append((i, i+1000, max(0.0, min(1.0, random.gauss(0.2, 0.08)))))
+    for i in range(500):
+        pair_scores.append((i+2000, i+3000, max(0.0, min(1.0, random.gauss(0.9, 0.05)))))
+    df = pl.DataFrame({"name": [f"x{i}" for i in range(100)]})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["name"])]),
+        matchkeys=[MatchkeyConfig(name="mk", type="weighted", threshold=0.7, fields=[
+            MatchkeyField(field="name", scorer="token_sort", weight=1.0)])],
+    )
+    report = postflight(df, cfg, pair_scores=pair_scores)
+    assert any(adj.field == "threshold" for adj in report.adjustments)
+    adj = next(a for a in report.adjustments if a.field == "threshold")
+    assert 0.3 <= adj.to_value <= 0.7
+
+
+def test_postflight_unimodal_histogram_no_adjustment():
+    import random
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    from goldenmatch.core.autoconfig_verify import postflight
+    random.seed(42)
+    pair_scores = [(i, i+1, random.random()) for i in range(1000)]
+    df = pl.DataFrame({"name": [f"x{i}" for i in range(100)]})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["name"])]),
+        matchkeys=[MatchkeyConfig(name="mk", type="weighted", threshold=0.7, fields=[
+            MatchkeyField(field="name", scorer="token_sort", weight=1.0)])],
+    )
+    report = postflight(df, cfg, pair_scores=pair_scores)
+    assert not any(adj.field == "threshold" for adj in report.adjustments)
+
+
+def test_postflight_strict_mode_no_adjustment():
+    """Strict mode: all signals computed, zero adjustments."""
+    import random
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    from goldenmatch.core.autoconfig_verify import postflight
+    random.seed(42)
+    pair_scores = []
+    for i in range(500):
+        pair_scores.append((i, i+1000, max(0.0, min(1.0, random.gauss(0.2, 0.08)))))
+    for i in range(500):
+        pair_scores.append((i+2000, i+3000, max(0.0, min(1.0, random.gauss(0.9, 0.05)))))
+    df = pl.DataFrame({"name": [f"x{i}" for i in range(100)]})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["name"])]),
+        matchkeys=[MatchkeyConfig(name="mk", type="weighted", threshold=0.7, fields=[
+            MatchkeyField(field="name", scorer="token_sort", weight=1.0)])],
+    )
+    cfg._strict_autoconfig = True
+    report = postflight(df, cfg, pair_scores=pair_scores)
+    assert report.adjustments == []
+    assert "score_histogram" in report.signals
+
+
 def test_preflight_report_dataclass_shape():
     f = PreflightFinding(check="x", severity="info", subject="y",
                          message="z", repaired=False, repair_note=None)

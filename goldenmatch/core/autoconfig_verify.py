@@ -540,6 +540,376 @@ def _check_weight_confidence(
                 report.config_was_modified = True
 
 
+# ── Postflight helpers ──────────────────────────────────────────────────
+
+
+def _signal_score_histogram(
+    pair_scores: "list[tuple[int, int, float]]",
+    current_threshold: float,
+) -> dict[str, Any]:
+    """Build a 100-bin histogram of pair scores and detect bimodality.
+
+    Returns a dict with:
+    - ``histogram``: {"bins": list[float], "counts": list[int]}
+    - ``valley_location``: midpoint of the deepest valley between two local
+      maxima that are >10 bins apart, or None if unimodal.
+    - ``valley_depth_ratio``: valley_count / max(peak_left, peak_right).
+      Lower = deeper valley. Bimodality threshold is ratio < 0.5.
+
+    A distribution is considered bimodal when both a valley and two peaks
+    (separated by >10 bins) exist AND ``valley_depth_ratio < 0.5``.
+    """
+    n_bins = 100
+    bin_edges = [i / n_bins for i in range(n_bins + 1)]
+    counts = [0] * n_bins
+    for _a, _b, s in pair_scores:
+        if s < 0.0:
+            s = 0.0
+        elif s > 1.0:
+            s = 1.0
+        idx = int(s * n_bins)
+        if idx == n_bins:
+            idx = n_bins - 1
+        counts[idx] += 1
+
+    # Smooth with a 5-bin window to reduce sampling noise — bimodality is a
+    # shape property, not a per-bin accident. Raw counts stay in the reported
+    # histogram; smoothing is only used internally for peak/valley detection.
+    def _smooth(vals: list[int]) -> list[float]:
+        out: list[float] = []
+        for i in range(len(vals)):
+            lo = max(0, i - 2)
+            hi = min(len(vals), i + 3)
+            window = vals[lo:hi]
+            out.append(sum(window) / len(window))
+        return out
+
+    smoothed = _smooth(counts)
+    total = sum(counts)
+    mean_bin = total / n_bins if n_bins > 0 else 0.0
+    max_count = max(smoothed) if smoothed else 0.0
+    # A real mode is well above the average bin-count; this filters out the
+    # ~uniform-noise peaks that appear in 1000-sample random data.
+    min_peak_height = max(max_count * 0.3, mean_bin * 2.0)
+
+    peaks: list[int] = []
+    for i in range(n_bins):
+        left = smoothed[i - 1] if i > 0 else -1.0
+        right = smoothed[i + 1] if i < n_bins - 1 else -1.0
+        if smoothed[i] >= left and smoothed[i] >= right and smoothed[i] >= min_peak_height:
+            if smoothed[i] > left or smoothed[i] > right:
+                peaks.append(i)
+
+    # Pick the two tallest peaks that are separated by >10 bins.
+    best_pair: tuple[int, int] | None = None
+    if len(peaks) >= 2:
+        peaks_sorted = sorted(peaks, key=lambda i: smoothed[i], reverse=True)
+        for i_idx, i in enumerate(peaks_sorted):
+            for j in peaks_sorted[i_idx + 1:]:
+                if abs(i - j) > 10:
+                    best_pair = (min(i, j), max(i, j))
+                    break
+            if best_pair is not None:
+                break
+
+    valley_location: float | None = None
+    valley_depth_ratio: float | None = None
+    if best_pair is not None:
+        left_peak, right_peak = best_pair
+        valley_idx = left_peak + 1
+        valley_count = smoothed[valley_idx]
+        for k in range(left_peak + 1, right_peak):
+            if smoothed[k] < valley_count:
+                valley_count = smoothed[k]
+                valley_idx = k
+        peak_min = min(smoothed[left_peak], smoothed[right_peak])
+        if peak_min > 0:
+            # Ratio against the SHALLOWER peak — a true valley has to sag
+            # well below both sides, not just below the taller one. This also
+            # filters uniform noise where one "peak" is a chance spike.
+            valley_depth_ratio = valley_count / peak_min
+            valley_location = (valley_idx + 0.5) / n_bins
+
+    return {
+        "histogram": {"bins": bin_edges, "counts": counts},
+        "valley_location": valley_location,
+        "valley_depth_ratio": valley_depth_ratio,
+    }
+
+
+def _resolve_current_threshold(
+    config: "GoldenMatchConfig", override: float | None
+) -> float:
+    """Return the threshold to evaluate postflight against.
+
+    Order: explicit override > first weighted matchkey's threshold > 0.7.
+    """
+    if override is not None:
+        return float(override)
+    for mk in config.get_matchkeys():
+        if mk.type == "weighted" and mk.threshold is not None:
+            return float(mk.threshold)
+    return 0.7
+
+
+def _signal_blocking_recall(
+    df: "pl.DataFrame",
+    config: "GoldenMatchConfig",
+    pair_scores: "list[tuple[int, int, float]]",
+    current_threshold: float,
+) -> float | None:
+    """Estimate blocking recall by brute-forcing a sample.
+
+    Gated at df.height < 10_000 (returns None).
+
+    TODO(autoconfig-iterative): implement brute-force recall estimation.
+    The C iterative loop (see spec §6) owns this signal; for now we gate
+    and return None on small frames and defer the >=10K path so the
+    postflight orchestrator still ships.
+    """
+    if df.height < 10_000:
+        return None
+    # TODO(autoconfig-iterative): implement brute-force recall estimation
+    # over a uniform 1000-row sample. Reserved for the iterative autoconfig
+    # loop so postflight has a meaningful recall estimate.
+    _ = (config, pair_scores, current_threshold)  # silence unused
+    return None
+
+
+def _signal_cluster_sizes(
+    pair_scores: "list[tuple[int, int, float]]",
+    current_threshold: float,
+) -> dict[str, Any]:
+    """Union-find over above-threshold pairs; report size percentiles and
+    identify oversized clusters (size > 100) with their bottleneck pair.
+    """
+    filtered = [(a, b, s) for a, b, s in pair_scores if s >= current_threshold]
+    if not filtered:
+        return {
+            "preliminary_cluster_sizes": {
+                "p50": 0, "p95": 0, "p99": 0, "max": 0, "count": 0,
+            },
+            "oversized_clusters": [],
+        }
+
+    # Union-find
+    parent: dict[int, int] = {}
+
+    def find(x: int) -> int:
+        while parent.get(x, x) != x:
+            parent[x] = parent.get(parent.get(x, x), parent.get(x, x))
+            x = parent[x]
+        return x
+
+    def union(x: int, y: int) -> None:
+        rx, ry = find(x), find(y)
+        if rx != ry:
+            parent[rx] = ry
+
+    for a, b, _ in filtered:
+        parent.setdefault(a, a)
+        parent.setdefault(b, b)
+        union(a, b)
+
+    # Components: root -> members
+    components: dict[int, list[int]] = {}
+    for node in parent:
+        r = find(node)
+        components.setdefault(r, []).append(node)
+
+    sizes = sorted(len(m) for m in components.values())
+
+    def _percentile(sorted_vals: list[int], q: float) -> int:
+        if not sorted_vals:
+            return 0
+        idx = int(round(q * (len(sorted_vals) - 1)))
+        return sorted_vals[idx]
+
+    percentiles = {
+        "p50": _percentile(sizes, 0.50),
+        "p95": _percentile(sizes, 0.95),
+        "p99": _percentile(sizes, 0.99),
+        "max": sizes[-1] if sizes else 0,
+        "count": len(sizes),
+    }
+
+    oversized: list[dict[str, Any]] = []
+    for cluster_id, members in components.items():
+        if len(members) <= 100:
+            continue
+        member_set = set(members)
+        weakest_pair: tuple[int, int] | None = None
+        weakest_score: float | None = None
+        for a, b, s in filtered:
+            if a in member_set and b in member_set:
+                if weakest_score is None or s < weakest_score:
+                    weakest_score = s
+                    weakest_pair = (a, b)
+        entry: dict[str, Any] = {
+            "cluster_id": int(cluster_id),
+            "size": len(members),
+        }
+        if weakest_pair is not None:
+            entry["bottleneck_pair"] = [int(weakest_pair[0]), int(weakest_pair[1])]
+        oversized.append(entry)
+
+    return {
+        "preliminary_cluster_sizes": percentiles,
+        "oversized_clusters": oversized,
+    }
+
+
+def _signal_threshold_overlap(
+    pair_scores: "list[tuple[int, int, float]]",
+    current_threshold: float,
+) -> float:
+    """Fraction of pairs whose score lies in [threshold - 0.02, threshold + 0.02]."""
+    if not pair_scores:
+        return 0.0
+    lo = current_threshold - 0.02
+    hi = current_threshold + 0.02
+    in_band = sum(1 for _a, _b, s in pair_scores if lo <= s <= hi)
+    return in_band / len(pair_scores)
+
+
+def _signal_block_size_percentiles(
+    df: "pl.DataFrame", config: "GoldenMatchConfig"
+) -> dict[str, Any]:
+    """Compute P50/P95/P99/max block sizes across all blocking keys.
+
+    Mirrors the sampling approach in _check_block_sizes (Preflight Check 4):
+    sample min(df.height, 10_000), build the blocking key expr, group, count.
+    Returns zeros on failure or when blocking is absent.
+    """
+    zero = {"p50": 0, "p95": 0, "p99": 0, "max": 0}
+    if config.blocking is None or df.height == 0:
+        return zero
+
+    from goldenmatch.core.blocker import _build_block_key_expr
+
+    n = min(df.height, 10_000)
+    sample = df.head(n) if df.height > n else df
+
+    keys = list(config.blocking.keys or [])
+    keys.extend(config.blocking.passes or [])
+
+    all_sizes: list[int] = []
+    for key in keys:
+        if not all(f in df.columns for f in key.fields):
+            continue
+        try:
+            expr = _build_block_key_expr(key)
+            sizes_series = (
+                sample.with_columns(expr)
+                .group_by("__block_key__")
+                .len()
+                .get_column("len")
+            )
+        except Exception:
+            continue
+        all_sizes.extend(int(s) for s in sizes_series.to_list())
+
+    if not all_sizes:
+        return zero
+    all_sizes.sort()
+
+    def _percentile(vals: list[int], q: float) -> int:
+        idx = int(round(q * (len(vals) - 1)))
+        return vals[idx]
+
+    return {
+        "p50": _percentile(all_sizes, 0.50),
+        "p95": _percentile(all_sizes, 0.95),
+        "p99": _percentile(all_sizes, 0.99),
+        "max": all_sizes[-1],
+    }
+
+
+def postflight(
+    df: "pl.DataFrame",
+    config: "GoldenMatchConfig",
+    *,
+    pair_scores: "list[tuple[int, int, float]]",
+    current_threshold: float | None = None,
+) -> PostflightReport:
+    """Run all postflight signals on (df, config, pair_scores).
+
+    Populates ``report.signals`` with the stable schema from spec §6.3.
+    When ``config._strict_autoconfig`` is True, signals are still computed
+    but no adjustments are emitted (advisories may still accrue).
+    """
+    report = PostflightReport()
+    threshold = _resolve_current_threshold(config, current_threshold)
+    strict = bool(getattr(config, "_strict_autoconfig", False))
+
+    # Score histogram + bimodality
+    hist = _signal_score_histogram(pair_scores, threshold)
+    report.signals["score_histogram"] = hist["histogram"]
+    valley = hist["valley_location"]
+    depth_ratio = hist["valley_depth_ratio"]
+
+    is_bimodal = (
+        valley is not None
+        and depth_ratio is not None
+        and depth_ratio < 0.5
+    )
+    if is_bimodal and valley is not None:
+        if abs(valley - threshold) > 0.05 and not strict:
+            report.adjustments.append(
+                PostflightAdjustment(
+                    field="threshold",
+                    from_value=threshold,
+                    to_value=round(float(valley), 3),
+                    reason=(
+                        f"score distribution is bimodal; valley at "
+                        f"{valley:.3f} (depth ratio {depth_ratio:.2f}) is far "
+                        f"from current threshold {threshold:.3f}"
+                    ),
+                    signal="score_histogram",
+                )
+            )
+    elif not is_bimodal:
+        report.advisories.append(
+            "score distribution is unimodal; threshold cannot be auto-set."
+        )
+
+    # Blocking recall (gated >=10K rows; otherwise None)
+    report.signals["blocking_recall"] = _signal_blocking_recall(
+        df, config, pair_scores, threshold
+    )
+
+    # Block size percentiles
+    report.signals["block_size_percentiles"] = _signal_block_size_percentiles(
+        df, config
+    )
+
+    # Threshold-band overlap
+    overlap = _signal_threshold_overlap(pair_scores, threshold)
+    report.signals["threshold_overlap_pct"] = overlap
+    llm_enabled = (
+        config.llm_scorer is not None
+        and getattr(config.llm_scorer, "enabled", False) is True
+    )
+    if overlap > 0.20 and not llm_enabled:
+        report.advisories.append(
+            f"{overlap:.1%} of pairs lie within 0.02 of the threshold; "
+            f"consider --llm-auto for threshold-band calibration."
+        )
+
+    # Total pairs scored + current threshold (signal fingerprint)
+    report.signals["total_pairs_scored"] = len(pair_scores)
+    report.signals["current_threshold"] = threshold
+
+    # Preliminary cluster sizes + oversized clusters
+    cluster_info = _signal_cluster_sizes(pair_scores, threshold)
+    report.signals["preliminary_cluster_sizes"] = cluster_info[
+        "preliminary_cluster_sizes"
+    ]
+    report.signals["oversized_clusters"] = cluster_info["oversized_clusters"]
+
+    return report
+
+
 def preflight(
     df: "pl.DataFrame",
     config: "GoldenMatchConfig",
