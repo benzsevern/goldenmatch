@@ -209,6 +209,33 @@ def test_auto_configure_df_attaches_preflight_report():
     assert cfg._preflight_report is not None
 
 
+def test_preflight_check5_drops_empty_matchkey_after_record_embedding_removal():
+    import polars as pl
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    from goldenmatch.core.autoconfig_verify import preflight
+    df = pl.DataFrame({"title": ["a", "b"]})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["title"])]),
+        matchkeys=[
+            # A weighted matchkey with ONLY a record_embedding field — would be
+            # empty after demotion drops it.
+            MatchkeyConfig(name="mk_rec_only", type="weighted", threshold=0.7, fields=[
+                MatchkeyField(scorer="record_embedding", columns=["title"], weight=1.0),
+            ]),
+            # A keeper.
+            MatchkeyConfig(name="mk_keep", type="weighted", threshold=0.7, fields=[
+                MatchkeyField(field="title", scorer="token_sort", weight=1.0),
+            ]),
+        ],
+    )
+    preflight(df, cfg, allow_remote_assets=False)
+    names = [mk.name for mk in cfg.get_matchkeys()]
+    assert "mk_rec_only" not in names
+    assert "mk_keep" in names
+
+
 def test_auto_configure_df_dblp_acm_does_not_crash():
     from pathlib import Path
     from goldenmatch._api import dedupe_df

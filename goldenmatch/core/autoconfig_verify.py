@@ -371,7 +371,9 @@ def _check_remote_assets(
     if llm_enabled:
         return
 
-    for mk in config.get_matchkeys():
+    mks = config.get_matchkeys()
+    to_drop: list = []
+    for mk in mks:
         uses_remote = any(f.scorer in _REMOTE_SCORERS for f in mk.fields)
         uses_rerank = bool(mk.rerank)
         if not (uses_remote or uses_rerank):
@@ -439,6 +441,35 @@ def _check_remote_assets(
                 )
             )
             report.config_was_modified = True
+
+        # If all fields got dropped (e.g. a weighted matchkey whose only field
+        # was record_embedding), remove the zombie matchkey entirely.
+        if not mk.fields:
+            to_drop.append(mk)
+            report.findings.append(
+                PreflightFinding(
+                    check="remote_asset_matchkey_empty",
+                    severity="info",
+                    subject=mk.name,
+                    message=(
+                        f"matchkey '{mk.name}' has no fields left after "
+                        f"record_embedding removal; dropped from config"
+                    ),
+                    repaired=True,
+                    repair_note=(
+                        "matchkey left with zero fields after "
+                        "record_embedding removal — dropped"
+                    ),
+                )
+            )
+            report.config_was_modified = True
+
+    if to_drop:
+        kept_mks = [mk for mk in mks if mk not in to_drop]
+        if config.matchkeys is not None:
+            config.matchkeys = kept_mks
+        elif config.match_settings is not None:
+            config.match_settings.matchkeys = kept_mks
 
 
 def _check_weight_confidence(
