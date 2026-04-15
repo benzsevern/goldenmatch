@@ -377,8 +377,31 @@ def _check_remote_assets(
         if not (uses_remote or uses_rerank):
             continue
 
+        # record_embedding uses the synthetic '__record__' placeholder column —
+        # no real data behind it. Demoting to a per-field scorer like 'ensemble'
+        # would leave the pipeline looking for a column that doesn't exist. Drop
+        # those fields entirely; the remaining per-field fuzzy scorers in the
+        # matchkey already cover offline scoring.
+        kept_fields = []
         for f in mk.fields:
-            if f.scorer in _REMOTE_SCORERS:
+            if f.scorer == "record_embedding":
+                report.findings.append(
+                    PreflightFinding(
+                        check="remote_asset",
+                        severity="warning",
+                        subject=f"{mk.name}.{f.field}",
+                        message=(
+                            "scorer 'record_embedding' dropped (requires model "
+                            "download and the synthetic '__record__' column). "
+                            "Pass allow_remote_assets=True to opt in."
+                        ),
+                        repaired=True,
+                        repair_note="record_embedding field dropped",
+                    )
+                )
+                report.config_was_modified = True
+                continue
+            if f.scorer == "embedding":
                 original = f.scorer
                 f.scorer = "ensemble"
                 report.findings.append(
@@ -396,6 +419,9 @@ def _check_remote_assets(
                     )
                 )
                 report.config_was_modified = True
+            kept_fields.append(f)
+        mk.fields = kept_fields
+
         if uses_rerank:
             mk.rerank = False
             report.findings.append(

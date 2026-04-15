@@ -238,6 +238,10 @@ def _run_dedupe_pipeline(
         config.golden_rules = auto_cfg.golden_rules
         config.llm_scorer = auto_cfg.llm_scorer
         config.memory = auto_cfg.memory
+        # Propagate domain config so pipeline's domain-extraction step runs
+        # when auto_configure_df (via preflight Check 1) decided it should.
+        if auto_cfg.domain is not None:
+            config.domain = auto_cfg.domain
         matchkeys = config.get_matchkeys()
         logger.info("Auto-configured from cleaned data: %d matchkeys", len(matchkeys))
         combined_lf = combined_df_tmp.lazy()

@@ -1175,18 +1175,38 @@ def select_model(row_count: int, has_embedding_columns: bool, threshold: int = 5
 def auto_configure_df(
     df: pl.DataFrame, llm_provider: str | None = None,
     domain_config=None, llm_auto: bool = False,
+    strict: bool = False, allow_remote_assets: bool = False,
 ) -> GoldenMatchConfig:
     """Auto-generate a GoldenMatchConfig from a DataFrame.
 
     Profiles columns by name heuristics and data sampling, then builds
-    matchkeys, blocking, and golden rules automatically.
+    matchkeys, blocking, and golden rules automatically. Runs preflight
+    verification (spec §4) on the resulting config before returning, attaching
+    the `PreflightReport` to the config as ``config._preflight_report``.
 
     Args:
         df: Polars DataFrame to auto-configure for.
+        llm_provider: Optional LLM provider for profiling (openai/anthropic).
+        domain_config: Manual domain override; skips auto-detection.
+        llm_auto: Auto-enable the LLM scorer when an API key is present.
+        strict: Reserved for future use (currently auto_configure_df always
+            raises ConfigValidationError on unrepaired errors). Stashed on the
+            config as ``_strict_autoconfig`` for downstream consumers.
+        allow_remote_assets: When True, keep embedding/record_embedding/
+            rerank scorers. When False (default), preflight demotes them to
+            offline-safe alternatives.
 
     Returns:
         A fully populated GoldenMatchConfig ready for pipeline execution.
     """
+    # Initialized up front so the preflight-wiring block at the bottom can
+    # safely test `if domain_profile is not None` even when the domain
+    # branch below is skipped (e.g. user-provided domain_config).
+    domain_profile = None
+    # Preserve the raw input df for preflight. The in-function `df` variable
+    # gets enriched with __row_id__ / domain-extracted columns; preflight
+    # needs to check against the shape the pipeline will see.
+    df_input = df
     total_rows = df.height
 
     logger.info("Auto-configuring %d rows, %d columns", total_rows, len(df.columns))
@@ -1397,13 +1417,35 @@ def auto_configure_df(
         allow_remote_assets=False,
     )
 
-    return _rebuild_from_decisions(
+    config = _rebuild_from_decisions(
         profiles,
         decisions,
         transient_blocking=blocking,
         llm_scorer_config=llm_scorer_config,
         memory_config=memory_config,
     )
+
+    # ── Preflight verification (spec §4) ──
+    #
+    # Stash the domain profile so preflight Check 1 can auto-repair
+    # `config.domain` when the generated config references
+    # domain-extracted columns (e.g. __title_key__, __model_norm__).
+    # This fixes the DBLP-ACM crash where auto-config emitted
+    # references to columns produced by a disabled pipeline step.
+    from goldenmatch.core.autoconfig_verify import ConfigValidationError, preflight
+
+    if domain_profile is not None and domain_profile.confidence > 0.7:
+        config._domain_profile = domain_profile
+    config._strict_autoconfig = strict
+
+    report = preflight(
+        df_input, config, profiles=profiles,
+        allow_remote_assets=allow_remote_assets,
+    )
+    if report.has_errors:
+        raise ConfigValidationError(report=report)
+    config._preflight_report = report
+    return config
 
 
 def _rebuild_from_decisions(

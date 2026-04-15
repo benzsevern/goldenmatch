@@ -49,12 +49,6 @@
               "lowercase",
               "strip"
             ]
-          },
-          {
-            "field": "__record__",
-            "scorer": "record_embedding",
-            "weight": 1.0,
-            "transforms": []
           }
         ]
       },
@@ -226,12 +220,6 @@
               "lowercase",
               "strip"
             ]
-          },
-          {
-            "field": "__record__",
-            "scorer": "record_embedding",
-            "weight": 1.0,
-            "transforms": []
           }
         ]
       },

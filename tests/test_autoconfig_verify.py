@@ -195,3 +195,26 @@ def test_preflight_check6_caps_weight_for_low_confidence():
     name_f = next(f for mk in cfg.get_matchkeys() for f in mk.fields if f.field == "name")
     assert mystery_f.weight == 0.5
     assert name_f.weight == 1.0
+
+
+def test_auto_configure_df_attaches_preflight_report():
+    from goldenmatch.core.autoconfig import auto_configure_df
+    df = pl.DataFrame({
+        "title": [f"paper {i}" for i in range(50)],
+        "authors": [f"A, B, C{i}" for i in range(50)],
+        "year": [2000 + i % 10 for i in range(50)],
+    })
+    cfg = auto_configure_df(df)
+    assert hasattr(cfg, "_preflight_report")
+    assert cfg._preflight_report is not None
+
+
+def test_auto_configure_df_dblp_acm_does_not_crash():
+    from pathlib import Path
+    from goldenmatch._api import dedupe_df
+    d = Path("tests/benchmarks/datasets/DBLP-ACM")
+    dblp = pl.read_csv(d / "DBLP2.csv", encoding="utf8-lossy", ignore_errors=True)
+    acm  = pl.read_csv(d / "ACM.csv", encoding="utf8-lossy", ignore_errors=True)
+    df = pl.concat([dblp, acm], how="diagonal_relaxed")
+    result = dedupe_df(df)
+    assert result is not None

@@ -1132,7 +1132,9 @@ class TestDataDrivenStrategy:
             "city": ["NYC", "LA", "Chicago", "Houston"],
         })
 
-        config = auto_configure_df(df)
+        # rerank downloads a cross-encoder model; preflight's
+        # allow_remote_assets=False (default) would demote it. Opt in here.
+        config = auto_configure_df(df, allow_remote_assets=True)
         weighted_mks = [mk for mk in config.get_matchkeys() if mk.type == "weighted"]
         assert len(weighted_mks) > 0, "Expected at least one weighted matchkey"
         multi_field = [mk for mk in weighted_mks if len(mk.fields) >= 3]
