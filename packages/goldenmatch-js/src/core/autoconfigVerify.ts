@@ -303,6 +303,67 @@ function checkCardinality(
   return { ...config, matchkeys: kept };
 }
 
+function percentile(sorted: readonly number[], q: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = Math.min(
+    sorted.length - 1,
+    Math.max(0, Math.floor(q * (sorted.length - 1))),
+  );
+  return sorted[idx] ?? 0;
+}
+
+function checkBlockSizes(
+  rows: readonly Record<string, unknown>[],
+  config: GoldenMatchConfig,
+  findings: PreflightFinding[],
+): GoldenMatchConfig {
+  const blocking = config.blocking;
+  if (blocking === undefined || blocking.keys === undefined) return config;
+  if (rows.length === 0) return config;
+
+  const sample = rows.length <= 10_000 ? rows : rows.slice(0, 10_000);
+
+  for (const key of blocking.keys) {
+    if (key.fields.length === 0) continue;
+    const groups = new Map<string, number>();
+    for (const r of sample) {
+      const parts: string[] = [];
+      for (const f of key.fields) {
+        const v = r[f];
+        parts.push(v === null || v === undefined ? "\u0000" : String(v));
+      }
+      const gkey = parts.join("\u0001");
+      groups.set(gkey, (groups.get(gkey) ?? 0) + 1);
+    }
+    if (groups.size === 0) continue;
+    const sizes = [...groups.values()].sort((a, b) => a - b);
+    const p50 = percentile(sizes, 0.5);
+    const p99 = percentile(sizes, 0.99);
+    const subject = key.fields.join("+");
+    if (p99 > 5000) {
+      findings.push({
+        check: "block_size",
+        severity: "warning",
+        subject,
+        message: `blocking key [${subject}] yields p99 block size ${p99} (>5000) — fuzzy scoring will be slow`,
+        repaired: false,
+        repairNote: null,
+      });
+    } else if (p50 < 2 && sizes.length > 1) {
+      findings.push({
+        check: "block_size",
+        severity: "warning",
+        subject,
+        message: `blocking key [${subject}] is too selective: p50 block size ${p50} — most records will be singletons`,
+        repaired: false,
+        repairNote: null,
+      });
+    }
+  }
+
+  return config;
+}
+
 export function preflight(
   rows: readonly Record<string, unknown>[],
   config: GoldenMatchConfig,
@@ -314,7 +375,8 @@ export function preflight(
 
   current = checkColumns(rows, current, findings);
   current = checkCardinality(rows, current, findings);
-  // Checks 4-6 added in subsequent tasks.
+  current = checkBlockSizes(rows, current, findings);
+  // Checks 5-6 added in subsequent tasks.
 
   const report = makePreflightReport(findings, current !== config);
   return { report, config: current };

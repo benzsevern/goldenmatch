@@ -159,6 +159,16 @@ describe("preflight Check 3: cardinality_low", () => {
     expect(warning?.repaired).toBe(true);
   });
 
+  it("skips cardinality checks when no matchkeys remain before check", () => {
+    // Just sanity — empty matchkeys shouldn't crash.
+    const rows = [{ a: 1 }];
+    const cfg: GoldenMatchConfig = { matchkeys: [] };
+    const { report } = preflight(rows, cfg);
+    expect(
+      report.findings.some((f) => f.check === "no_matchkeys_remain"),
+    ).toBe(false);
+  });
+
   it("emits no_matchkeys_remain if drops empty the list", () => {
     const rows = Array.from({ length: 100 }, (_, i) => ({ id: String(i) }));
     const cfg: GoldenMatchConfig = {
@@ -181,5 +191,63 @@ describe("preflight Check 3: cardinality_low", () => {
     expect(
       report.findings.some((f) => f.check === "no_matchkeys_remain"),
     ).toBe(true);
+  });
+});
+
+describe("preflight Check 4: block_size", () => {
+  it("warns when blocking produces a mega-block", () => {
+    const rows = Array.from({ length: 10_000 }, (_, i) => ({
+      state: "NC",
+      last_name: `name${i}`,
+    }));
+    const cfg: GoldenMatchConfig = {
+      matchkeys: [
+        {
+          name: "mk",
+          type: "weighted",
+          fields: [
+            { field: "last_name", transforms: [], scorer: "token_sort", weight: 1 },
+          ],
+          threshold: 0.7,
+        },
+      ],
+      blocking: {
+        strategy: "static",
+        keys: [{ fields: ["state"], transforms: [] }],
+        maxBlockSize: 1000,
+        skipOversized: true,
+      },
+    };
+    const { report } = preflight(rows, cfg);
+    const warning = report.findings.find((f) => f.check === "block_size");
+    expect(warning).toBeDefined();
+    expect(warning?.repaired).toBe(false);
+  });
+
+  it("does not warn when blocks look healthy", () => {
+    const rows = Array.from({ length: 200 }, (_, i) => ({
+      state: ["NC", "SC", "VA", "NY"][i % 4]!,
+      last_name: `name${i}`,
+    }));
+    const cfg: GoldenMatchConfig = {
+      matchkeys: [
+        {
+          name: "mk",
+          type: "weighted",
+          fields: [
+            { field: "last_name", transforms: [], scorer: "token_sort", weight: 1 },
+          ],
+          threshold: 0.7,
+        },
+      ],
+      blocking: {
+        strategy: "static",
+        keys: [{ fields: ["state"], transforms: [] }],
+        maxBlockSize: 1000,
+        skipOversized: true,
+      },
+    };
+    const { report } = preflight(rows, cfg);
+    expect(report.findings.some((f) => f.check === "block_size")).toBe(false);
   });
 });
