@@ -19,6 +19,8 @@ from typing import Any
 
 import polars as pl
 
+from goldenmatch.core.autoconfig_verify import PostflightReport
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,6 +53,7 @@ class DedupeResult:
     stats: dict = field(default_factory=dict)
     scored_pairs: list[tuple[int, int, float]] = field(default_factory=list)
     config: Any = None
+    postflight_report: PostflightReport | None = None
 
     def to_csv(self, path: str, which: str = "golden") -> Path:
         """Write results to CSV.
@@ -142,6 +145,7 @@ class MatchResult:
     matched: pl.DataFrame | None = None
     unmatched: pl.DataFrame | None = None
     stats: dict = field(default_factory=dict)
+    postflight_report: PostflightReport | None = None
 
     def to_csv(self, path: str) -> Path:
         """Write matched results to CSV."""
@@ -260,6 +264,7 @@ def dedupe(
         stats=_extract_stats(result),
         scored_pairs=_extract_pairs(result),
         config=cfg,
+        postflight_report=result.get("postflight_report"),
     )
 
 
@@ -294,6 +299,15 @@ def dedupe_df(
 
     Returns:
         DedupeResult with golden records, clusters, dupes, unique, and stats.
+
+    Notes:
+        Zero-config paths call ``auto_configure_df`` internally. If preflight
+        finds an unrepairable issue, ``ConfigValidationError`` (from
+        ``goldenmatch.core.autoconfig_verify``) propagates unchanged —
+        callers that want a partial config can catch it and inspect
+        ``err.report.findings``. The returned result's ``postflight_report``
+        is populated when auto-config was used; ``None`` for hand-written
+        configs.
     """
     from goldenmatch.core.pipeline import run_dedupe_df
 
@@ -335,6 +349,7 @@ def dedupe_df(
         stats=_extract_stats(result),
         scored_pairs=_extract_pairs(result),
         config=config,
+        postflight_report=result.get("postflight_report"),
     )
 
 
@@ -365,23 +380,43 @@ def match_df(
 
     Returns:
         MatchResult with matched and unmatched DataFrames.
+
+    Notes:
+        Zero-config paths call ``auto_configure_df`` internally. If preflight
+        finds an unrepairable issue, ``ConfigValidationError`` (from
+        ``goldenmatch.core.autoconfig_verify``) propagates unchanged —
+        callers that want a partial config can catch it and inspect
+        ``err.report.findings``. The returned result's ``postflight_report``
+        is populated when auto-config was used; ``None`` for hand-written
+        configs.
     """
     from goldenmatch.core.pipeline import run_match_df
+
+    _auto_config = False
 
     if isinstance(config, str):
         config = load_config(config)
     elif config is None:
-        config = _build_config(exact, fuzzy, blocking, threshold, backend=backend)
+        if exact or fuzzy:
+            config = _build_config(exact, fuzzy, blocking, threshold, backend=backend)
+        else:
+            # Zero-config: defer auto-config to inside pipeline (same pattern
+            # as dedupe_df). auto_configure_df runs on the combined target +
+            # reference frame so matchkeys/blocking apply uniformly.
+            from goldenmatch.config.schemas import GoldenMatchConfig
+            config = GoldenMatchConfig()
+            _auto_config = True
 
     if backend and hasattr(config, "backend"):
         config.backend = backend
 
-    result = run_match_df(target, reference, config)
+    result = run_match_df(target, reference, config, auto_config=_auto_config)
 
     return MatchResult(
         matched=result.get("matched"),
         unmatched=result.get("unmatched"),
         stats=_extract_stats(result),
+        postflight_report=result.get("postflight_report"),
     )
 
 

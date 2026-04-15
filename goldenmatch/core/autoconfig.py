@@ -38,8 +38,15 @@ _PRICE_PATTERNS = re.compile(r"(price|cost|amount|revenue|salary|fee|charge|tota
 _ADDRESS_PATTERNS = re.compile(r"(address|street|addr|line.?1|line.?2)", re.IGNORECASE)
 _GEO_PATTERNS = re.compile(r"((?<![a-z])city|^state$|state.?cd|^country$|province|region|(?<![a-z])county)", re.IGNORECASE)
 _DATE_PATTERNS = re.compile(r"(date|_dt$|_date$|registr|created|updated|birth.?d|dob)", re.IGNORECASE)
+_YEAR_PATTERNS = re.compile(r"(^|_)(year|yr)(_|$)", re.IGNORECASE)
 _ID_PATTERNS = re.compile(
-    r"^(?i:id|key|code|sku)$|_(?i:id|key)$|(?<=[a-zA-Z])(?:ID|Id)$"
+    r"^(?i:id|key|code|sku)$"                      # whole-name matches
+    r"|_(?i:id|key)$"                              # *_id / *_key suffix
+    r"|(?<=[a-zA-Z])(?:ID|Id)$"                    # CamelCase ID suffix (e.g. recordID)
+    r"|(?i:^uuid$|^guid$|_uuid$|_guid$)"           # uuid/guid bounded
+    r"|(?i:^uuid_|^guid_)"                         # uuid_*/guid_* prefix (e.g. guid_col)
+    r"|^(?i:account_no|account_num)$"              # whole-name account identifiers
+    r"|_(?i:ref|ref_num|reg_num|account_no|account_num|account)$"  # targeted ID-suffixes
 )
 
 
@@ -57,6 +64,29 @@ class ColumnProfile:
     avg_len: float = 0.0  # average string length
 
 
+@dataclass
+class AutoConfigDecisions:
+    """Fields marked 'not read yet' are wired up in subsequent tasks; they must not be read before then.
+
+    Captures the *choices* auto_configure_df makes from profiled data.
+
+    Separating decisions from the GoldenMatchConfig enables future iterative
+    tuning: a future loop can nudge these decisions without re-profiling and
+    then rebuild the config via `_rebuild_from_decisions`.
+
+    Populated only by auto_configure_df; not persisted to YAML.
+    """
+
+    blocking_strategy: str
+    blocking_keys: list[BlockingKeyConfig]
+    blocking_passes: list[BlockingKeyConfig]
+    matchkeys: list[MatchkeyConfig]
+    threshold: float                # TODO(autoconfig-verify): consumed by postflight threshold nudge — not read yet
+    domain_mode: str | None         # populated from detected DomainProfile.name; not read yet
+    llm_enabled: bool               # TODO(autoconfig-verify): preflight Check 5 input — not read yet
+    allow_remote_assets: bool       # TODO(autoconfig-verify): preflight Check 5 input — not read yet
+
+
 def _classify_by_name(col_name: str) -> str | None:
     """Phase 1: classify column by name pattern matching.
 
@@ -66,6 +96,8 @@ def _classify_by_name(col_name: str) -> str | None:
     """
     if _DATE_PATTERNS.search(col_name):
         return "date"
+    if _YEAR_PATTERNS.search(col_name):
+        return "year"
     if _EMAIL_PATTERNS.search(col_name):
         return "email"
     if _ID_PATTERNS.search(col_name):
@@ -92,6 +124,36 @@ def _classify_by_data(values: list[str]) -> tuple[str, float]:
 
     data_type = _guess_type(values)
 
+    # Cardinality guard: near-unique numeric-looking columns (phone/zip
+    # lookalikes) are almost certainly identifiers. Scoping to numeric-shaped
+    # types avoids reclassifying long text columns (titles, descriptions,
+    # distinct names) as identifiers. Require a non-trivial sample (>=10)
+    # so a handful of genuinely-unique zip/phone rows don't trip the guard.
+    if data_type in ("phone", "zip", "numeric") and len(values) >= 10:
+        cardinality_ratio = len(set(values)) / len(values)
+        if cardinality_ratio >= 0.95:
+            return "identifier", 0.9
+
+    # Year detection: 4-digit integers in 1900..2100. Cheap blocking signal
+    # for bibliographic / birth-year data (not full dates).
+    def _is_year(v: str) -> bool:
+        """True if v looks like a 4-digit year in 1900-2100, tolerating
+        float-promoted integer columns (e.g. '1999.0')."""
+        v = v.strip()
+        try:
+            n = int(float(v))
+        except (ValueError, TypeError, OverflowError):
+            # OverflowError: float('1e500') -> inf; int(inf) raises OverflowError.
+            return False
+        if not (1900 <= n <= 2100):
+            return False
+        # Round-trip check: stringified int must match v (with optional '.0').
+        # Prevents '1.999e3' / '2001abc' from sneaking through.
+        return str(n) == v.replace(".0", "").strip()
+
+    if values and all(_is_year(v) for v in values):
+        return "year", 0.9
+
     # Map profiler types to our types
     type_map = {
         "email": "email",
@@ -106,6 +168,23 @@ def _classify_by_data(values: list[str]) -> tuple[str, float]:
     }
 
     col_type = type_map.get(data_type, "string")
+
+    # Multi-value name detection: comma/semicolon-delimited text with
+    # substantive length is almost always a co-author / multi-name field.
+    # Catches this before the generic description branch so it gets routed
+    # to token_sort rather than the embedding pathway.
+    if col_type == "string":
+        rows_with_delim = sum(1 for v in values if "," in v or ";" in v)
+        delim_ratio = rows_with_delim / max(len(values), 1)
+        if rows_with_delim > 0:
+            avg_delims_in_delim_rows = sum(
+                (v.count(",") + v.count(";")) for v in values if ("," in v or ";" in v)
+            ) / rows_with_delim
+        else:
+            avg_delims_in_delim_rows = 0
+        avg_len = sum(len(v) for v in values) / max(len(values), 1)
+        if avg_len > 30 and delim_ratio >= 0.7 and avg_delims_in_delim_rows >= 2:
+            return "multi_name", 0.7
 
     # Check for description (long freetext)
     if col_type == "string":
@@ -187,7 +266,7 @@ def profile_columns(
         # (date, geo) because data profiling frequently misclassifies them
         # (e.g., ISO dates look like phone numbers, city names look like person names).
         # For other types, Phase 2 (data) wins when it contradicts Phase 1 (name).
-        _name_authoritative = {"date", "geo", "identifier", "numeric"}
+        _name_authoritative = {"date", "geo", "identifier", "numeric", "year"}
         if name_type and name_type in _name_authoritative:
             # Name pattern is authoritative for date/geo — trust it
             col_type = name_type
@@ -404,8 +483,8 @@ def build_matchkeys(
     skipped_exact: list[tuple[str, str]] = []  # (column, reason)
 
     for p in profiles:
-        if p.col_type in ("numeric", "date", "identifier"):
-            continue  # skip non-matchable columns
+        if p.col_type in ("numeric", "date", "identifier", "year"):
+            continue  # skip non-matchable columns (year is blocking-only)
 
         if p.col_type == "description":
             fuzzy_fields.append(MatchkeyField(
@@ -415,6 +494,15 @@ def build_matchkeys(
                 transforms=["lowercase", "strip"],
             ))
             description_columns.append(p)
+            continue
+
+        if p.col_type == "multi_name":
+            fuzzy_fields.append(MatchkeyField(
+                field=p.name,
+                scorer="token_sort",
+                weight=1.0,
+                transforms=["lowercase", "strip"],
+            ))
             continue
 
         scorer_info = _SCORER_MAP.get(p.col_type)
@@ -560,6 +648,22 @@ def build_matchkeys(
             "Truncated fuzzy fields from %d to %d. Dropped: %s",
             len(all_weighted) + len(dropped), max_fuzzy_fields, dropped,
         )
+
+    # Confidence-gated weighting: when a profile's classification confidence
+    # is low (<0.5), cap the weight at 0.3 so noisy/ambiguous columns can't
+    # dominate a weighted matchkey. Profile lookup is by column name.
+    # Ordering note: this cap runs AFTER field-utility truncation above.
+    # _field_utility uses f.weight only as a fallback when a profile is
+    # missing; more importantly, we don't want the cap to skew the utility
+    # ranking used by the truncation step. Reorder at your peril.
+    _profile_lookup = {p.name: p for p in profiles}
+    for f in all_weighted:
+        if f.field is None:
+            continue
+        prof = _profile_lookup.get(f.field)
+        if prof is not None and prof.confidence < 0.5:
+            if (f.weight or 0) > 0.3:
+                f.weight = 0.3
 
     if all_weighted:
         threshold = _adaptive_threshold(all_weighted)
@@ -898,14 +1002,14 @@ def build_blocking(
 
     exact_cols = [
         p for p in profiles
-        if p.col_type in ("email", "phone", "zip", "identifier")
+        if p.col_type in ("email", "phone", "zip", "identifier", "year")
         and _null_rate(p.name) <= max_null_rate
         and p.cardinality_ratio < 0.95
         and _check_source_overlap(df, p.name) > 0.0
     ]
     # Log skipped columns
     for p in profiles:
-        if (p.col_type in ("email", "phone", "zip", "identifier")
+        if (p.col_type in ("email", "phone", "zip", "identifier", "year")
                 and _null_rate(p.name) <= max_null_rate
                 and p.cardinality_ratio < 0.95
                 and _check_source_overlap(df, p.name) == 0.0):
@@ -1072,18 +1176,40 @@ def select_model(row_count: int, has_embedding_columns: bool, threshold: int = 5
 def auto_configure_df(
     df: pl.DataFrame, llm_provider: str | None = None,
     domain_config=None, llm_auto: bool = False,
+    strict: bool = False, allow_remote_assets: bool = False,
 ) -> GoldenMatchConfig:
     """Auto-generate a GoldenMatchConfig from a DataFrame.
 
     Profiles columns by name heuristics and data sampling, then builds
-    matchkeys, blocking, and golden rules automatically.
+    matchkeys, blocking, and golden rules automatically. Runs preflight
+    verification on the resulting config before returning, attaching the
+    `PreflightReport` to the config as ``config._preflight_report``.
 
     Args:
         df: Polars DataFrame to auto-configure for.
+        llm_provider: Optional LLM provider for profiling (openai/anthropic).
+        domain_config: Manual domain override; skips auto-detection.
+        llm_auto: Auto-enable the LLM scorer when an API key is present.
+        strict: When True, postflight computes signals and emits advisories
+            but does not apply any adjustments (keeps output deterministic for
+            parity runs). Preflight always raises ``ConfigValidationError`` on
+            unrepairable errors regardless. Stashed on the config as
+            ``_strict_autoconfig`` for downstream consumers.
+        allow_remote_assets: When True, keep embedding/record_embedding/
+            rerank scorers. When False (default), preflight demotes them to
+            offline-safe alternatives.
 
     Returns:
         A fully populated GoldenMatchConfig ready for pipeline execution.
     """
+    # Initialized up front so the preflight-wiring block at the bottom can
+    # safely test `if domain_profile is not None` even when the domain
+    # branch below is skipped (e.g. user-provided domain_config).
+    domain_profile = None
+    # Preserve the raw input df for preflight. The in-function `df` variable
+    # gets enriched with __row_id__ / domain-extracted columns; preflight
+    # needs to check against the shape the pipeline will see.
+    df_input = df
     total_rows = df.height
 
     logger.info("Auto-configuring %d rows, %d columns", total_rows, len(df.columns))
@@ -1100,7 +1226,16 @@ def auto_configure_df(
     extracted_columns = []
 
     if domain_config is not None:
-        # Manual override: skip auto-detection
+        # Manual override: skip auto-detection. Synthesize a profile-like
+        # object so preflight Check 1 can still auto-repair domain-extracted
+        # column refs in the manual-override path. Without this, passing an
+        # explicit DomainConfig silently defeats the preflight repair.
+        from goldenmatch.core.domain import DomainProfile
+        domain_profile = DomainProfile(
+            name=domain_config.mode or "manual",
+            confidence=1.0,
+            text_columns=[],  # unknown; not used by preflight's repair path
+        )
         logger.info("Domain config provided manually, skipping auto-detection")
     else:
         from goldenmatch.core.domain import detect_domain, extract_features
@@ -1278,17 +1413,101 @@ def auto_configure_df(
 
     memory_config = MemoryConfig(enabled=True) if llm_auto else None
 
-    # Build config
-    config = GoldenMatchConfig(
+    # Capture choices in a decisions object so a future iterative-tuning loop
+    # can nudge them without re-profiling. Matchkeys and blocking strategy/
+    # keys/passes all flow through decisions; non-decision runtime attributes
+    # on the transient `blocking` object (learned_sample_size, min_recall,
+    # skip_oversized, etc.) are preserved in the rebuild step below.
+    decisions = AutoConfigDecisions(
+        blocking_strategy=blocking.strategy if blocking is not None else "none",
+        blocking_keys=list(blocking.keys) if (blocking is not None and blocking.keys) else [],
+        blocking_passes=list(blocking.passes) if (blocking is not None and blocking.passes) else [],
         matchkeys=matchkeys,
-        blocking=blocking,
+        threshold=0.0,  # populated in a later task
+        # domain_mode mirrors the detected domain profile (when present).
+        # Demonstrates the field's contract even though no consumer reads it
+        # yet — populating now means future iterative tuners can inspect it
+        # without us also having to backfill the call site.
+        domain_mode=(domain_profile.name if domain_profile is not None else None),
+        llm_enabled=llm_scorer_config is not None,
+        allow_remote_assets=False,
+    )
+
+    config = _rebuild_from_decisions(
+        profiles,
+        decisions,
+        transient_blocking=blocking,
+        llm_scorer_config=llm_scorer_config,
+        memory_config=memory_config,
+    )
+
+    # ── Preflight verification ──
+    #
+    # Stash the domain profile so preflight Check 1 can auto-repair
+    # `config.domain` when the generated config references
+    # domain-extracted columns (e.g. __title_key__, __model_norm__).
+    # This fixes the DBLP-ACM crash where auto-config emitted
+    # references to columns produced by a disabled pipeline step.
+    from goldenmatch.core.autoconfig_verify import ConfigValidationError, preflight
+
+    if domain_profile is not None and domain_profile.confidence > 0.7:
+        config._domain_profile = domain_profile
+    config._strict_autoconfig = strict
+
+    report = preflight(
+        df_input, config, profiles=profiles,
+        allow_remote_assets=allow_remote_assets,
+    )
+    if report.has_errors:
+        raise ConfigValidationError(report=report)
+    config._preflight_report = report
+    return config
+
+
+def _rebuild_from_decisions(
+    _profiles: list[ColumnProfile],
+    decisions: AutoConfigDecisions,
+    *,
+    transient_blocking: BlockingConfig | None,
+    llm_scorer_config: LLMScorerConfig | None,
+    memory_config: MemoryConfig | None,
+) -> GoldenMatchConfig:
+    """Assemble a GoldenMatchConfig from decisions (+ runtime hand-offs).
+
+    Pure function of (profiles, decisions) plus non-decision runtime values:
+      - `transient_blocking` carries non-decision attributes (learned_sample_size,
+        learned_min_recall, skip_oversized, ...) that survive the rebuild.
+      - `llm_scorer_config` / `memory_config` are runtime plumbing, not decisions.
+
+    Splitting this out lets a future iterative-tuning loop mutate `decisions`
+    and re-call `_rebuild_from_decisions` without re-running profile_columns /
+    build_matchkeys / build_blocking.
+
+    ``_profiles`` is reserved (underscore-prefix unused parameter) for future
+    iterative-tuning hooks that may re-examine column stats without rethreading
+    them through the call chain.
+    """
+    # Rebuild final blocking from decisions, preserving runtime-only attrs
+    # (learned_sample_size, learned_min_recall, skip_oversized, etc.) from
+    # the transient blocking object produced above.
+    final_blocking: BlockingConfig | None
+    if transient_blocking is None:
+        final_blocking = None
+    else:
+        final_blocking = transient_blocking.model_copy(update={
+            "strategy": decisions.blocking_strategy,
+            "keys": decisions.blocking_keys,
+            "passes": decisions.blocking_passes,
+        })
+
+    return GoldenMatchConfig(
+        matchkeys=decisions.matchkeys,
+        blocking=final_blocking,
         golden_rules=GoldenRulesConfig(default_strategy="most_complete"),
         output=OutputConfig(),
         llm_scorer=llm_scorer_config,
         memory=memory_config,
     )
-
-    return config
 
 
 def auto_configure(files: list[tuple[str, str]]) -> GoldenMatchConfig:

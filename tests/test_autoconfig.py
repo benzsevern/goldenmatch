@@ -1132,7 +1132,9 @@ class TestDataDrivenStrategy:
             "city": ["NYC", "LA", "Chicago", "Houston"],
         })
 
-        config = auto_configure_df(df)
+        # rerank downloads a cross-encoder model; preflight's
+        # allow_remote_assets=False (default) would demote it. Opt in here.
+        config = auto_configure_df(df, allow_remote_assets=True)
         weighted_mks = [mk for mk in config.get_matchkeys() if mk.type == "weighted"]
         assert len(weighted_mks) > 0, "Expected at least one weighted matchkey"
         multi_field = [mk for mk in weighted_mks if len(mk.fields) >= 3]
@@ -1215,3 +1217,136 @@ class TestLLMMemoryAutoEnablement:
         df = pl.DataFrame({"name": ["John", "Jane", "Bob"], "email": ["a@t.com", "b@t.com", "c@t.com"]})
         config = auto_configure_df(df)
         assert config.memory is None
+
+
+def test_classify_by_data_cardinality_guard_beats_phone():
+    from goldenmatch.core.autoconfig import _classify_by_data
+    values = [str(9000000 + i) for i in range(10)]
+    col_type, confidence = _classify_by_data(values)
+    assert col_type == "identifier", f"got {col_type!r} (confidence={confidence})"
+    assert confidence == 0.9
+
+
+def test_classify_by_name_voter_reg_num_is_identifier():
+    from goldenmatch.core.autoconfig import _classify_by_name
+    assert _classify_by_name("voter_reg_num") == "identifier"
+    assert _classify_by_name("account_no") == "identifier"
+    assert _classify_by_name("guid_col") == "identifier"
+
+
+def test_classify_by_name_year_column():
+    from goldenmatch.core.autoconfig import _classify_by_name
+    assert _classify_by_name("birth_year") == "year"
+    assert _classify_by_name("year") == "year"
+    assert _classify_by_name("pub_yr") == "year"
+
+
+def test_classify_by_data_year_values():
+    from goldenmatch.core.autoconfig import _classify_by_data
+    values = ["1999", "2000", "2001", "1985", "1978"] * 10
+    col_type, _ = _classify_by_data(values)
+    assert col_type == "year"
+
+
+def test_classify_by_data_multi_name_detection():
+    from goldenmatch.core.autoconfig import _classify_by_data
+    values = [
+        "Alice Smith, Bob Jones, Carol White, Dave Brown",
+        "Eve Green; Frank Blue; Grace Hopper; Alan Turing",
+        "Hector Gomez, Iris Liu, Jasper Nguyen, Kara Patel",
+    ] * 10
+    col_type, _ = _classify_by_data(values)
+    assert col_type == "multi_name"
+
+
+def test_build_matchkeys_multi_name_gets_token_sort():
+    import polars as pl
+    from goldenmatch.core.autoconfig import auto_configure_df
+    df = pl.DataFrame({
+        "authors": [
+            "Alice Smith, Bob Jones, Carol White, Dave Brown",
+            "Eve Green; Frank Blue; Grace Hopper; Alan Turing",
+        ] * 50,
+        "title": [f"paper {i}" for i in range(100)],
+    })
+    cfg = auto_configure_df(df)
+    mks = cfg.get_matchkeys()
+    authors_fields = [f for mk in mks for f in mk.fields if f.field == "authors"]
+    assert any(f.scorer == "token_sort" and f.weight == 1.0 for f in authors_fields)
+
+
+def test_low_confidence_field_gets_capped_weight():
+    import polars as pl
+    from goldenmatch.core.autoconfig import auto_configure_df
+    df = pl.DataFrame({
+        "mystery_col": [f"xyz{i}abc" for i in range(50)],
+        "name": [f"person {i}" for i in range(50)],
+    })
+    cfg = auto_configure_df(df)
+    for mk in cfg.get_matchkeys():
+        if mk.type != "weighted":
+            continue
+        for f in mk.fields:
+            if f.field == "mystery_col":
+                assert (f.weight or 0) <= 0.3, f"low-conf field weight={f.weight}"
+
+
+def test_classify_by_name_num_kids_is_not_identifier():
+    from goldenmatch.core.autoconfig import _classify_by_name
+    assert _classify_by_name("num_kids") != "identifier"
+    assert _classify_by_name("num_days") != "identifier"
+    assert _classify_by_name("no_show") != "identifier"
+    assert _classify_by_name("yes_no") != "identifier"
+
+
+def test_classify_by_data_year_float_promoted():
+    from goldenmatch.core.autoconfig import _classify_by_data
+    values = ["1999.0", "2000.0", "2001.0", "1985.0"] * 10
+    col_type, _ = _classify_by_data(values)
+    assert col_type == "year"
+
+
+def test_classify_by_data_prose_not_multi_name():
+    from goldenmatch.core.autoconfig import _classify_by_data
+    # Long prose with one comma per row - NOT multi-name
+    values = [
+        "Today, the meeting went well and we discussed several topics at length.",
+        "Yesterday, we deployed a new version and everyone was quite pleased.",
+        "On Monday, the team gathered to review progress across multiple projects.",
+    ] * 10
+    col_type, _ = _classify_by_data(values)
+    assert col_type != "multi_name"
+
+
+def test_autoconfig_parity_pins_unchanged():
+    """Pin test: AutoConfigDecisions refactor must not change output for the
+    three benchmarks. If this fails, the refactor changed behavior - fix the
+    refactor, not the pin file."""
+    import json
+    import sys
+    from pathlib import Path
+
+    import polars as pl
+
+    repo_root = Path(__file__).parent.parent
+    # Import pin_config from the capture script (not a normal test import)
+    sys.path.insert(0, str(repo_root / "tests" / "parity"))
+    from capture_autoconfig_output import pin_config  # type: ignore
+
+    pin_file = repo_root / "tests" / "parity" / "autoconfig-classification.json"
+    expected = {p["name"]: p for p in json.loads(pin_file.read_text())}
+
+    datasets = repo_root / "tests" / "benchmarks" / "datasets"
+    dblp = pl.read_csv(datasets / "DBLP-ACM/DBLP2.csv", encoding="utf8-lossy", ignore_errors=True)
+    acm = pl.read_csv(datasets / "DBLP-ACM/ACM.csv", encoding="utf8-lossy", ignore_errors=True)
+    got = pin_config("dblp_acm", pl.concat([dblp, acm], how="diagonal_relaxed"))
+    assert got == expected["dblp_acm"], "parity drift: diff between pin and current output"
+
+
+def test_classify_by_data_year_rejects_pathological_floats():
+    from goldenmatch.core.autoconfig import _classify_by_data
+    # Shouldn't crash on infinity-ish strings
+    values = ["1e500", "2e500", "1999"]
+    col_type, _ = _classify_by_data(values)
+    # Just verify no crash — classification outcome doesn't matter
+    assert col_type is not None

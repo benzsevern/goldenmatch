@@ -18,6 +18,19 @@ import polars as pl
 logger = logging.getLogger(__name__)
 
 
+# Columns that extract_features may add to a DataFrame, by domain:
+#   bibliographic → __title_key__
+#   electronics   → __brand__, __model__, __model_norm__, __color__, __specs__, __extract_confidence__
+#   software      → __sw_name__, __sw_version__, __sw_edition__, __sw_platform__, __sw_part_num__, __extract_confidence__
+# If new extractors are added, append here.
+_DOMAIN_EXTRACTED_COLS: frozenset[str] = frozenset({
+    "__title_key__",
+    "__brand__", "__model__", "__model_norm__", "__color__", "__specs__",
+    "__sw_name__", "__sw_version__", "__sw_edition__", "__sw_platform__", "__sw_part_num__",
+    "__extract_confidence__",
+})
+
+
 # ── Domain Profiles ───────────────────────────────────────────────────────
 
 @dataclass

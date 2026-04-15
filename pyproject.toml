@@ -110,6 +110,9 @@ line-length = 100
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "benchmark: integration tests against real benchmark datasets (skipped by default; run with `pytest -m benchmark`)",
+]
 
 [tool.coverage.run]
 source = ["goldenmatch"]

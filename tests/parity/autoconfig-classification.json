@@ -1,0 +1,256 @@
+[
+  {
+    "name": "dblp_acm",
+    "rows": 4910,
+    "blocking": {
+      "strategy": "static",
+      "keys": [
+        {
+          "fields": [
+            "__title_key__"
+          ],
+          "transforms": [
+            "lowercase",
+            "strip"
+          ]
+        }
+      ],
+      "passes": []
+    },
+    "matchkeys": [
+      {
+        "name": "fuzzy_match",
+        "type": "weighted",
+        "threshold": 0.7,
+        "fields": [
+          {
+            "field": "title",
+            "scorer": "token_sort",
+            "weight": 1.5,
+            "transforms": [
+              "lowercase",
+              "strip"
+            ]
+          },
+          {
+            "field": "authors",
+            "scorer": "token_sort",
+            "weight": 1.0,
+            "transforms": [
+              "lowercase",
+              "strip"
+            ]
+          },
+          {
+            "field": "venue",
+            "scorer": "ensemble",
+            "weight": 1.0,
+            "transforms": [
+              "lowercase",
+              "strip"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "domain_exact_title_key",
+        "type": "exact",
+        "threshold": null,
+        "fields": [
+          {
+            "field": "__title_key__",
+            "scorer": null,
+            "weight": null,
+            "transforms": [
+              "lowercase"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "ncvr_10k",
+    "rows": 10000,
+    "blocking": {
+      "strategy": "static",
+      "keys": [
+        {
+          "fields": [
+            "birth_year"
+          ],
+          "transforms": [
+            "strip"
+          ]
+        }
+      ],
+      "passes": []
+    },
+    "matchkeys": [
+      {
+        "name": "fuzzy_match",
+        "type": "weighted",
+        "threshold": 0.8,
+        "fields": [
+          {
+            "field": "res_street_address",
+            "scorer": "token_sort",
+            "weight": 0.8,
+            "transforms": [
+              "lowercase",
+              "strip"
+            ]
+          },
+          {
+            "field": "first_name",
+            "scorer": "ensemble",
+            "weight": 1.0,
+            "transforms": [
+              "lowercase",
+              "strip"
+            ]
+          },
+          {
+            "field": "middle_name",
+            "scorer": "ensemble",
+            "weight": 1.0,
+            "transforms": [
+              "lowercase",
+              "strip"
+            ]
+          },
+          {
+            "field": "last_name",
+            "scorer": "ensemble",
+            "weight": 1.0,
+            "transforms": [
+              "lowercase",
+              "strip"
+            ]
+          },
+          {
+            "field": "race_code",
+            "scorer": "token_sort",
+            "weight": 0.3,
+            "transforms": [
+              "lowercase",
+              "strip"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "abt_buy",
+    "rows": 2173,
+    "blocking": {
+      "strategy": "multi_pass",
+      "keys": [
+        {
+          "fields": [
+            "manufacturer"
+          ],
+          "transforms": [
+            "lowercase",
+            "soundex"
+          ]
+        }
+      ],
+      "passes": [
+        {
+          "fields": [
+            "manufacturer"
+          ],
+          "transforms": [
+            "lowercase",
+            "substring:0:5"
+          ]
+        },
+        {
+          "fields": [
+            "manufacturer"
+          ],
+          "transforms": [
+            "lowercase",
+            "soundex"
+          ]
+        },
+        {
+          "fields": [
+            "manufacturer"
+          ],
+          "transforms": [
+            "lowercase",
+            "token_sort",
+            "substring:0:8"
+          ]
+        }
+      ]
+    },
+    "matchkeys": [
+      {
+        "name": "fuzzy_match",
+        "type": "weighted",
+        "threshold": 0.6499999999999999,
+        "fields": [
+          {
+            "field": "name",
+            "scorer": "token_sort",
+            "weight": 1.5,
+            "transforms": [
+              "lowercase",
+              "strip"
+            ]
+          },
+          {
+            "field": "description",
+            "scorer": "token_sort",
+            "weight": 1.5,
+            "transforms": [
+              "lowercase",
+              "strip"
+            ]
+          },
+          {
+            "field": "manufacturer",
+            "scorer": "ensemble",
+            "weight": 1.0,
+            "transforms": [
+              "lowercase",
+              "strip"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "domain_exact_model",
+        "type": "exact",
+        "threshold": null,
+        "fields": [
+          {
+            "field": "__model__",
+            "scorer": null,
+            "weight": null,
+            "transforms": [
+              "strip"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "domain_exact_model_norm",
+        "type": "exact",
+        "threshold": null,
+        "fields": [
+          {
+            "field": "__model_norm__",
+            "scorer": null,
+            "weight": null,
+            "transforms": []
+          }
+        ]
+      }
+    ]
+  }
+]
