@@ -117,6 +117,38 @@ describe("postflight: score histogram", () => {
     ).toBe(true);
   });
 
+  it("signals has exactly the 8 documented keys", () => {
+    const rows = Array.from({ length: 50 }, (_, i) => ({ a: String(i) }));
+    const cfg: GoldenMatchConfig = {
+      matchkeys: [
+        {
+          name: "mk",
+          type: "weighted",
+          fields: [
+            { field: "a", transforms: [], scorer: "exact", weight: 1 },
+          ],
+          threshold: 0.7,
+        },
+      ],
+      blocking: {
+        strategy: "static",
+        keys: [{ fields: ["a"], transforms: [] }],
+        maxBlockSize: 1000,
+        skipOversized: true,
+      },
+    };
+    const pairScores = Array.from({ length: 48 }, (_, i) => ({
+      idA: i, idB: i + 1, score: 0.8,
+    }));
+    const report = postflight(rows, cfg, { pairScores });
+    const keys = new Set(Object.keys(report.signals));
+    expect(keys).toEqual(new Set([
+      "scoreHistogram", "blockingRecall", "blockSizePercentiles",
+      "thresholdOverlapPct", "totalPairsScored", "currentThreshold",
+      "preliminaryClusterSizes", "oversizedClusters",
+    ]));
+  });
+
   it("strict mode: signal computed, adjustments empty", () => {
     const r = seeded(42);
     const pairScores: { idA: number; idB: number; score: number }[] = [];

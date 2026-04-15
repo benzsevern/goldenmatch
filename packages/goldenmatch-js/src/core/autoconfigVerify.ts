@@ -635,6 +635,42 @@ function signalBlockingRecall(): "deferred" {
   return "deferred";
 }
 
+function signalBlockSizePercentiles(
+  rows: readonly Record<string, unknown>[],
+  config: GoldenMatchConfig,
+): BlockSizePercentiles {
+  const b = config.blocking;
+  if (b === undefined || b.keys.length === 0 || rows.length === 0) {
+    return { p50: 0, p95: 0, p99: 0, max: 0 };
+  }
+  const sample = rows.slice(0, Math.min(rows.length, 10_000));
+  const sizes: number[] = [];
+  for (const key of b.keys) {
+    if (key.fields.length === 0) continue;
+    const counts = new Map<string, number>();
+    for (const row of sample) {
+      const parts = key.fields.map((f) => {
+        const v = row[f];
+        return v === null || v === undefined ? "\u0000" : String(v);
+      });
+      const k = parts.join("\u0001");
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    for (const n of counts.values()) sizes.push(n);
+  }
+  sizes.sort((a, b) => a - b);
+  const pct = (q: number) =>
+    sizes.length === 0
+      ? 0
+      : sizes[Math.min(sizes.length - 1, Math.floor(sizes.length * q))] ?? 0;
+  return {
+    p50: pct(0.5),
+    p95: pct(0.95),
+    p99: pct(0.99),
+    max: sizes.length === 0 ? 0 : sizes[sizes.length - 1]!,
+  };
+}
+
 function signalThresholdOverlap(
   pairScores: readonly { score: number }[],
   threshold: number,
@@ -721,7 +757,7 @@ function signalClusterSizes(
 }
 
 export function postflight(
-  _rows: readonly Record<string, unknown>[],
+  rows: readonly Record<string, unknown>[],
   config: GoldenMatchConfig,
   options: {
     readonly pairScores: readonly { idA: number; idB: number; score: number }[];
@@ -767,11 +803,12 @@ export function postflight(
     );
   }
 
-  // Placeholder values for signals added in Task 3.5.
+  const blockSizePercentiles = signalBlockSizePercentiles(rows, config);
+
   const signals: PostflightSignals = {
     scoreHistogram: hist.histogram,
     blockingRecall: signalBlockingRecall(),
-    blockSizePercentiles: { p50: 0, p95: 0, p99: 0, max: 0 },
+    blockSizePercentiles,
     thresholdOverlapPct: overlapPct,
     totalPairsScored: options.pairScores.length,
     currentThreshold,
