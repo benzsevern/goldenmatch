@@ -43,4 +43,11 @@ describe("smoke", () => {
     expect(s2).toBeGreaterThanOrEqual(0);
     expect(s2).toBeLessThanOrEqual(1);
   });
+
+  it("autoconfigVerify symbols re-exported from goldenmatch", async () => {
+    const gm = await import("../src/index.js");
+    expect(typeof gm.makePreflightReport).toBe("function");
+    expect(typeof gm.ConfigValidationError).toBe("function");
+    expect(typeof gm.stripConventionPrivate).toBe("function");
+  });
 });
