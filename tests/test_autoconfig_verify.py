@@ -71,6 +71,29 @@ def test_postflight_unimodal_histogram_no_adjustment():
     assert not any(adj.field == "threshold" for adj in report.adjustments)
 
 
+def test_postflight_signals_schema():
+    """Contract test: PostflightReport.signals must contain every key
+    documented in spec §6.3 after a representative run."""
+    from goldenmatch.core.autoconfig_verify import postflight
+    from goldenmatch.config.schemas import (
+        GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
+    )
+    df = pl.DataFrame({"a": list(range(100))})
+    cfg = GoldenMatchConfig(
+        blocking=BlockingConfig(strategy="static", keys=[BlockingKeyConfig(fields=["a"])]),
+        matchkeys=[MatchkeyConfig(name="mk", type="weighted", threshold=0.7, fields=[
+            MatchkeyField(field="a", scorer="exact", weight=1.0)])],
+    )
+    pair_scores = [(i, i+1, 0.8) for i in range(0, 98, 2)]
+    report = postflight(df, cfg, pair_scores=pair_scores)
+    expected_keys = {
+        "score_histogram", "blocking_recall", "block_size_percentiles",
+        "threshold_overlap_pct", "total_pairs_scored", "current_threshold",
+        "preliminary_cluster_sizes", "oversized_clusters",
+    }
+    assert expected_keys.issubset(report.signals.keys())
+
+
 def test_postflight_threshold_overlap_triggers_llm_advisory():
     from goldenmatch.config.schemas import (
         GoldenMatchConfig, MatchkeyConfig, MatchkeyField, BlockingConfig, BlockingKeyConfig,
