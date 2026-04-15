@@ -93,6 +93,27 @@ type ClassifiedKind =
 function classifyColumn(profile: ColumnProfile): ClassifiedKind {
   const name = profile.name;
 
+  // Cardinality guard (spec §5.2) — a column where virtually every value is
+  // unique cannot be a phone, zip, or numeric feature UNLESS its name
+  // explicitly asserts it (e.g. "phone" or "zip"). Scoped to samples >= 10
+  // to avoid false positives on tiny fixtures. Only overrides data-heuristic
+  // classifications; explicit name patterns still win below.
+  if (
+    profile.totalCount >= 10 &&
+    profile.cardinalityRatio >= 0.95 &&
+    !nameMatches(name, EMAIL_NAME_PATTERNS) &&
+    !nameMatches(name, PHONE_NAME_PATTERNS) &&
+    !nameMatches(name, ZIP_NAME_PATTERNS) &&
+    !nameMatches(name, NAME_NAME_PATTERNS) &&
+    !nameMatches(name, GEO_NAME_PATTERNS) &&
+    !nameMatches(name, DATE_NAME_PATTERNS) &&
+    (profile.inferredType === "phone" ||
+      profile.inferredType === "zip" ||
+      profile.inferredType === "numeric")
+  ) {
+    return "id";
+  }
+
   // Date is checked first so that date-like columns never get misclassified
   // as phones by the profiler's value heuristic.
   if (nameMatches(name, DATE_NAME_PATTERNS)) return "date";
@@ -131,7 +152,16 @@ function buildExactMatchkeys(
   for (const p of profiles) {
     const kind = classifyColumn(p);
     // zip/geo are blocking signals, NOT identity claims.
-    if (kind === "zip" || kind === "geo" || kind === "date" || kind === "text") {
+    // id/numeric/date are skipped from scoring (Python parity: id is a
+    // primary-key column, not a match signal).
+    if (
+      kind === "zip" ||
+      kind === "geo" ||
+      kind === "date" ||
+      kind === "text" ||
+      kind === "id" ||
+      kind === "numeric"
+    ) {
       continue;
     }
 
@@ -139,9 +169,8 @@ function buildExactMatchkeys(
     if (p.nullRate > 0.4) continue;
     if (p.cardinalityRatio < 0.01) continue;
 
-    // Only identifier-like columns get exact matchkeys with >=0.5 cardinality.
-    const isIdentifier =
-      kind === "email" || kind === "phone" || kind === "id";
+    // Only identifier-like columns (email, phone) get exact matchkeys with >=0.5 cardinality.
+    const isIdentifier = kind === "email" || kind === "phone";
     if (!isIdentifier) continue;
     if (p.cardinalityRatio < 0.5) continue;
 
