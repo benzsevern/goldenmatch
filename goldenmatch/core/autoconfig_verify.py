@@ -657,23 +657,23 @@ def _signal_blocking_recall(
     config: "GoldenMatchConfig",
     pair_scores: "list[tuple[int, int, float]]",
     current_threshold: float,
-) -> float | None:
+) -> float | Literal["deferred"]:
     """Estimate blocking recall by brute-forcing a sample.
 
-    Gated at df.height < 10_000 (returns None).
+    Returns the string sentinel ``"deferred"`` when recall cannot be measured
+    (gated at df.height < 10_000, and deferred-always today until the
+    iterative autoconfig loop lands). Consumers of
+    ``PostflightReport.signals["blocking_recall"]`` should handle the value
+    as either a float in [0, 1] OR the literal string ``"deferred"``.
 
-    TODO(autoconfig-iterative): implement brute-force recall estimation.
-    The C iterative loop (see spec §6) owns this signal; for now we gate
-    and return None on small frames and defer the >=10K path so the
-    postflight orchestrator still ships.
+    TODO(autoconfig-iterative): implement brute-force recall estimation over
+    a uniform 1000-row sample when df.height >= 10_000. Reserved for the
+    iterative autoconfig loop so postflight has a meaningful recall estimate.
     """
     if df.height < 10_000:
-        return None
-    # TODO(autoconfig-iterative): implement brute-force recall estimation
-    # over a uniform 1000-row sample. Reserved for the iterative autoconfig
-    # loop so postflight has a meaningful recall estimate.
+        return "deferred"
     _ = (config, pair_scores, current_threshold)  # silence unused
-    return None
+    return "deferred"
 
 
 def _signal_cluster_sizes(

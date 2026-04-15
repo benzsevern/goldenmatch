@@ -1341,3 +1341,12 @@ def test_autoconfig_parity_pins_unchanged():
     acm = pl.read_csv(datasets / "DBLP-ACM/ACM.csv", encoding="utf8-lossy", ignore_errors=True)
     got = pin_config("dblp_acm", pl.concat([dblp, acm], how="diagonal_relaxed"))
     assert got == expected["dblp_acm"], "parity drift: diff between pin and current output"
+
+
+def test_classify_by_data_year_rejects_pathological_floats():
+    from goldenmatch.core.autoconfig import _classify_by_data
+    # Shouldn't crash on infinity-ish strings
+    values = ["1e500", "2e500", "1999"]
+    col_type, _ = _classify_by_data(values)
+    # Just verify no crash — classification outcome doesn't matter
+    assert col_type is not None

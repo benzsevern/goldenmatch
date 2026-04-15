@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
+
+if TYPE_CHECKING:
+    from goldenmatch.core.autoconfig_verify import PreflightReport
 
 # ── Valid enums ─────────────────────────────────────────────────────────────
 
@@ -433,6 +436,14 @@ class GoldenMatchConfig(BaseModel):
     domain: DomainConfig | None = None
     backend: str | None = None  # None (default Polars), "ray", "duckdb"
     memory: MemoryConfig | None = None
+
+    # Auto-config verification hand-offs (see goldenmatch/core/autoconfig_verify.py).
+    # These attrs are set by auto_configure_df and read by the pipeline;
+    # they are NOT persisted to YAML. Declaring them as PrivateAttr insulates
+    # the hand-off contract from Pydantic v2 private-attr handling changes.
+    _preflight_report: "PreflightReport | None" = PrivateAttr(default=None)
+    _strict_autoconfig: bool = PrivateAttr(default=False)
+    _domain_profile: Any = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def _validate_fuzzy_needs_blocking(self) -> "GoldenMatchConfig":

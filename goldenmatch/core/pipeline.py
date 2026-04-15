@@ -430,19 +430,31 @@ def _run_dedupe_pipeline(
             logger.warning("LLM boost unavailable: %s", e)
 
     # ── Step 3.6: POSTFLIGHT (auto-config only) ──
-    # Postflight verification (spec §6). Signals are computed from the
-    # unadjusted pair list; threshold adjustments (if any, non-strict only)
-    # are then applied to all_pairs before clustering. This is intentional:
-    # signals reflect what postflight actually observed; downstream clustering
-    # reflects the adjusted threshold. Documented in spec §6.1.
+    # Postflight verification. Signals are computed from the unadjusted pair
+    # list; threshold adjustments (if any, non-strict only) are then applied
+    # to all_pairs before clustering. Ordering rationale: signals reflect
+    # pre-adjustment observations; downstream clustering reflects the adjusted
+    # threshold.
     postflight_report = None
-    if getattr(config, "_preflight_report", None) is not None:
+    from goldenmatch.core.autoconfig_verify import PreflightReport as _PfR
+    _preflight = getattr(config, "_preflight_report", None)
+    if isinstance(_preflight, _PfR):
         from goldenmatch.core.autoconfig_verify import postflight as _postflight
         postflight_report = _postflight(collected_df, config, pair_scores=all_pairs)
         if not getattr(config, "_strict_autoconfig", False):
             for adj in postflight_report.adjustments:
                 if adj.field == "threshold":
+                    prev_count = len(all_pairs)
                     all_pairs = [p for p in all_pairs if p[2] >= adj.to_value]
+                    if prev_count > 0 and len(all_pairs) == 0:
+                        msg = (
+                            f"postflight threshold adjustment to {adj.to_value:.3f} "
+                            f"dropped all {prev_count} scored pairs — no clusters "
+                            f"will form. Consider strict=True or review the score "
+                            f"distribution in postflight_report.signals['score_histogram']."
+                        )
+                        logger.warning(msg)
+                        postflight_report.advisories.append(msg)
 
     # ── Step 4: CLUSTER ──
     all_ids = collected_df["__row_id__"].to_list()
@@ -841,18 +853,30 @@ def _run_match_pipeline(
         all_pairs = [(a, b, s) for a, b, s in all_pairs if s > 0.5]
 
     # ── Step 4.7: POSTFLIGHT (auto-config only) ──
-    # Postflight verification (spec §6). Signals are computed from the
-    # unadjusted pair list; threshold adjustments (if any, non-strict only)
-    # are then applied to all_pairs before downstream grouping. Documented
-    # in spec §6.1.
+    # Postflight verification. Signals are computed from the unadjusted pair
+    # list; threshold adjustments (if any, non-strict only) are then applied
+    # to all_pairs before downstream grouping. Ordering: signals reflect
+    # pre-adjustment observations; grouping reflects the adjusted threshold.
     postflight_report = None
-    if getattr(config, "_preflight_report", None) is not None:
+    from goldenmatch.core.autoconfig_verify import PreflightReport as _PfR
+    _preflight = getattr(config, "_preflight_report", None)
+    if isinstance(_preflight, _PfR):
         from goldenmatch.core.autoconfig_verify import postflight as _postflight
         postflight_report = _postflight(combined_df, config, pair_scores=all_pairs)
         if not getattr(config, "_strict_autoconfig", False):
             for adj in postflight_report.adjustments:
                 if adj.field == "threshold":
+                    prev_count = len(all_pairs)
                     all_pairs = [p for p in all_pairs if p[2] >= adj.to_value]
+                    if prev_count > 0 and len(all_pairs) == 0:
+                        msg = (
+                            f"postflight threshold adjustment to {adj.to_value:.3f} "
+                            f"dropped all {prev_count} scored pairs — no clusters "
+                            f"will form. Consider strict=True or review the score "
+                            f"distribution in postflight_report.signals['score_histogram']."
+                        )
+                        logger.warning(msg)
+                        postflight_report.advisories.append(msg)
 
     # ── Step 5: Normalize pairs so target ID is always first ──
     normalized: list[tuple[int, int, float]] = []

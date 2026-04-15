@@ -143,7 +143,8 @@ def _classify_by_data(values: list[str]) -> tuple[str, float]:
         v = v.strip()
         try:
             n = int(float(v))
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
+            # OverflowError: float('1e500') -> inf; int(inf) raises OverflowError.
             return False
         if not (1900 <= n <= 2100):
             return False
@@ -1223,7 +1224,16 @@ def auto_configure_df(
     extracted_columns = []
 
     if domain_config is not None:
-        # Manual override: skip auto-detection
+        # Manual override: skip auto-detection. Synthesize a profile-like
+        # object so preflight Check 1 can still auto-repair domain-extracted
+        # column refs in the manual-override path. Without this, passing an
+        # explicit DomainConfig silently defeats the preflight repair.
+        from goldenmatch.core.domain import DomainProfile
+        domain_profile = DomainProfile(
+            name=domain_config.mode or "manual",
+            confidence=1.0,
+            text_columns=[],  # unknown; not used by preflight's repair path
+        )
         logger.info("Domain config provided manually, skipping auto-detection")
     else:
         from goldenmatch.core.domain import detect_domain, extract_features

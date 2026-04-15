@@ -145,7 +145,7 @@ def test_postflight_blocking_recall_gated_below_10k():
             MatchkeyField(field="name", scorer="token_sort", weight=1.0)])],
     )
     report = postflight(df, cfg, pair_scores=[(0, 1, 0.9)])
-    assert report.signals.get("blocking_recall") is None  # gated below 10K
+    assert report.signals["blocking_recall"] == "deferred"  # explicit sentinel
 
 
 def test_postflight_strict_mode_no_adjustment():
@@ -440,3 +440,17 @@ def test_postflight_attached_after_match_via_autoconfig():
     result = match_df(target, reference)  # zero-config
     assert result.postflight_report is not None
     assert "score_histogram" in result.postflight_report.signals
+
+
+def test_preflight_check1_domain_repair_works_with_manual_domain_config():
+    """Bug fix: when user passes explicit domain_config, preflight should still
+    be able to auto-repair domain-extracted column references."""
+    import polars as pl
+    from goldenmatch.core.autoconfig import auto_configure_df
+    from goldenmatch.config.schemas import DomainConfig
+    df = pl.DataFrame({"title": [f"paper {i}" for i in range(50)]})
+    # Force manual domain selection
+    cfg = auto_configure_df(df, domain_config=DomainConfig(enabled=True, mode="bibliographic"))
+    assert hasattr(cfg, "_domain_profile")
+    assert cfg._domain_profile is not None
+    assert cfg._preflight_report is not None
