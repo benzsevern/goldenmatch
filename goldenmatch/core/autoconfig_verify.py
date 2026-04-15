@@ -20,8 +20,80 @@ from typing import TYPE_CHECKING, Any, Literal, TypedDict
 if TYPE_CHECKING:
     import polars as pl
 
-    from goldenmatch.config.schemas import GoldenMatchConfig
+    from goldenmatch.config.schemas import BlockingConfig, GoldenMatchConfig
     from goldenmatch.core.autoconfig import ColumnProfile
+
+
+def _sample_block_sizes(
+    df: "pl.DataFrame",
+    blocking: "BlockingConfig",
+    *,
+    sample_cap: int = 10_000,
+) -> list[int]:
+    """Return observed block sizes for all blocking keys + passes on a
+    head(sample_cap) sample of df.
+
+    Empty list if blocking has no keys, df is empty, or expression building
+    fails for every key. Per-key transform failures are silently skipped so a
+    single bad key cannot suppress signal from the other keys.
+
+    Sampling is deterministic via ``df.head(n)`` (not random) — for pre-sorted
+    inputs the distribution may over-represent the head's block skew;
+    acceptable as a first-line indicator. See callers for interpretation
+    (Preflight Check 4 treats this as percentile data; postflight signals
+    use it for ``block_size_percentiles``).
+    """
+    flat: list[int] = []
+    for _key, sizes, _err in _sample_block_sizes_per_key(
+        df, blocking, sample_cap=sample_cap
+    ):
+        flat.extend(sizes)
+    return flat
+
+
+def _sample_block_sizes_per_key(
+    df: "pl.DataFrame",
+    blocking: "BlockingConfig",
+    *,
+    sample_cap: int = 10_000,
+) -> list[tuple[Any, list[int], Exception | None]]:
+    """Per-key variant of ``_sample_block_sizes``.
+
+    Yields ``(key, sizes, err)`` for each blocking key + pass that references
+    columns present in ``df``. ``err`` is set when block-key expression
+    building or grouping raises — sizes will be ``[]`` in that case so callers
+    can surface a per-key advisory without losing the other keys' data.
+
+    Returns ``[]`` when df is empty.
+    """
+    if df.height == 0:
+        return []
+
+    from goldenmatch.core.blocker import _build_block_key_expr
+
+    n = min(df.height, sample_cap)
+    sample = df.head(n) if df.height > n else df
+
+    keys = list(blocking.keys or [])
+    keys.extend(blocking.passes or [])
+
+    out: list[tuple[Any, list[int], Exception | None]] = []
+    for key in keys:
+        if not all(f in df.columns for f in key.fields):
+            continue
+        try:
+            expr = _build_block_key_expr(key)
+            sizes_series = (
+                sample.with_columns(expr)
+                .group_by("__block_key__")
+                .len()
+                .get_column("len")
+            )
+        except Exception as exc:
+            out.append((key, [], exc))
+            continue
+        out.append((key, [int(s) for s in sizes_series.to_list()], None))
+    return out
 
 
 # Closed enumeration of preflight check names. A Literal (rather than free-form
@@ -380,32 +452,11 @@ def _check_block_sizes(
     if config.blocking is None or df.height == 0:
         return
 
-    import polars as pl
-    from goldenmatch.core.blocker import _build_block_key_expr
-
-    # Cap sample at 10K rows for speed. Sample via ``df.head(n)`` (not random)
-    # for determinism — for pre-sorted inputs the distribution may over-
-    # represent the head's block skew; acceptable as a first-line indicator.
     n = min(df.height, 10_000)
-    sample = df.head(n) if df.height > n else df
+    per_key = _sample_block_sizes_per_key(df, config.blocking, sample_cap=10_000)
 
-    keys = list(config.blocking.keys or [])
-    keys.extend(config.blocking.passes or [])
-
-    for key in keys:
-        # Skip if the blocking key references a column the df doesn't have;
-        # that's Check 1's problem.
-        if not all(f in df.columns for f in key.fields):
-            continue
-        try:
-            expr = _build_block_key_expr(key)
-            sizes = (
-                sample.with_columns(expr)
-                .group_by("__block_key__")
-                .len()
-                .get_column("len")
-            )
-        except Exception as exc:
+    for key, sizes_list, exc in per_key:
+        if exc is not None:
             # Transform failure — don't crash preflight; Check 1 or runtime
             # will surface it.
             report.findings.append(
@@ -420,11 +471,19 @@ def _check_block_sizes(
             )
             continue
 
-        if sizes.len() == 0:
+        if not sizes_list:
             continue
 
-        p50 = float(sizes.quantile(0.5) or 0)
-        p99 = float(sizes.quantile(0.99) or 0)
+        sorted_sizes = sorted(sizes_list)
+
+        def _quant(vals: list[int], q: float) -> float:
+            if not vals:
+                return 0.0
+            idx = int(round(q * (len(vals) - 1)))
+            return float(vals[idx])
+
+        p50 = _quant(sorted_sizes, 0.5)
+        p99 = _quant(sorted_sizes, 0.99)
 
         if p99 > 5000 or p50 < 2:
             verdict = []
@@ -440,7 +499,7 @@ def _check_block_sizes(
                     message=(
                         f"blocking key {key.fields}: "
                         f"P50={p50:.0f}, P99={p99:.0f}, "
-                        f"n_blocks={sizes.len()} (sampled {n} rows). "
+                        f"n_blocks={len(sorted_sizes)} (sampled {n} rows). "
                         + "; ".join(verdict)
                     ),
                     repaired=False,
@@ -860,41 +919,14 @@ def _signal_block_size_percentiles(
 ) -> dict[str, Any]:
     """Compute P50/P95/P99/max block sizes across all blocking keys.
 
-    Mirrors the sampling approach in _check_block_sizes (Preflight Check 4):
-    sample ``min(df.height, 10_000)`` via ``df.head(n)`` (deterministic, not
-    random — for pre-sorted inputs the distribution may over-represent the
-    head's block skew; acceptable as a first-line indicator), build the
-    blocking key expr, group, count. Returns zeros on failure or when
-    blocking is absent.
+    Uses the shared ``_sample_block_sizes`` helper (same sampling approach as
+    Preflight Check 4). Returns zeros on failure or when blocking is absent.
     """
     zero = {"p50": 0, "p95": 0, "p99": 0, "max": 0}
     if config.blocking is None or df.height == 0:
         return zero
 
-    from goldenmatch.core.blocker import _build_block_key_expr
-
-    n = min(df.height, 10_000)
-    sample = df.head(n) if df.height > n else df
-
-    keys = list(config.blocking.keys or [])
-    keys.extend(config.blocking.passes or [])
-
-    all_sizes: list[int] = []
-    for key in keys:
-        if not all(f in df.columns for f in key.fields):
-            continue
-        try:
-            expr = _build_block_key_expr(key)
-            sizes_series = (
-                sample.with_columns(expr)
-                .group_by("__block_key__")
-                .len()
-                .get_column("len")
-            )
-        except Exception:
-            continue
-        all_sizes.extend(int(s) for s in sizes_series.to_list())
-
+    all_sizes = _sample_block_sizes(df, config.blocking, sample_cap=10_000)
     if not all_sizes:
         return zero
     all_sizes.sort()

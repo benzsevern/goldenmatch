@@ -43,6 +43,66 @@ def _extract_matchkey_columns(config: GoldenMatchConfig) -> list[str]:
     return sorted(cols)
 
 
+def _propagate_autoconfig_markers(
+    src: GoldenMatchConfig, dst: GoldenMatchConfig
+) -> None:
+    """Copy preflight-verification markers from an auto_configure_df result
+    onto the user-facing ``dst`` config so postflight (later in the pipeline)
+    knows auto-config was used and whether strict mode is on.
+
+    These are underscore-private attrs, not Pydantic fields. ``dst.domain`` is
+    not touched here — callers handle that explicitly because the assignment
+    semantics differ (``domain`` is a Pydantic field, the markers are not).
+    """
+    if getattr(src, "_preflight_report", None) is not None:
+        dst._preflight_report = src._preflight_report
+    if getattr(src, "_strict_autoconfig", False):
+        dst._strict_autoconfig = True
+
+
+def _apply_postflight(
+    df: pl.DataFrame,
+    config: GoldenMatchConfig,
+    pair_scores: list[tuple[int, int, float]],
+) -> tuple[list[tuple[int, int, float]], object | None]:
+    """Run postflight if auto-config was used; apply threshold adjustments
+    unless strict.
+
+    Returns ``(possibly-filtered pair_scores, postflight_report or None)``.
+    Emits a logger warning + advisory if a threshold adjustment empties the
+    pair list (so callers can see why no clusters formed).
+
+    No-op (returns the input pair_scores and None) when the config carries
+    no ``_preflight_report`` — i.e. the caller did not go through
+    ``auto_configure_df``.
+    """
+    from goldenmatch.core.autoconfig_verify import (
+        PreflightReport as _PfR,
+        postflight as _postflight,
+    )
+
+    _preflight = getattr(config, "_preflight_report", None)
+    if not isinstance(_preflight, _PfR):
+        return pair_scores, None
+
+    report = _postflight(df, config, pair_scores=pair_scores)
+    if not getattr(config, "_strict_autoconfig", False):
+        for adj in report.adjustments:
+            if adj.field == "threshold":
+                prev_count = len(pair_scores)
+                pair_scores = [p for p in pair_scores if p[2] >= adj.to_value]
+                if prev_count > 0 and len(pair_scores) == 0:
+                    msg = (
+                        f"postflight threshold adjustment to {adj.to_value:.3f} "
+                        f"dropped all {prev_count} scored pairs — no clusters "
+                        f"will form. Consider strict=True or review the score "
+                        f"distribution in postflight_report.signals['score_histogram']."
+                    )
+                    logger.warning(msg)
+                    report.advisories.append(msg)
+    return pair_scores, report
+
+
 def _run_auto_suggest(df: pl.DataFrame, config: GoldenMatchConfig) -> None:
     """Run block analyzer auto-suggest if enabled in config.
 
@@ -242,13 +302,7 @@ def _run_dedupe_pipeline(
         # when auto_configure_df (via preflight Check 1) decided it should.
         if auto_cfg.domain is not None:
             config.domain = auto_cfg.domain
-        # Propagate preflight-verification markers so postflight (later in
-        # this function) knows auto-config was used and whether strict mode
-        # is on. These are underscore-private attrs, not Pydantic fields.
-        if getattr(auto_cfg, "_preflight_report", None) is not None:
-            config._preflight_report = auto_cfg._preflight_report
-        if getattr(auto_cfg, "_strict_autoconfig", False):
-            config._strict_autoconfig = True
+        _propagate_autoconfig_markers(auto_cfg, config)
         matchkeys = config.get_matchkeys()
         logger.info("Auto-configured from cleaned data: %d matchkeys", len(matchkeys))
         combined_lf = combined_df_tmp.lazy()
@@ -435,26 +489,9 @@ def _run_dedupe_pipeline(
     # to all_pairs before clustering. Ordering rationale: signals reflect
     # pre-adjustment observations; downstream clustering reflects the adjusted
     # threshold.
-    postflight_report = None
-    from goldenmatch.core.autoconfig_verify import PreflightReport as _PfR
-    _preflight = getattr(config, "_preflight_report", None)
-    if isinstance(_preflight, _PfR):
-        from goldenmatch.core.autoconfig_verify import postflight as _postflight
-        postflight_report = _postflight(collected_df, config, pair_scores=all_pairs)
-        if not getattr(config, "_strict_autoconfig", False):
-            for adj in postflight_report.adjustments:
-                if adj.field == "threshold":
-                    prev_count = len(all_pairs)
-                    all_pairs = [p for p in all_pairs if p[2] >= adj.to_value]
-                    if prev_count > 0 and len(all_pairs) == 0:
-                        msg = (
-                            f"postflight threshold adjustment to {adj.to_value:.3f} "
-                            f"dropped all {prev_count} scored pairs — no clusters "
-                            f"will form. Consider strict=True or review the score "
-                            f"distribution in postflight_report.signals['score_histogram']."
-                        )
-                        logger.warning(msg)
-                        postflight_report.advisories.append(msg)
+    all_pairs, postflight_report = _apply_postflight(
+        collected_df, config, all_pairs
+    )
 
     # ── Step 4: CLUSTER ──
     all_ids = collected_df["__row_id__"].to_list()
@@ -736,13 +773,7 @@ def _run_match_pipeline(
         config.memory = auto_cfg.memory
         if auto_cfg.domain is not None:
             config.domain = auto_cfg.domain
-        # Propagate preflight-verification markers so postflight (later in
-        # this function) knows auto-config was used and whether strict mode
-        # is on. These are underscore-private attrs, not Pydantic fields.
-        if getattr(auto_cfg, "_preflight_report", None) is not None:
-            config._preflight_report = auto_cfg._preflight_report
-        if getattr(auto_cfg, "_strict_autoconfig", False):
-            config._strict_autoconfig = True
+        _propagate_autoconfig_markers(auto_cfg, config)
         matchkeys = config.get_matchkeys()
         logger.info("Auto-configured from cleaned data: %d matchkeys", len(matchkeys))
         combined_lf = combined_df_tmp.lazy()
@@ -857,26 +888,9 @@ def _run_match_pipeline(
     # list; threshold adjustments (if any, non-strict only) are then applied
     # to all_pairs before downstream grouping. Ordering: signals reflect
     # pre-adjustment observations; grouping reflects the adjusted threshold.
-    postflight_report = None
-    from goldenmatch.core.autoconfig_verify import PreflightReport as _PfR
-    _preflight = getattr(config, "_preflight_report", None)
-    if isinstance(_preflight, _PfR):
-        from goldenmatch.core.autoconfig_verify import postflight as _postflight
-        postflight_report = _postflight(combined_df, config, pair_scores=all_pairs)
-        if not getattr(config, "_strict_autoconfig", False):
-            for adj in postflight_report.adjustments:
-                if adj.field == "threshold":
-                    prev_count = len(all_pairs)
-                    all_pairs = [p for p in all_pairs if p[2] >= adj.to_value]
-                    if prev_count > 0 and len(all_pairs) == 0:
-                        msg = (
-                            f"postflight threshold adjustment to {adj.to_value:.3f} "
-                            f"dropped all {prev_count} scored pairs — no clusters "
-                            f"will form. Consider strict=True or review the score "
-                            f"distribution in postflight_report.signals['score_histogram']."
-                        )
-                        logger.warning(msg)
-                        postflight_report.advisories.append(msg)
+    all_pairs, postflight_report = _apply_postflight(
+        combined_df, config, all_pairs
+    )
 
     # ── Step 5: Normalize pairs so target ID is always first ──
     normalized: list[tuple[int, int, float]] = []

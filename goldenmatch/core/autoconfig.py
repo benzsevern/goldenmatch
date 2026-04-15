@@ -82,7 +82,7 @@ class AutoConfigDecisions:
     blocking_passes: list[BlockingKeyConfig]
     matchkeys: list[MatchkeyConfig]
     threshold: float                # TODO(autoconfig-verify): consumed by postflight threshold nudge — not read yet
-    domain_mode: str | None         # TODO(autoconfig-verify): populated by preflight Check 1 — not read yet
+    domain_mode: str | None         # populated from detected DomainProfile.name; not read yet
     llm_enabled: bool               # TODO(autoconfig-verify): preflight Check 5 input — not read yet
     allow_remote_assets: bool       # TODO(autoconfig-verify): preflight Check 5 input — not read yet
 
@@ -1424,7 +1424,11 @@ def auto_configure_df(
         blocking_passes=list(blocking.passes) if (blocking is not None and blocking.passes) else [],
         matchkeys=matchkeys,
         threshold=0.0,  # populated in a later task
-        domain_mode=None,
+        # domain_mode mirrors the detected domain profile (when present).
+        # Demonstrates the field's contract even though no consumer reads it
+        # yet — populating now means future iterative tuners can inspect it
+        # without us also having to backfill the call site.
+        domain_mode=(domain_profile.name if domain_profile is not None else None),
         llm_enabled=llm_scorer_config is not None,
         allow_remote_assets=False,
     )
@@ -1461,7 +1465,7 @@ def auto_configure_df(
 
 
 def _rebuild_from_decisions(
-    profiles: list[ColumnProfile],
+    _profiles: list[ColumnProfile],
     decisions: AutoConfigDecisions,
     *,
     transient_blocking: BlockingConfig | None,
@@ -1478,6 +1482,10 @@ def _rebuild_from_decisions(
     Splitting this out lets a future iterative-tuning loop mutate `decisions`
     and re-call `_rebuild_from_decisions` without re-running profile_columns /
     build_matchkeys / build_blocking.
+
+    ``_profiles`` is reserved (underscore-prefix unused parameter) for future
+    iterative-tuning hooks that may re-examine column stats without rethreading
+    them through the call chain.
     """
     # Rebuild final blocking from decisions, preserving runtime-only attrs
     # (learned_sample_size, learned_min_recall, skip_oversized, etc.) from
@@ -1491,11 +1499,6 @@ def _rebuild_from_decisions(
             "keys": decisions.blocking_keys,
             "passes": decisions.blocking_passes,
         })
-
-    # `profiles` is retained in the signature for future iterative-tuning
-    # hooks: reserved so tuning loops can re-examine column stats without
-    # threading them through the call chain. Currently unused.
-    del profiles
 
     return GoldenMatchConfig(
         matchkeys=decisions.matchkeys,
