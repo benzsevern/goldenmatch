@@ -15,6 +15,12 @@
 - **Optional peer deps:** load via `await import("pkg-name" as string)` — the `as string` cast prevents tsup from resolving at build time
 - **tsup has 5 entrypoints:** `index`, `core/index`, `node/index`, `cli`, `node/backends/score-worker` (piscina worker)
 - **PORTING_GUIDE.md** in repo root is the playbook for porting
+- **No `make*` factory functions** exist for config types — test fixtures use full literals. Required fields: `MatchkeyField` needs `field`+`transforms`+`scorer`+`weight`; `BlockingKeyConfig` needs `fields`+`transforms`; `BlockingConfig` needs `strategy`+`keys`+`maxBlockSize`+`skipOversized`
+- **Scorer names are snake_case** (same as Python): `token_sort`, `record_embedding`, `soundex_match`, `ensemble`, `exact`, `jaro_winkler`, `levenshtein`
+- **`DOMAIN_EXTRACTED_COLS`** (in `src/core/domain.ts`) has only 3 entries (`__brand__`, `__model__`, `__version__`) — Python's equivalent has 12; don't assume parity when porting domain features
+- **`import type` cycle rule:** `types.ts` imports types from `autoconfigVerify.ts`, so `autoconfigVerify.ts` must use `import type { ... }` (never runtime `import`) for any types.ts symbols
+- **`exactOptionalPropertyTypes`:** don't spread `undefined` into typed optional fields — use `...(x !== undefined ? { field: x } : {})`
+- **Vitest default timeout is 5s** — heavier integration tests (PPRL multi-level, postflight end-to-end) need `{ timeout: 15000 }`; CI concurrent load has bitten this (cost a release: goldenmatch-js v0.3.0 → v0.3.1)
 
 ## Branch & Merge SOP (all Golden Suite repos)
 - Feature work goes on `feature/<name>` branches, never directly to main
@@ -33,6 +39,7 @@
 - Project lives on D: drive: `D:\show_case\goldenmatch`
 - Two GitHub accounts: `benzsevern` (personal, for this repo) and `benzsevern-mjh` (work)
 - MUST `gh auth switch --user benzsevern` before push, switch back to `benzsevern-mjh` after
+- `gh auth switch` sometimes doesn't apply to `gh api graphql` / `gh pr create` / git push — force the right token with `GH_TOKEN=$(gh auth token --user benzsevern) gh ...`. For wiki repo push, rewrite the remote URL: `git remote set-url origin "https://benzsevern:$(gh auth token --user benzsevern)@github.com/benzsevern/goldenmatch.wiki.git"`
 - Polars `scan_csv` uses `encoding="utf8"` not `"utf-8"`
 - Polars `read_excel` needs explicit `engine="openpyxl"`
 - Rust 1.94.0 installed at `C:\Users\bsevern\.cargo\bin` -- must set `RUSTUP_HOME="C:/Users/bsevern/.rustup"` and `CARGO_HOME="C:/Users/bsevern/.cargo"` in every bash command, plus add to PATH
@@ -222,6 +229,10 @@ Hosted on Railway, registered on Smithery:
 - `llm_scorer` and `backend` kwargs applied uniformly after config resolution (not inside zero-config branch)
 
 ## Gotchas
+- `docs/superpowers/` is gitignored — specs and plans are local-only; do NOT `git add` them
+- `tests/benchmarks/datasets/` is gitignored — tests reading those files must `pytest.skip` when absent OR be marked `@pytest.mark.benchmark` and excluded from default CI via `--ignore`
+- `publish-npm.yml` runs the full vitest suite pre-publish — any flake blocks the release; can't retry, must fix + bump patch version + new tag
+- `gh run watch <run-id> --exit-status` blocks until a workflow completes — useful for confirming publish success before moving on
 - GitHub Discussions API: REST returns 404. Use GraphQL `createDiscussion` mutation with `repositoryId` (R_kgDORoztPA for this repo) and a `categoryId` fetched via `discussionCategories`.
 - `gh repo edit --add-topic` fails at 20 topics (API-side cap). Drop low-value topics with `--remove-topic` before adding.
 - Wiki repo: `git clone https://github.com/benzsevern/goldenmatch.wiki.git`, branch is `master` (not `main`).
