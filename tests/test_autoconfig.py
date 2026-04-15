@@ -1321,14 +1321,26 @@ def test_classify_by_data_prose_not_multi_name():
 def test_autoconfig_parity_pins_unchanged():
     """Pin test: AutoConfigDecisions refactor must not change output for the
     three benchmarks. If this fails, the refactor changed behavior - fix the
-    refactor, not the pin file."""
+    refactor, not the pin file.
+
+    Benchmark datasets are gitignored; this test is effectively local-dev
+    only. CI skips it gracefully. Contributors who want to exercise the
+    parity guard should run `python tests/parity/capture_autoconfig_output.py`
+    after pulling the Leipzig DBLP-ACM dataset into tests/benchmarks/datasets/.
+    """
     import json
     import sys
     from pathlib import Path
 
     import polars as pl
+    import pytest
 
     repo_root = Path(__file__).parent.parent
+    dblp_path = repo_root / "tests" / "benchmarks" / "datasets" / "DBLP-ACM" / "DBLP2.csv"
+    if not dblp_path.exists():
+        pytest.skip(
+            "DBLP-ACM dataset not present (gitignored, local-dev only)"
+        )
     # Import pin_config from the capture script (not a normal test import)
     sys.path.insert(0, str(repo_root / "tests" / "parity"))
     from capture_autoconfig_output import pin_config  # type: ignore
