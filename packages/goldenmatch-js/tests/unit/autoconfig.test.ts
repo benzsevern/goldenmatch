@@ -23,16 +23,24 @@ function makePeople(n: number): Row[] {
 }
 
 describe("autoConfigureRows", () => {
-  it("picks exact matchkeys on email/phone and produces a weighted matchkey", () => {
+  it("produces a weighted matchkey; preflight drops near-unique exact matchkeys", () => {
     const rows = makePeople(40);
     const cfg = autoConfigureRows(rows);
     const names = (cfg.matchkeys ?? []).map((m) => m.name);
-    // Exact matchkeys for identifier columns.
-    expect(names).toContain("exact_email");
-    // Phone column has phone-shaped values and is near-unique -> exact allowed.
-    expect(names).toContain("exact_phone");
-    // There should be a weighted matchkey for fuzzy fields.
+    // email/phone are 100% unique in this fixture -> preflight Check 2
+    // drops them as "near-unique, never agree".
+    expect(names).not.toContain("exact_email");
+    expect(names).not.toContain("exact_phone");
+    // Weighted matchkey survives.
     expect(names).toContain("weighted_identity");
+    // The drop is surfaced as a repaired warning in the report.
+    const report = cfg._preflightReport;
+    expect(report).toBeDefined();
+    expect(
+      report!.findings.some(
+        (f) => f.check === "cardinality_high" && f.repaired,
+      ),
+    ).toBe(true);
   });
 
   it("zip and geo columns do NOT back exact matchkeys (blocking signal only)", () => {
@@ -91,13 +99,26 @@ describe("autoConfigureRows", () => {
     expect(keyFields).not.toContain("email");
   });
 
-  it("email column detected as exact identifier candidate when cardinality is high", () => {
+  it("email column: 100%-unique fixtures have their exact matchkey dropped by preflight", () => {
+    // With every email unique, preflight's cardinality_high check repairs
+    // the config by dropping exact_email. Autoconfig still builds it — the
+    // preflight report records the repair.
     const rows: Row[] = [];
     for (let i = 0; i < 20; i++) {
       rows.push({ __row_id__: i, email: `user${i}@x.com` });
     }
     const cfg = autoConfigureRows(rows);
     const names = (cfg.matchkeys ?? []).map((m) => m.name);
-    expect(names).toContain("exact_email");
+    expect(names).not.toContain("exact_email");
+    const report = cfg._preflightReport;
+    expect(report).toBeDefined();
+    expect(
+      report!.findings.some(
+        (f) =>
+          f.check === "cardinality_high" &&
+          f.repaired &&
+          f.subject === "exact_email",
+      ),
+    ).toBe(true);
   });
 });

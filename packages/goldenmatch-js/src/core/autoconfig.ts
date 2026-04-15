@@ -22,6 +22,8 @@ import {
   makeGoldenRulesConfig,
 } from "./types.js";
 import { profileRows, type ColumnProfile, type DatasetProfile } from "./profiler.js";
+import { detectDomain } from "./domain.js";
+import { preflight, ConfigValidationError } from "./autoconfigVerify.js";
 
 // ---------------------------------------------------------------------------
 // Options
@@ -30,6 +32,13 @@ import { profileRows, type ColumnProfile, type DatasetProfile } from "./profiler
 export interface AutoconfigOptions {
   readonly llmProvider?: string;
   readonly llmAuto?: boolean;
+  /** If true, stamps `_strictAutoconfig: true` onto the returned config so
+   *  postflight skips threshold auto-adjustment. */
+  readonly strict?: boolean;
+  /** If true, preflight preserves `embedding` / `record_embedding` scorers
+   *  instead of demoting them. Use when callers have opted into remote
+   *  model downloads. */
+  readonly allowRemoteAssets?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -442,7 +451,27 @@ export function autoConfigureRows(
     ...(options?.llmAuto !== undefined ? { llmAuto: options.llmAuto } : {}),
   });
 
-  return config;
+  // Stash domain profile for preflight's domain-extracted column auto-repair
+  // (Check 1). Confidence threshold matches Python — below 0.7 we do not
+  // trust the detection enough to flip on config.domain automatically.
+  const rowColumns = rows.length > 0 ? Object.keys(rows[0] as object) : [];
+  const domainProfile = rowColumns.length > 0 ? detectDomain(rowColumns) : null;
+  if (domainProfile !== null && domainProfile.confidence > 0.7) {
+    (config as GoldenMatchConfig)._domainProfile = domainProfile;
+  }
+
+  const { report, config: repaired } = preflight(rows, config, {
+    profiles,
+    allowRemoteAssets: options?.allowRemoteAssets ?? false,
+  });
+  if (report.hasErrors) {
+    throw new ConfigValidationError(report);
+  }
+  (repaired as GoldenMatchConfig)._preflightReport = report;
+  if (options?.strict === true) {
+    (repaired as GoldenMatchConfig)._strictAutoconfig = true;
+  }
+  return repaired;
 }
 
 /**
