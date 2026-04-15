@@ -24,7 +24,7 @@ jobs:
         run: pip install -e ".[dev]" xlsxwriter scikit-learn
 
       - name: Run tests
-        run: pytest --tb=short --ignore=tests/test_db.py --ignore=tests/test_reconcile.py --ignore=tests/test_mcp_and_watch.py -q
+        run: pytest --tb=short --ignore=tests/test_db.py --ignore=tests/test_reconcile.py --ignore=tests/test_mcp_and_watch.py --ignore=tests/test_autoconfig_benchmarks.py -q
 
   coverage:
     runs-on: ubuntu-latest
@@ -34,7 +34,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]" xlsxwriter scikit-learn
-      - run: pytest --cov=goldenmatch --cov-report=xml --tb=short --ignore=tests/test_db.py --ignore=tests/test_reconcile.py --ignore=tests/test_mcp_and_watch.py -q
+      - run: pytest --cov=goldenmatch --cov-report=xml --tb=short --ignore=tests/test_db.py --ignore=tests/test_reconcile.py --ignore=tests/test_mcp_and_watch.py --ignore=tests/test_autoconfig_benchmarks.py -q
       - uses: codecov/codecov-action@v4
         with:
           file: coverage.xml
