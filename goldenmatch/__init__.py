@@ -151,6 +151,18 @@ from goldenmatch.core.boost import boost_accuracy
 from goldenmatch.core.autoconfig import auto_configure, auto_configure_df
 from goldenmatch.core.threshold import suggest_threshold
 
+# ── Auto-config verification ────────────────────────────────────────────
+# Spec: docs/superpowers/specs/2026-04-14-autoconfig-verification-design.md
+from goldenmatch.core.autoconfig_verify import (
+    preflight,
+    postflight,
+    PreflightReport,
+    PreflightFinding,
+    PostflightReport,
+    PostflightAdjustment,
+    ConfigValidationError,
+)
+
 # ── Data quality ─────────────────────────────────────────────────────────
 from goldenmatch.core.autofix import auto_fix_dataframe
 from goldenmatch.core.validate import validate_dataframe
@@ -249,6 +261,11 @@ __all__ = [
     "boost_accuracy",
     # Auto-configuration
     "auto_configure", "auto_configure_df", "suggest_threshold",
+    # Auto-config verification
+    "preflight", "postflight",
+    "PreflightReport", "PreflightFinding",
+    "PostflightReport", "PostflightAdjustment",
+    "ConfigValidationError",
     # Data quality
     "auto_fix_dataframe", "validate_dataframe", "detect_anomalies",
     # Schema matching
