@@ -19,6 +19,8 @@ npx tsx examples/<name>.ts
 | 09 | `09-llm-scorer.ts` | LLM scorer for borderline pairs (needs OPENAI_API_KEY) |
 | 10 | `10-explain.ts` | Template NL explanation of a pair match |
 | 11 | `11-evaluate.ts` | Evaluate against ground truth (precision/recall/F1) |
+| 12 | `verificationInspection.ts` | Inspect preflight findings + postflight signals |
+| 13 | `strictModeParity.ts` | Use `_strictAutoconfig` to disable runtime threshold shifts |
 
 ## Running
 
