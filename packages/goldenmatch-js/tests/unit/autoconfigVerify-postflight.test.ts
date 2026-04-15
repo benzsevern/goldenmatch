@@ -171,3 +171,68 @@ describe("postflight: score histogram", () => {
     expect(report.signals.scoreHistogram.bins.length).toBe(101);
   });
 });
+
+describe("postflight pipeline integration: dedupe", () => {
+  it("auto-configured dedupe attaches postflightReport", async () => {
+    const { dedupe } = await import("../../src/core/api.js");
+    const { autoConfigureRows } = await import("../../src/core/autoconfig.js");
+    const rows = Array.from({ length: 50 }, (_, i) => ({
+      name: `alice ${i}`,
+      zip: "90210",
+    }));
+    const cfg = autoConfigureRows(rows);
+    const result = dedupe(rows, { config: cfg });
+    expect(result.postflightReport).toBeDefined();
+    expect(result.postflightReport!.signals.scoreHistogram.bins.length).toBe(101);
+  });
+
+  it("hand-written config (non-autoconfig) has undefined postflightReport", async () => {
+    const { dedupe } = await import("../../src/core/api.js");
+    const rows = Array.from({ length: 10 }, (_, i) => ({ name: `x${i}` }));
+    // Hand-written shorthand: the shorthand path does NOT call
+    // autoConfigureRows, so config._preflightReport is undefined and the
+    // pipeline guard short-circuits. This documents the contract: a
+    // PostflightReport is only attached when the config went through the
+    // auto-config preflight layer.
+    const result = dedupe(rows, { fuzzy: { name: 0.7 } });
+    expect(result.postflightReport).toBeUndefined();
+  });
+});
+
+describe("postflight pipeline integration: strict mode", () => {
+  it("strict mode: postflightReport present, adjustments empty", async () => {
+    const { autoConfigureRows } = await import("../../src/core/autoconfig.js");
+    const { dedupe } = await import("../../src/core/api.js");
+    const rows = Array.from({ length: 100 }, (_, i) => ({
+      name: i < 50 ? `bob ${i}` : `bob ${i}x`,
+    }));
+    const cfg = autoConfigureRows(rows, { strict: true });
+    const result = dedupe(rows, { config: cfg });
+    expect(result.postflightReport).toBeDefined();
+    expect(result.postflightReport!.adjustments).toHaveLength(0);
+  });
+});
+
+describe("postflight pipeline integration: match", () => {
+  it("auto-configured match attaches postflightReport", async () => {
+    const { match } = await import("../../src/core/api.js");
+    const { autoConfigureRows } = await import("../../src/core/autoconfig.js");
+    const target = [
+      { name: "alice smith" },
+      { name: "bob jones" },
+      { name: "carol white" },
+    ];
+    const reference = [
+      { name: "alice smyth" },
+      { name: "bob jonesy" },
+      { name: "carol white" },
+      { name: "dan brown" },
+    ];
+    const cfg = autoConfigureRows([...target, ...reference]);
+    const result = match(target, reference, { config: cfg });
+    expect(result.postflightReport).toBeDefined();
+    const sig = result.postflightReport!.signals;
+    expect("scoreHistogram" in sig).toBe(true);
+    expect(sig.totalPairsScored).toBeGreaterThanOrEqual(0);
+  });
+});
