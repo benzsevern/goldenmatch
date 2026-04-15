@@ -29,8 +29,11 @@ import { DOMAIN_EXTRACTED_COLS } from "./domain.js";
 // Types
 // ---------------------------------------------------------------------------
 
-/** Snake_case chosen to match the Python PreflightCheckName string values;
- *  cross-repo parity fixtures compare these as literal strings. */
+/**
+ * Named preflight check. Snake_case chosen to match the Python
+ * `PreflightCheckName` string values; cross-repo parity fixtures compare
+ * these as literal strings.
+ */
 export type PreflightCheckName =
   | "missing_column"
   | "cardinality_high"
@@ -41,8 +44,14 @@ export type PreflightCheckName =
   | "no_matchkeys_remain"
   | "remote_asset_matchkey_empty";
 
+/** Severity level for a {@link PreflightFinding}. */
 export type Severity = "error" | "warning" | "info";
 
+/**
+ * A single diagnostic produced by {@link preflight}. `repaired: true` means
+ * the config mutation has already happened; `repairNote` describes what
+ * changed.
+ */
 export interface PreflightFinding {
   readonly check: PreflightCheckName;
   readonly severity: Severity;
@@ -52,6 +61,11 @@ export interface PreflightFinding {
   readonly repairNote: string | null;
 }
 
+/**
+ * Aggregate result of running {@link preflight}: a list of findings plus
+ * flags summarising whether the config was mutated or contains unrepairable
+ * errors.
+ */
 export interface PreflightReport {
   readonly findings: readonly PreflightFinding[];
   readonly configWasModified: boolean;
@@ -59,6 +73,10 @@ export interface PreflightReport {
   readonly hasErrors: boolean;
 }
 
+/**
+ * Build a frozen {@link PreflightReport} from a findings array. Computes
+ * {@link PreflightReport.hasErrors} from the finding severities.
+ */
 export function makePreflightReport(
   findings: readonly PreflightFinding[],
   configWasModified: boolean,
@@ -69,6 +87,12 @@ export function makePreflightReport(
   return Object.freeze({ findings, configWasModified, hasErrors });
 }
 
+/**
+ * Thrown by {@link preflight} / `autoConfigureRows` when the report contains
+ * at least one severity=error finding that could not be repaired.
+ * The full {@link PreflightReport} is available on `.report` for downstream
+ * inspection (e.g. logging every finding before re-throwing).
+ */
 export class ConfigValidationError extends Error {
   public readonly report: PreflightReport;
   constructor(report: PreflightReport) {
@@ -84,11 +108,20 @@ export class ConfigValidationError extends Error {
   }
 }
 
+/**
+ * 100-bin histogram of pair scores emitted by {@link postflight}.
+ * `bins` has 101 edges; `counts` has 100 frequencies. `sum(counts)` equals
+ * {@link PostflightSignals.totalPairsScored}.
+ */
 export interface ScoreHistogram {
   readonly bins: readonly number[];
   readonly counts: readonly number[];
 }
 
+/**
+ * Percentile summary of block sizes (pre-scoring). Always satisfies
+ * `p50 <= p95 <= p99 <= max`.
+ */
 export interface BlockSizePercentiles {
   readonly p50: number;
   readonly p95: number;
@@ -96,16 +129,30 @@ export interface BlockSizePercentiles {
   readonly max: number;
 }
 
+/**
+ * Percentile summary of preliminary cluster sizes (post-scoring, pre-MST).
+ * Adds a `count` field for the number of non-singleton components.
+ */
 export interface ClusterSizePercentiles extends BlockSizePercentiles {
   readonly count: number;
 }
 
+/**
+ * A preliminary cluster exceeding the oversize threshold. `bottleneckPair`
+ * is the weakest edge in the MST and is always present in the input pair
+ * scores.
+ */
 export interface OversizedCluster {
   readonly clusterId: number;
   readonly size: number;
   readonly bottleneckPair: readonly [number, number];
 }
 
+/**
+ * Four diagnostic signals produced by {@link postflight}: a score
+ * histogram, blocking recall (often `"deferred"`), block + cluster
+ * percentiles, threshold-overlap fraction, and oversized-cluster list.
+ */
 export interface PostflightSignals {
   readonly scoreHistogram: ScoreHistogram;
   readonly blockingRecall: number | "deferred";
@@ -117,6 +164,12 @@ export interface PostflightSignals {
   readonly oversizedClusters: readonly OversizedCluster[];
 }
 
+/**
+ * A single config mutation proposed by {@link postflight}. Currently the
+ * only emitted field is `"threshold"` in response to a clearly bimodal
+ * score distribution. In strict mode the adjustment is still reported but
+ * not applied by the pipeline.
+ */
 export interface PostflightAdjustment {
   readonly field: string;
   readonly fromValue: unknown;
@@ -125,6 +178,11 @@ export interface PostflightAdjustment {
   readonly signal: string;
 }
 
+/**
+ * Full postflight result: raw {@link PostflightSignals}, the list of
+ * proposed {@link PostflightAdjustment}s, and human-readable advisories
+ * (e.g. "score distribution is unimodal; threshold cannot be auto-set").
+ */
 export interface PostflightReport {
   readonly signals: PostflightSignals;
   readonly adjustments: readonly PostflightAdjustment[];
@@ -135,6 +193,12 @@ export interface PostflightReport {
 // Utility: strip convention-private fields before YAML/JSON serialization.
 // ---------------------------------------------------------------------------
 
+/**
+ * Remove convention-private fields (keys starting with `_`) from a config
+ * before YAML/JSON serialization. Leaves the input unmodified; returns a
+ * shallow copy without `_preflightReport`, `_postflightReport`,
+ * `_strictAutoconfig`, `_domainProfile`, and similar internal metadata.
+ */
 export function stripConventionPrivate<T extends object>(cfg: T): T {
   const out = { ...cfg } as T & Record<string, unknown>;
   for (const k of Object.keys(out)) {
@@ -149,6 +213,12 @@ export function stripConventionPrivate<T extends object>(cfg: T): T {
 // preflight — six static checks, config-aware, returns possibly-repaired cfg.
 // ---------------------------------------------------------------------------
 
+/**
+ * Options for {@link preflight}. `profiles` lets the caller reuse an
+ * already-computed set of column profiles (avoiding a rescan). Set
+ * `allowRemoteAssets: true` to permit scorers that require model downloads
+ * (default is offline-safe).
+ */
 export interface PreflightOptions {
   readonly profiles?: readonly ColumnProfile[];
   readonly allowRemoteAssets?: boolean;
@@ -510,6 +580,14 @@ function checkWeightConfidence(
   return { ...config, matchkeys: newMatchkeys };
 }
 
+/**
+ * Run the preflight verification pass: six static checks over `rows` and
+ * `config`, returning a possibly-repaired config alongside the findings.
+ *
+ * Does NOT throw on errors — callers (typically `autoConfigureRows`) decide
+ * whether to raise {@link ConfigValidationError} based on
+ * `report.hasErrors`.
+ */
 export function preflight(
   rows: readonly Record<string, unknown>[],
   config: GoldenMatchConfig,
@@ -756,6 +834,15 @@ function signalClusterSizes(
   return { percentiles, oversized };
 }
 
+/**
+ * Run the postflight verification pass: computes four runtime signals and
+ * zero-or-more {@link PostflightAdjustment}s from the scored pair list.
+ *
+ * Adjustments are surfaced but NOT applied here; the caller (the pipeline)
+ * decides whether to honor them. Strict-mode configs
+ * (`_strictAutoconfig === true`) skip the adjustment application entirely
+ * but still receive the diagnostic report.
+ */
 export function postflight(
   rows: readonly Record<string, unknown>[],
   config: GoldenMatchConfig,
