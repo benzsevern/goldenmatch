@@ -15,7 +15,7 @@ downstream introspection (Postflight, diagnostics, tests).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 if TYPE_CHECKING:
     import polars as pl
@@ -24,11 +24,26 @@ if TYPE_CHECKING:
     from goldenmatch.core.autoconfig import ColumnProfile
 
 
+# Closed enumeration of preflight check names. A Literal (rather than free-form
+# str) gives static protection against typos in producer/consumer code and
+# makes the set of checks grep-friendly.
+PreflightCheckName = Literal[
+    "missing_column",
+    "cardinality_high",
+    "cardinality_low",
+    "block_size",
+    "remote_asset",
+    "weight_confidence",
+    "no_matchkeys_remain",
+    "remote_asset_matchkey_empty",
+]
+
+
 @dataclass
 class PreflightFinding:
     """One check result — informational, warning, or hard error."""
 
-    check: str
+    check: PreflightCheckName
     severity: Literal["error", "warning", "info"]
     subject: str
     message: str
@@ -51,6 +66,50 @@ class PreflightReport:
         )
 
 
+# ── Postflight signals schema (stable public contract) ──
+#
+# The shape below is the stable schema of ``PostflightReport.signals``. Using
+# TypedDict rather than ``dict[str, Any]`` makes the contract legible and
+# mechanically enforceable, without changing runtime behavior.
+
+
+class ScoreHistogram(TypedDict):
+    bins: list[float]
+    counts: list[int]
+
+
+class BlockSizePercentiles(TypedDict):
+    p50: int
+    p95: int
+    p99: int
+    max: int
+
+
+class ClusterSizePercentiles(TypedDict):
+    p50: int
+    p95: int
+    p99: int
+    max: int
+    count: int
+
+
+class OversizedCluster(TypedDict, total=False):
+    cluster_id: int
+    size: int
+    bottleneck_pair: list[int]  # [int, int]
+
+
+class PostflightSignals(TypedDict):
+    score_histogram: ScoreHistogram
+    blocking_recall: float | Literal["deferred"]
+    block_size_percentiles: BlockSizePercentiles
+    threshold_overlap_pct: float
+    total_pairs_scored: int
+    current_threshold: float
+    preliminary_cluster_sizes: ClusterSizePercentiles
+    oversized_clusters: list[OversizedCluster]
+
+
 @dataclass
 class PostflightAdjustment:
     """A single auto-applied adjustment produced by postflight.
@@ -66,6 +125,16 @@ class PostflightAdjustment:
     signal: str
 
 
+def _empty_signals() -> "PostflightSignals":
+    """Factory for PostflightReport.signals.
+
+    Returns an empty dict typed as PostflightSignals; ``postflight()``
+    populates every required key before the report is returned. Tests may
+    also build a ``PostflightReport`` with partial signals.
+    """
+    return {}  # type: ignore[typeddict-item]
+
+
 @dataclass
 class PostflightReport:
     """Aggregated result of running all postflight signals.
@@ -76,7 +145,7 @@ class PostflightReport:
     --llm-auto").
     """
 
-    signals: dict[str, Any] = field(default_factory=dict)
+    signals: "PostflightSignals" = field(default_factory=_empty_signals)
     adjustments: list[PostflightAdjustment] = field(default_factory=list)
     advisories: list[str] = field(default_factory=list)
 
