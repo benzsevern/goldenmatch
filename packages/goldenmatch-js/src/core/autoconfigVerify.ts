@@ -222,6 +222,87 @@ function checkColumns(
   return repairedConfig;
 }
 
+function cardinalityRatio(
+  rows: readonly Record<string, unknown>[],
+  col: string,
+): number {
+  if (rows.length === 0) return 0;
+  const distinct = new Set<unknown>();
+  for (const r of rows) distinct.add(r[col]);
+  return distinct.size / rows.length;
+}
+
+function checkCardinality(
+  rows: readonly Record<string, unknown>[],
+  config: GoldenMatchConfig,
+  findings: PreflightFinding[],
+): GoldenMatchConfig {
+  const matchkeys = config.matchkeys;
+  if (matchkeys === undefined || matchkeys.length === 0) return config;
+  if (rows.length === 0) return config;
+
+  const present = new Set<string>(Object.keys(rows[0] as object));
+  const kept: MatchkeyConfig[] = [];
+  let dropped = 0;
+
+  for (const mk of matchkeys) {
+    if (mk.type !== "exact") {
+      kept.push(mk);
+      continue;
+    }
+    let drop = false;
+    for (const f of mk.fields) {
+      if (!present.has(f.field)) continue;
+      const ratio = cardinalityRatio(rows, f.field);
+      if (ratio >= 0.99) {
+        findings.push({
+          check: "cardinality_high",
+          severity: "warning",
+          subject: mk.name,
+          message: `exact matchkey ${mk.name} dropped: column ${f.field} has cardinality ${ratio.toFixed(3)} (near-unique)`,
+          repaired: true,
+          repairNote: `dropped matchkey (cardinality_ratio=${ratio.toFixed(3)} >= 0.99)`,
+        });
+        drop = true;
+        break;
+      }
+      if (ratio <= 0.01) {
+        findings.push({
+          check: "cardinality_low",
+          severity: "warning",
+          subject: mk.name,
+          message: `exact matchkey ${mk.name} dropped: column ${f.field} has cardinality ${ratio.toFixed(3)} (too few distinct values)`,
+          repaired: true,
+          repairNote: `dropped matchkey (cardinality_ratio=${ratio.toFixed(3)} <= 0.01)`,
+        });
+        drop = true;
+        break;
+      }
+    }
+    if (drop) {
+      dropped += 1;
+    } else {
+      kept.push(mk);
+    }
+  }
+
+  if (dropped === 0) return config;
+
+  if (kept.length === 0) {
+    findings.push({
+      check: "no_matchkeys_remain",
+      severity: "error",
+      subject: "matchkeys",
+      message:
+        "all matchkeys dropped by cardinality guards — nothing left to score",
+      repaired: false,
+      repairNote: null,
+    });
+  }
+
+  return { ...config, matchkeys: kept };
+}
+
 export function preflight(
   rows: readonly Record<string, unknown>[],
   config: GoldenMatchConfig,
@@ -232,7 +313,8 @@ export function preflight(
   let current = config;
 
   current = checkColumns(rows, current, findings);
-  // Checks 2-6 added in subsequent tasks.
+  current = checkCardinality(rows, current, findings);
+  // Checks 4-6 added in subsequent tasks.
 
   const report = makePreflightReport(findings, current !== config);
   return { report, config: current };

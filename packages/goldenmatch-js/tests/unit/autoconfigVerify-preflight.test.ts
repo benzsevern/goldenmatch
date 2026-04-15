@@ -86,3 +86,100 @@ describe("preflight Check 1: missing column", () => {
     }).toThrow(/missing_column/);
   });
 });
+
+describe("preflight Check 2: cardinality_high", () => {
+  it("drops exact matchkey on near-unique column", () => {
+    const rows = Array.from({ length: 100 }, (_, i) => ({
+      id: String(i),
+      name: "alice",
+    }));
+    const cfg: GoldenMatchConfig = {
+      matchkeys: [
+        {
+          name: "mk_id",
+          type: "exact",
+          fields: [{ field: "id", transforms: [], scorer: "exact", weight: 1 }],
+        },
+        {
+          name: "mk_name",
+          type: "weighted",
+          fields: [{ field: "name", transforms: [], scorer: "exact", weight: 1 }],
+          threshold: 0.7,
+        },
+      ],
+      blocking: {
+        strategy: "static",
+        keys: [{ fields: ["name"], transforms: [] }],
+        maxBlockSize: 1000,
+        skipOversized: true,
+      },
+    };
+    const { report, config: repaired } = preflight(rows, cfg);
+    const names = (repaired.matchkeys ?? []).map((mk) => mk.name);
+    expect(names).not.toContain("mk_id");
+    expect(names).toContain("mk_name");
+    const warning = report.findings.find((f) => f.check === "cardinality_high");
+    expect(warning?.repaired).toBe(true);
+  });
+});
+
+describe("preflight Check 3: cardinality_low", () => {
+  it("drops exact matchkey on single-value column", () => {
+    const rows = Array.from({ length: 100 }, (_, i) => ({
+      state: "NC",
+      last_name: `name${i}`,
+    }));
+    const cfg: GoldenMatchConfig = {
+      matchkeys: [
+        {
+          name: "mk_state",
+          type: "exact",
+          fields: [{ field: "state", transforms: [], scorer: "exact", weight: 1 }],
+        },
+        {
+          name: "mk_name",
+          type: "weighted",
+          fields: [
+            { field: "last_name", transforms: [], scorer: "token_sort", weight: 1 },
+          ],
+          threshold: 0.7,
+        },
+      ],
+      blocking: {
+        strategy: "static",
+        keys: [{ fields: ["last_name"], transforms: [] }],
+        maxBlockSize: 1000,
+        skipOversized: true,
+      },
+    };
+    const { report, config: repaired } = preflight(rows, cfg);
+    const names = (repaired.matchkeys ?? []).map((mk) => mk.name);
+    expect(names).not.toContain("mk_state");
+    const warning = report.findings.find((f) => f.check === "cardinality_low");
+    expect(warning?.repaired).toBe(true);
+  });
+
+  it("emits no_matchkeys_remain if drops empty the list", () => {
+    const rows = Array.from({ length: 100 }, (_, i) => ({ id: String(i) }));
+    const cfg: GoldenMatchConfig = {
+      matchkeys: [
+        {
+          name: "mk_id",
+          type: "exact",
+          fields: [{ field: "id", transforms: [], scorer: "exact", weight: 1 }],
+        },
+      ],
+      blocking: {
+        strategy: "static",
+        keys: [{ fields: ["id"], transforms: [] }],
+        maxBlockSize: 1000,
+        skipOversized: true,
+      },
+    };
+    const { report } = preflight(rows, cfg);
+    expect(report.hasErrors).toBe(true);
+    expect(
+      report.findings.some((f) => f.check === "no_matchkeys_remain"),
+    ).toBe(true);
+  });
+});
