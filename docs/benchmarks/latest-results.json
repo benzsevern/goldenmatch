@@ -8,7 +8,7 @@
       "tp": 2145,
       "fp": 23,
       "fn": 79,
-      "elapsed_seconds": 10.3,
+      "elapsed_seconds": 9.01,
       "health": "n/a",
       "stop_reason": "n/a"
     },
@@ -20,7 +20,7 @@
       "tp": 6429,
       "fp": 5,
       "fn": 109,
-      "elapsed_seconds": 9.08,
+      "elapsed_seconds": 8.22,
       "health": "n/a",
       "stop_reason": "n/a"
     },
@@ -32,7 +32,7 @@
       "tp": 2499,
       "fp": 37,
       "fn": 1,
-      "elapsed_seconds": 19.64,
+      "elapsed_seconds": 19.02,
       "health": "n/a",
       "stop_reason": "n/a",
       "planning_effort": "normal"
@@ -40,8 +40,8 @@
     {
       "name": "DQbench",
       "composite": 83.16,
-      "elapsed_seconds": 350.5,
-      "raw_output_tail": "\u2502 T3   \u2502 88.8%     \u2502 100.0% \u2502 94.1% \u2502 200.18s \u2502 105.0 MB \u2502\n\u2502 T4   \u2502 85.1%     \u2502 100.0% \u2502 92.0% \u2502 32.80s  \u2502 10.9 MB  \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\nDQBench ER Score: 83.16 / 100\n\n            Confusion Matrix (pairs) & B\u00b3 (clusters)            \n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502 Tier \u2502   TP \u2502  FP \u2502 FN \u2502       TN \u2502 B\u00b3 Prec \u2502 B\u00b3 Rec \u2502 B\u00b3 F1 \u2502\n\u251c\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\n\u2502 T1   \u2502  100 \u2502  24 \u2502  0 \u2502   499376 \u2502   98.1% \u2502 100.0% \u2502 99.1% \u2502\n\u2502 T2   \u2502  750 \u2502 668 \u2502  0 \u2502 12496082 \u2502   90.2% \u2502 100.0% \u2502 94.8% \u2502\n\u2502 T3   \u2502 2000 \u2502 252 \u2502  0 \u2502 49992748 \u2502   98.8% \u2502 100.0% \u2502 99.4% \u2502\n\u2502 T4   \u2502   80 \u2502  14 \u2502  0 \u2502   319506 \u2502   98.5% \u2502 100.0% \u2502 99.2% \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\nSkipping exact matchkey for 'city' (col_type=geo is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'state' (col_type=geo is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'zip' (col_type=zip is a blocking signal, not an identity claim). Column remains a blocking candidate.\nauto-config committed best-effort RED config (iter=v0, stop_reason=BUDGET_TIME, failing_subprofile=scoring); downstream pipeline will run but output may be low-precision\nSkipping exact matchkey for 'city' (col_type=geo is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'state' (col_type=geo is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'zip' (col_type=zip is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'city' (col_type=geo is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'state' (col_type=geo is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'zip' (col_type=zip is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'city' (col_type=geo is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'state' (col_type=geo is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'zip' (col_type=zip is a blocking signal, not an identity claim). Column remains a blocking candidate.\nauto-config committed best-effort RED config (iter=v0, stop_reason=BUDGET_TIME, failing_subprofile=scoring); downstream pipeline will run but output may be low-precision"
+      "elapsed_seconds": 344.1,
+      "raw_output_tail": "\u2502 T3   \u2502 88.8%     \u2502 100.0% \u2502 94.1% \u2502 195.35s \u2502 105.0 MB \u2502\n\u2502 T4   \u2502 85.1%     \u2502 100.0% \u2502 92.0% \u2502 32.06s  \u2502 10.9 MB  \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\nDQBench ER Score: 83.16 / 100\n\n            Confusion Matrix (pairs) & B\u00b3 (clusters)            \n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502 Tier \u2502   TP \u2502  FP \u2502 FN \u2502       TN \u2502 B\u00b3 Prec \u2502 B\u00b3 Rec \u2502 B\u00b3 F1 \u2502\n\u251c\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\n\u2502 T1   \u2502  100 \u2502  24 \u2502  0 \u2502   499376 \u2502   98.1% \u2502 100.0% \u2502 99.1% \u2502\n\u2502 T2   \u2502  750 \u2502 668 \u2502  0 \u2502 12496082 \u2502   90.2% \u2502 100.0% \u2502 94.8% \u2502\n\u2502 T3   \u2502 2000 \u2502 252 \u2502  0 \u2502 49992748 \u2502   98.8% \u2502 100.0% \u2502 99.4% \u2502\n\u2502 T4   \u2502   80 \u2502  14 \u2502  0 \u2502   319506 \u2502   98.5% \u2502 100.0% \u2502 99.2% \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\nSkipping exact matchkey for 'city' (col_type=geo is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'state' (col_type=geo is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'zip' (col_type=zip is a blocking signal, not an identity claim). Column remains a blocking candidate.\nauto-config committed best-effort RED config (iter=v0, stop_reason=BUDGET_TIME, failing_subprofile=scoring); downstream pipeline will run but output may be low-precision\nSkipping exact matchkey for 'city' (col_type=geo is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'state' (col_type=geo is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'zip' (col_type=zip is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'city' (col_type=geo is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'state' (col_type=geo is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'zip' (col_type=zip is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'city' (col_type=geo is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'state' (col_type=geo is a blocking signal, not an identity claim). Column remains a blocking candidate.\nSkipping exact matchkey for 'zip' (col_type=zip is a blocking signal, not an identity claim). Column remains a blocking candidate.\nauto-config committed best-effort RED config (iter=v0, stop_reason=BUDGET_TIME, failing_subprofile=scoring); downstream pipeline will run but output may be low-precision"
     },
     {
       "name": "Abt-Buy (linkage)",
@@ -51,7 +51,7 @@
       "tp": 655,
       "fp": 113,
       "fn": 442,
-      "elapsed_seconds": 8.57,
+      "elapsed_seconds": 7.95,
       "health": "yellow",
       "stop_reason": "policy_satisfied",
       "domain": "product",
@@ -66,7 +66,7 @@
       "tp": 493,
       "fp": 334,
       "fn": 807,
-      "elapsed_seconds": 37.33,
+      "elapsed_seconds": 36.58,
       "health": "yellow",
       "stop_reason": "budget_time",
       "domain": "product",
@@ -75,7 +75,7 @@
     }
   ],
   "metadata": {
-    "date": "2026-09-05",
+    "date": "2026-09-06",
     "with_llm": false,
     "llm_keys_suppressed": false,
     "planning_effort": "normal",
