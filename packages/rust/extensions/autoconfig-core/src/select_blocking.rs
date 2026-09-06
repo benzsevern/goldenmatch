@@ -25,8 +25,16 @@ use serde::{Deserialize, Serialize};
 use crate::classify::{classify_by_name, ColType};
 
 /// `autoconfig.py::_STRONG_EXACT_TYPES` — the strong-identifier col_types that
-/// back a per-id blocking pass.
-pub const STRONG_EXACT_TYPES: [ColType; 3] = [ColType::Identifier, ColType::Email, ColType::Phone];
+/// back a per-id blocking pass. `ExactDerived` (#2876/#2881) is included for
+/// the same reason as the Python side: a domain-extracted exact-scored column
+/// (e.g. `__title_key__`) is exactly this kind of strong identity signal for
+/// blocking purposes, even though it is not itself an "identifier" column.
+pub const STRONG_EXACT_TYPES: [ColType; 4] = [
+    ColType::Identifier,
+    ColType::Email,
+    ColType::Phone,
+    ColType::ExactDerived,
+];
 
 /// `_UNION_PASS_MIN_NONNULL` — a per-id pass must block more than a trivial
 /// handful of rows (non-null fraction floor).
@@ -64,13 +72,13 @@ fn is_strong(ct: ColType) -> bool {
     STRONG_EXACT_TYPES.contains(&ct)
 }
 
-/// `_transforms_for(fields)` — email → `[lowercase, strip]`, else `[strip]`,
-/// keyed on the col_type of `fields[0]`.
+/// `_transforms_for(fields)` — email/exact_derived → `[lowercase, strip]`,
+/// else `[strip]`, keyed on the col_type of `fields[0]`.
 fn transforms_for_field(field: &str, cols: &[BlockingColumnInput]) -> Vec<String> {
     let is_email = cols
         .iter()
         .find(|c| c.name == field)
-        .map(|c| c.col_type == ColType::Email)
+        .map(|c| matches!(c.col_type, ColType::Email | ColType::ExactDerived))
         .unwrap_or(false);
     if is_email {
         vec!["lowercase".to_string(), "strip".to_string()]

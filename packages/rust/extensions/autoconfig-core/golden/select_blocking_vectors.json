@@ -61,6 +61,20 @@
         {"fields": ["npi"], "transforms": ["strip"], "is_strong_id": true},
         {"fields": ["phone"], "transforms": ["strip"], "is_strong_id": true}
       ]
+    },
+    {
+      "name": "exact_derived_strong_id",
+      "input": [
+        {"name": "__title_key__", "col_type": "exact_derived", "null_rate": 0.0, "cardinality_ratio": 0.3},
+        {"name": "first_name", "col_type": "name", "null_rate": 0.1, "cardinality_ratio": 0.3},
+        {"name": "last_name", "col_type": "name", "null_rate": 0.1, "cardinality_ratio": 0.4},
+        {"name": "zip", "col_type": "zip", "null_rate": 0.2, "cardinality_ratio": 0.1}
+      ],
+      "expected": [
+        {"fields": ["__title_key__"], "transforms": ["lowercase", "strip"], "is_strong_id": true},
+        {"fields": ["first_name", "last_name"], "transforms": ["strip"], "is_strong_id": false},
+        {"fields": ["last_name", "zip"], "transforms": ["strip"], "is_strong_id": false}
+      ]
     }
   ],
   "finalize": [

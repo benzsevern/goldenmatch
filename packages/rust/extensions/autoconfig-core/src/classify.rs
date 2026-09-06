@@ -32,6 +32,13 @@ pub enum ColType {
     String,
     Year,
     MultiName,
+    /// `autoconfig.py::_EXACT_DERIVED_COL_TYPE` (#2876/#2881) — given to a
+    /// domain-extracted, exact-scored derived column (e.g. `__title_key__`,
+    /// `__model_norm__`). Never produced by this crate's own classifier
+    /// (`classify_by_name`/`classify_by_data`/`classify_columns`) — it only
+    /// ever arrives as an INPUT to the blocking-union decision
+    /// (`select_blocking::BlockingColumnInput`), sent by the Python host.
+    ExactDerived,
 }
 
 // `ColType::as_str()` removed — the cross-surface contract is serde JSON

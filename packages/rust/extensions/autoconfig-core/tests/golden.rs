@@ -9,7 +9,7 @@
 //! Key serde contracts verified by these tests:
 //!   - `BackendName` → `"polars-direct"` / `"bucket"` / `"chunked"` / `"ray"` / `"duckdb"`
 //!   - `ClusteringStrategy` → `"in_memory"` / `"partitioned_union_find"` / `"streaming_cc"`
-//!   - `ColType` → `"email"` / `"name"` / `"phone"` / `"zip"` / `"address"` / `"geo"` / `"identifier"` / `"description"` / `"numeric"` / `"date"` / `"string"` / `"year"` / `"multi_name"`
+//!   - `ColType` → `"email"` / `"name"` / `"phone"` / `"zip"` / `"address"` / `"geo"` / `"identifier"` / `"description"` / `"numeric"` / `"date"` / `"string"` / `"year"` / `"multi_name"` / `"exact_derived"`
 //!   - `pair_spill_threshold` and `chunk_size` serialize to JSON `null` (NOT `"none"`
 //!     or absent) for rules that leave them as `None` (pathological / simple /
 //!     fast_box / bucket_suggested / user_override).
@@ -416,6 +416,7 @@ fn serde_col_type_names() {
         ("string", ColType::String),
         ("year", ColType::Year),
         ("multi_name", ColType::MultiName),
+        ("exact_derived", ColType::ExactDerived),
     ];
     for (expected_str, col_type) in cases {
         let got = serde_json::to_string(col_type).unwrap();

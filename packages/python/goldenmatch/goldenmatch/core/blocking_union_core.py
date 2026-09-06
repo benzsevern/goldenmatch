@@ -34,18 +34,21 @@ from __future__ import annotations
 from typing import Any
 
 # Mirror of the union constants in ``autoconfig.py`` (kept in lockstep with the
-# Rust ``select_blocking.rs`` constants).
-_STRONG_EXACT_TYPES = ("identifier", "email", "phone")
+# Rust ``select_blocking.rs`` constants). ``exact_derived`` (#2876/#2881) is a
+# domain-extracted exact-scored column (e.g. ``__title_key__``) -- the same
+# strong-identity signal as identifier/email/phone for blocking purposes.
+_STRONG_EXACT_TYPES = ("identifier", "email", "phone", "exact_derived")
 _UNION_PASS_MIN_NONNULL = 0.02
 _BLOCKING_UNION_COVERAGE_TARGET = 0.95
 
 
 def _transforms_for(field: str, cols: list[dict[str, Any]]) -> list[str]:
-    """``email`` → ``[lowercase, strip]``, else ``[strip]`` (keyed on the FIRST
-    field's col_type, matching the Rust core + ``_build_strong_identifier_union``)."""
+    """``email``/``exact_derived`` → ``[lowercase, strip]``, else ``[strip]``
+    (keyed on the FIRST field's col_type, matching the Rust core +
+    ``_build_strong_identifier_union``)."""
     for c in cols:
         if c["name"] == field:
-            if c.get("col_type") == "email":
+            if c.get("col_type") in ("email", "exact_derived"):
                 return ["lowercase", "strip"]
             break
     return ["strip"]
