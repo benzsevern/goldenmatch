@@ -23,8 +23,11 @@
 
 import { classifyByName } from "./classifyByName.js";
 
-/** `autoconfig.py::_STRONG_EXACT_TYPES` — the strong-identifier col_types. */
-const STRONG_EXACT_TYPES = new Set(["identifier", "email", "phone"]);
+/** `autoconfig.py::_STRONG_EXACT_TYPES` — the strong-identifier col_types.
+ *  `exact_derived` (#2876/#2881) is a domain-extracted exact-scored column
+ *  (e.g. `__title_key__`) — the same strong-identity signal as
+ *  identifier/email/phone for blocking purposes. */
+const STRONG_EXACT_TYPES = new Set(["identifier", "email", "phone", "exact_derived"]);
 /** `_UNION_PASS_MIN_NONNULL` — a per-id pass must block more than a handful. */
 const UNION_PASS_MIN_NONNULL = 0.02;
 /** `_BLOCKING_UNION_COVERAGE_TARGET`. */
@@ -63,10 +66,13 @@ function isStrong(colType: string): boolean {
   return STRONG_EXACT_TYPES.has(colType);
 }
 
-/** `_transforms_for(fields)` — email → `[lowercase, strip]`, else `[strip]`. */
+/** `_transforms_for(fields)` — email/exact_derived → `[lowercase, strip]`,
+ *  else `[strip]`. */
 function transformsForField(field: string, cols: readonly UnionColumn[]): string[] {
   const c = cols.find((x) => x.name === field);
-  return c && c.colType === "email" ? ["lowercase", "strip"] : ["strip"];
+  return c && (c.colType === "email" || c.colType === "exact_derived")
+    ? ["lowercase", "strip"]
+    : ["strip"];
 }
 
 /**
