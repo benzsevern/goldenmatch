@@ -609,11 +609,23 @@ def apply_batch(store: IdentityStore, batch: ResolutionBatch) -> ResolveSummary:
     # scale with the identity graph rather than with the input frame.
     # ``emit_singletons=True`` legitimately needs every row and degenerates to
     # the old behaviour.
-    if "__row_id__" in _fa5.columns:
-        _needed = _referenced_row_ids(cluster_items, emit_singletons)
-        if len(_needed) < _fa5.height:
-            _fa5 = _fa5.filter_in("__row_id__", sorted(_needed))
-    rows = _fa5.select_dicts(list(_fa5.columns))
+    # Stage markers (#2893 follow-up). The 5M control-plane profile
+    # (ADR 0064) found ~210s of the cold-load wall and essentially all of the
+    # 12.6 GB peak RSS sitting OUTSIDE the store, in the prep below -- and
+    # backend-independent, to within noise, across SQLite and Postgres. This
+    # module previously had no stage instrumentation at all, so that cost was
+    # only visible by subtraction. These bracket the prep phases so it is
+    # attributable directly. No-ops unless a `bench_capture()` recorder is
+    # active, so the default path is unchanged.
+    from goldenmatch.core.bench import stage as _stage  # noqa: PLC0415
+
+    with _stage("identity_prep_row_filter"):
+        if "__row_id__" in _fa5.columns:
+            _needed = _referenced_row_ids(cluster_items, emit_singletons)
+            if len(_needed) < _fa5.height:
+                _fa5 = _fa5.filter_in("__row_id__", sorted(_needed))
+    with _stage("identity_prep_materialize_rows"):
+        rows = _fa5.select_dicts(list(_fa5.columns))
     rowid_to_recid: dict[int, str] = {}
     rowid_to_payload: dict[int, dict[str, Any]] = {}
     rowid_to_source: dict[int, str] = {}
@@ -650,27 +662,29 @@ def apply_batch(store: IdentityStore, batch: ResolutionBatch) -> ResolveSummary:
             if not has_pk:
                 h1_by_rowid[int(rid)] = h1_list[i]
 
-    for row in rows:
-        rid = row.get("__row_id__")
-        if rid is None:
-            continue
-        irid = int(rid)
-        source = str(row.get("__source__", "dataframe"))
-        primary_id, candidates = _record_id_candidates(
-            row, source, source_pk_col,
-            precomputed_h1=h1_by_rowid.get(irid, _NOT_BATCHED),
-        )
-        _rowid_primary[irid] = primary_id
-        _rowid_candidates[irid] = candidates
-        rowid_to_payload[irid] = _row_to_payload(row)
-        rowid_to_source[irid] = source
-        rowid_to_hash[irid] = _hash_payload(rowid_to_payload[irid])
+    with _stage("identity_prep_record_ids"):
+        for row in rows:
+            rid = row.get("__row_id__")
+            if rid is None:
+                continue
+            irid = int(rid)
+            source = str(row.get("__source__", "dataframe"))
+            primary_id, candidates = _record_id_candidates(
+                row, source, source_pk_col,
+                precomputed_h1=h1_by_rowid.get(irid, _NOT_BATCHED),
+            )
+            _rowid_primary[irid] = primary_id
+            _rowid_candidates[irid] = candidates
+            rowid_to_payload[irid] = _row_to_payload(row)
+            rowid_to_source[irid] = source
+            rowid_to_hash[irid] = _hash_payload(rowid_to_payload[irid])
 
     # One bulk lookup over the candidate union resolves each record to an
     # existing id (legacy-fallback) and doubles as the pre-flight check the
     # bulk fast-path below uses to spot brand-new clusters (the 500K-cluster
     # bench, #368 Phase 6, depends on this single pre-flight lookup).
-    _all_candidates = sorted({c for cs in _rowid_candidates.values() for c in cs})
+    with _stage("identity_prep_candidate_union"):
+        _all_candidates = sorted({c for cs in _rowid_candidates.values() for c in cs})
     _existing_by_id: dict[str, str] = (
         store.lookup_entity_ids(_all_candidates) if _all_candidates else {}
     )
@@ -878,7 +892,11 @@ def apply_batch(store: IdentityStore, batch: ResolutionBatch) -> ResolveSummary:
         if _ilw is not None
         else contextlib.nullcontext()
     )
-    with _initial_ctx, store.bulk_writes():
+    # Brackets the whole write region (cluster loop + mid-loop and final bulk
+    # flushes). Subtracting the store's own wall from this is what separates
+    # "time spent deciding and building rows in Python" from "time spent in the
+    # backend" -- the split ADR 0064 could only infer.
+    with _stage("identity_write_loop"), _initial_ctx, store.bulk_writes():
         with store.write_pipeline():
             # 3. Iterate clusters.
             for cluster_id, info in cluster_items:

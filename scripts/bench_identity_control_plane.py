@@ -273,6 +273,7 @@ def run_phase(
     dataset: str,
     run_name: str,
 ) -> dict:
+    from goldenmatch.core.bench import bench_capture
     from goldenmatch.identity.resolve import resolve_clusters
 
     probe.reset()
@@ -280,18 +281,29 @@ def run_phase(
     rss_before = _vmrss_mb()
     sampler.start()
     t0 = time.perf_counter()
-    summary = resolve_clusters(
-        clusters=clusters,
-        df=df,
-        store=store,
-        run_name=run_name,
-        dataset=dataset,
-        # SQLite carries a singleton ceiling warning (store.py:118) and
-        # singletons are not what the write path is being judged on here.
-        emit_singletons=False,
-    )
+    # apply_batch's prep phases carry `stage()` markers as of the #2893
+    # follow-up; without a recorder active they no-op, so capture one to get
+    # the breakdown of the backend-independent wall that ADR 0064 could only
+    # see by subtraction.
+    with bench_capture() as bench_rec:
+        summary = resolve_clusters(
+            clusters=clusters,
+            df=df,
+            store=store,
+            run_name=run_name,
+            dataset=dataset,
+            # SQLite carries a singleton ceiling warning (store.py:118) and
+            # singletons are not what the write path is being judged on here.
+            emit_singletons=False,
+        )
     wall = time.perf_counter() - t0
     sampler.halt()
+    try:
+        _bd = bench_rec.to_dict()
+    except Exception as exc:  # noqa: BLE001 -- diagnostic only
+        _bd = {"_capture_error": repr(exc)[:120]}
+    _stage_wall = _bd.get("stage_timings_seconds") or {}
+    _stage_rss = _bd.get("stage_peak_rss_kb") or {}
 
     n_members = sum(len(v.get("members") or []) for v in clusters.values())
     total_store_calls = sum(probe.counts.values())
@@ -308,6 +320,9 @@ def run_phase(
         "store_wall_s": round(sum(probe.wall.values()), 3),
         "store_share_of_wall": round(sum(probe.wall.values()) / wall, 3) if wall else None,
         "by_method": probe.report(),
+        "stage_wall_s": {k: round(v, 3) for k, v in sorted(
+            _stage_wall.items(), key=lambda kv: -float(kv[1] or 0))},
+        "stage_peak_rss_mb": {k: round(v / 1024.0, 1) for k, v in _stage_rss.items()},
         "summary": {
             k: v for k, v in vars(summary).items() if isinstance(v, (int, float, str, bool))
         },
