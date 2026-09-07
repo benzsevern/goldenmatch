@@ -1746,12 +1746,40 @@ class IdentityStore:
         ids = list(record_ids)
         if not ids:
             return {}
+        out: dict[str, str] = {}
+
+        if self._backend == "postgres":
+            # Postgres takes the whole candidate set as ONE array parameter, so
+            # the 900-id chunking below (a SQLite host-parameter limit) does not
+            # apply and actively hurts here: it turned a single pre-flight into
+            # one round trip per 900 ids. Measured at 5M rows (#2893), that was
+            # ~5,556 round trips costing 50.8s in this one call, vs 0.26s for
+            # the same logical work on SQLite -- 195x, with the network already
+            # removed (co-located services container). `= ANY(array)` is
+            # equality-equivalent to `IN (list)`, so results are unchanged.
+            #
+            # Still chunked, but on RESULT-SET SIZE rather than a parameter cap:
+            # at 5M this is ~50 round trips instead of ~5,556, while keeping the
+            # array parameter and the returned rows bounded.
+            _PG_CHUNK = 100_000
+            for i in range(0, len(ids), _PG_CHUNK):
+                chunk = ids[i:i + _PG_CHUNK]
+                rows = self._fetchall(
+                    "SELECT record_id, entity_id FROM source_records "
+                    "WHERE record_id = ANY(?) AND entity_id IS NOT NULL",
+                    (list(chunk),),
+                )
+                for r in rows:
+                    out[r["record_id"]] = r["entity_id"]
+            return out
+
         # SQLite caps host parameters per statement (SQLITE_MAX_VARIABLE_NUMBER;
         # 999 on older builds). A single IN-list over the full candidate set
         # raised "too many SQL variables" at 1M+ records (#670). Chunk the
         # IN-list and union the results -- each record_id is unique so chunks
         # never overlap; behavior is identical to the single-query form.
-        out: dict[str, str] = {}
+        # Kept as the portable path: any backend that is not postgres/mongo/
+        # snowflake lands here rather than on postgres-specific array SQL.
         _CHUNK = 900
         for i in range(0, len(ids), _CHUNK):
             chunk = ids[i:i + _CHUNK]

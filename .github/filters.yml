@@ -69,9 +69,16 @@ python_goldenmatch_postgres:
   - 'packages/python/goldenmatch/tests/test_db.py'
   - 'packages/python/goldenmatch/tests/test_reconcile.py'
   - 'packages/python/goldenmatch/tests/test_memory_store_postgres.py'
+  - 'packages/python/goldenmatch/tests/identity/test_store_pg_lookup_2893.py'
   - 'packages/python/goldenmatch/tests/_pg_helpers.py'
   - 'packages/python/goldenmatch/goldenmatch/db/**'
   - 'packages/python/goldenmatch/goldenmatch/core/memory/**'
+  # The identity store carries a full Postgres backend (IdentityStore
+  # backend="postgres"), and this lane is the only place a real Postgres
+  # exercises it -- but `identity/**` was absent here, so an edit to that
+  # backend triggered NO Postgres coverage at PR time. Found while fixing
+  # #2893, which is a postgres-only change inside identity/store.py.
+  - 'packages/python/goldenmatch/goldenmatch/identity/**'
 # #1086 throughput-tier perf gate: re-run when the tier code or the
 # bench harness changes (so a regression in the sketch-then-verify
 # cost is caught), and on ci.yml edits (keeps the gate logic tested).
