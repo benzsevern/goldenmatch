@@ -1175,6 +1175,7 @@ jobs:
           # the headache for a small (~30-test) lane.
           uv run --extra postgres pytest tests/test_db.py tests/test_reconcile.py \
             tests/test_memory_store_postgres.py \
+            tests/identity/test_store_pg_lookup_2893.py \
             -n 0 --timeout=180 --timeout-method=thread -v
 
   # Synthetic-fixture benchmark smoke. Runs on every PR against committed
