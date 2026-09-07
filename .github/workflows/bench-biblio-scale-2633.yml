@@ -1,0 +1,101 @@
+# One-off, workflow_dispatch-only validation for issue #2633's exit condition:
+# does the title+year compound blocking fix (PR #2875/#2882) hold up at real
+# scale, not just on the small suggest-quality-panel datasets that structurally
+# cannot see a comparison-cost blowup? See scripts/bench_biblio_scale_2633.py
+# for the full rationale.
+#
+# Deliberately NOT scheduled and NOT wired into ci-required or main-health --
+# this answers one specific, already-resolved-by-code question and is not a
+# standing regression gate. If a permanent bibliographic-shape gate is wanted
+# later, that is a separate, larger investment (a real "bibliographic" shape
+# in scripts/quality_invariant_scale.py + bench-quality-scale wiring), not
+# this script.
+name: bench-biblio-scale-2633
+
+on:
+  workflow_dispatch:
+    inputs:
+      tiers:
+        description: "Comma-separated row-count tiers"
+        required: false
+        default: "5000,50000,200000,1000000"
+      seed:
+        description: "RNG seed"
+        required: false
+        default: "0"
+
+permissions:
+  contents: read
+
+env:
+  # pyarrow's bundled mimalloc SIGSEGVs on goldenmatch's pipeline worker
+  # threads; force the system pool (#1627 remedy).
+  ARROW_DEFAULT_MEMORY_POOL: system
+  # jemalloc page-decay standard for scale runs (root CLAUDE.md).
+  _RJEM_MALLOC_CONF: "dirty_decay_ms:1000,muzzy_decay_ms:0"
+  GOLDENMATCH_AUTOCONFIG_MEMORY: "0"
+
+jobs:
+  bench:
+    runs-on: large-new-64GB
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Sync workspace (installs goldenmatch @ HEAD)
+        run: uv sync --all-packages
+      - name: Build the native kernel (mirror real zero-config usage)
+        run: uv run python scripts/build_native.py
+      - name: Run the biblio-scale bench
+        env:
+          # Via env, not interpolated straight into the shell: a dispatch
+          # input is attacker-influenceable text and `${{ }}` inside `run:`
+          # is template injection (matches bench-suggest-quality.yml's REF_NAME
+          # precedent).
+          TIERS: ${{ github.event.inputs.tiers || '5000,50000,200000,1000000' }}
+          SEED: ${{ github.event.inputs.seed || '0' }}
+        run: |
+          uv run python scripts/bench_biblio_scale_2633.py \
+            --tiers "$TIERS" \
+            --seed "$SEED" \
+            --out-json biblio_scale_2633.json
+      - name: Write step summary
+        if: always()
+        run: |
+          uv run python - <<'PY'
+          import json, pathlib
+          p = pathlib.Path("biblio_scale_2633.json")
+          if not p.exists():
+              print("no output file (bench crashed before writing)")
+              raise SystemExit(0)
+          data = json.loads(p.read_text())
+          lines = ["## #2633 biblio-scale validation", "",
+                   "| n_rows | blocking_keys | candidate_pairs | max_block | pairwise_f1 | pairwise_r | t_autoconfig_s | t_dedupe_s |",
+                   "|---|---|---|---|---|---|---|---|"]
+          for r in data["tiers"]:
+              q = r.get("quality", {}).get("pairwise", {})
+              lines.append(
+                  f"| {r.get('n_rows')} | {r.get('blocking_keys')} | "
+                  f"{r.get('candidate_pairs', r.get('error'))} | {r.get('max_block_size', '-')} | "
+                  f"{q.get('f1', 'n/a'):.4f} | {q.get('r', 'n/a'):.4f} | "
+                  f"{r.get('t_autoconfig_s')} | {r.get('t_dedupe_s')} |"
+                  if 'f1' in q else
+                  f"| {r.get('n_rows')} | {r.get('blocking_keys')} | "
+                  f"{r.get('candidate_pairs', r.get('error'))} | {r.get('max_block_size', '-')} | "
+                  f"n/a | n/a | {r.get('t_autoconfig_s')} | {r.get('t_dedupe_s')} |"
+              )
+          import os
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+              fh.write("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          PY
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: biblio-scale-2633
+          path: biblio_scale_2633.json
+          if-no-files-found: warn
