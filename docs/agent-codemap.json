@@ -6561,6 +6561,7 @@
             "goldenmatch._polars_lazy",
             "goldenmatch.config.schemas",
             "goldenmatch.core._hashing",
+            "goldenmatch.core.bench",
             "goldenmatch.core.cluster",
             "goldenmatch.core.cluster_pairscores",
             "goldenmatch.core.frame",
