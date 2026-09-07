@@ -1,0 +1,135 @@
+# Where does the identity CONTROL PLANE actually cost wall + RSS at scale?
+#
+# Standing question: is Postgres the right long-horizon store for the control
+# plane, or is its row-oriented / no-zero-copy shape what costs us? This makes
+# that a numbers decision instead of an architecture-taste one.
+#
+# See scripts/bench_identity_control_plane.py for the full rationale. The short
+# version: it isolates the control-plane WRITE path (resolve_clusters ->
+# apply_batch) by synthesizing the cluster partition straight from QIS ground
+# truth, so no compute-path cost is folded into the measurement, and reports
+# `cold` (bulk fast path) vs `incremental` (per-row path) separately -- the
+# bulk path only engages for brand-new clusters with no existing-entity overlap
+# (resolve.py:915-919), so those two numbers answer very different questions.
+#
+# workflow_dispatch only: a profiling run, not a regression gate. Not in
+# ci-required, not in main-health.
+name: bench-identity-control-plane
+
+on:
+  workflow_dispatch:
+    inputs:
+      rungs:
+        description: "Comma-separated row counts"
+        required: false
+        default: "100000,1000000,5000000"
+      backends:
+        description: "Comma-separated: sqlite,postgres"
+        required: false
+        default: "sqlite,postgres"
+      pair_scores:
+        description: "Evidence-edge density per cluster: none | spanning | full"
+        required: false
+        default: "spanning"
+
+permissions:
+  contents: read
+
+env:
+  ARROW_DEFAULT_MEMORY_POOL: system
+  _RJEM_MALLOC_CONF: "dirty_decay_ms:1000,muzzy_decay_ms:0"
+  GOLDENMATCH_AUTOCONFIG_MEMORY: "0"
+
+jobs:
+  profile:
+    runs-on: large-new-64GB
+    timeout-minutes: 120
+    services:
+      # Co-located, so ~zero network latency. That is deliberately FLATTERING
+      # to Postgres, which is the honest way to isolate engine + protocol +
+      # marshaling cost from network cost: if PG still looks heavy here, that
+      # is a real signal rather than a round-trip artifact.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Sync workspace
+        run: uv sync --all-packages --extra postgres
+      - name: Build the native kernel
+        run: uv run python scripts/build_native.py
+      - name: Profile the control plane
+        env:
+          # Dispatch inputs via env, never interpolated into the shell body --
+          # template injection (bench-suggest-quality.yml's REF_NAME precedent).
+          RUNGS: ${{ github.event.inputs.rungs || '100000,1000000,5000000' }}
+          BACKENDS: ${{ github.event.inputs.backends || 'sqlite,postgres' }}
+          PAIR_SCORES: ${{ github.event.inputs.pair_scores || 'spanning' }}
+          GOLDENMATCH_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+        run: |
+          set -u
+          mkdir -p cp_results
+          # ONE rung per subprocess: ru_maxrss is a process high-water mark, so
+          # sharing a process across rungs would smear the peaks together.
+          IFS=',' read -ra NS <<< "$RUNGS"
+          IFS=',' read -ra BES <<< "$BACKENDS"
+          for be in "${BES[@]}"; do
+            for n in "${NS[@]}"; do
+              echo "::group::backend=$be n=$n"
+              # Keep going on a single-rung failure so one OOM/timeout does not
+              # discard every other datapoint in the sweep.
+              uv run python scripts/bench_identity_control_plane.py \
+                --n "$n" --backend "$be" --phase both \
+                --pair-scores "$PAIR_SCORES" \
+                --out-json "cp_results/cp_${be}_${n}.json" || echo "RUNG FAILED: $be $n"
+              echo "::endgroup::"
+            done
+          done
+      - name: Summarize
+        if: always()
+        run: |
+          uv run python - <<'PY'
+          import json, os, pathlib
+          rows = []
+          for p in sorted(pathlib.Path("cp_results").glob("*.json")):
+              d = json.loads(p.read_text())
+              m = d["meta"]
+              for ph in d["phases"]:
+                  rows.append((m["backend"], m["n_rows_actual"], ph))
+          lines = ["## Identity control plane: wall + RSS", "",
+                   "| backend | n_rows | phase | member_rows | wall_s | store_calls | calls/row | store_share | peak_rss_mb | top method (calls) |",
+                   "|---|---|---|---|---|---|---|---|---|---|"]
+          for be, n, ph in rows:
+              top = ph["by_method"][0] if ph["by_method"] else {}
+              lines.append(
+                  f"| {be} | {n} | {ph['phase']} | {ph['member_rows']} | {ph['wall_s']} | "
+                  f"{ph['store_calls_total']} | {ph['store_calls_per_member_row']} | "
+                  f"{ph['store_share_of_wall']} | {ph.get('ru_maxrss_mb', ph['peak_rss_sampled_mb'])} | "
+                  f"{top.get('method','-')} ({top.get('calls','-')}) |"
+              )
+          body = "\n".join(lines)
+          print(body)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+              fh.write(body + "\n")
+          PY
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: identity-control-plane-profile
+          path: cp_results/
+          if-no-files-found: warn
