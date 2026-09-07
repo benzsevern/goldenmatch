@@ -2,6 +2,29 @@
 
 Newest first. One entry per meaningful change to the network.
 
+## 2026-09-07 -- ADR 0064: the identity control plane stays on Postgres/SQLite
+- Added **[ADR 0064](../decisions/0064-identity-control-plane-stays-on-postgres-sqlite.md)**,
+  closing the standing "should we build a custom Arrow-native relational store for the
+  control plane?" question with a measurement instead of an argument
+  (`scripts/bench_identity_control_plane.py`, 5M rows, both backends).
+- **The answer is no, on both axes the proposal targeted.** At 5M cold: ~210 s of wall is
+  backend-INDEPENDENT Python-side prep in `apply_batch` (SQLite's figure is marginally
+  *higher* than Postgres's), and peak RSS differs by **0.1%** across two entirely different
+  engines -- 12,568 MB vs 12,556 MB. An infinitely fast store buys ~40% of wall and zero
+  memory. Postgres's real price is **+17%** against an embedded in-process DB with the
+  network removed.
+- **Redirects the Arrow/zero-copy instinct at the right target**: `apply_batch`'s
+  materialization of 5M rows into Python dicts -- Arrow-shaped work *inside* the control
+  plane, not underneath it.
+- Produced one real fix (#2893 / PR #2895: `lookup_entity_ids` was chunking at SQLite's
+  900-parameter cap on Postgres, ~5,556 round trips -> 50.82 s, now 10.40 s) and exposed
+  that `python_goldenmatch_postgres` had no `identity/**` path filter, so the identity
+  store's Postgres backend had never had PR-time Postgres coverage.
+- The ADR also records **three harness bugs** found along the way, each of which produced a
+  plausible-but-wrong number rather than an obvious failure -- including a Postgres "engine
+  bug" (#2894) that was a shared-database artifact and was withdrawn. Every figure in the
+  ADR post-dates all three fixes.
+
 ## 2026-08-24 -- ADR 0063: generated API reference (Python static, REST OpenAPI, TS deferred)
 - Added **[ADR 0063](../decisions/0063-generated-api-reference.md)** + design
   `docs/superpowers/specs/2026-08-24-generated-api-reference-design.md`. The derived-docs battery
