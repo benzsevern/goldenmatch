@@ -74,6 +74,8 @@ import sys
 import tempfile
 import threading
 import time
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -215,14 +217,50 @@ def build_clusters(gt_cids: Any, pair_scores: str) -> dict[int, dict]:
     return clusters
 
 
-def open_store(backend: str, dsn: str | None, path: str) -> Any:
+@contextmanager
+def open_store(backend: str, dsn: str | None, path: str) -> Generator[Any, None, None]:
+    """A store guaranteed EMPTY at entry, torn down at exit.
+
+    Postgres gets a freshly CREATEd database per invocation, mirroring
+    `tests/_pg_helpers.py`. That is not incidental hygiene -- reusing one
+    database across rungs silently corrupted the first 5M profile: SQLite got
+    a fresh temp file per rung while Postgres kept the shared DSN, and because
+    the QIS generator is PREFIX-STABLE (the first k rows of an n-row draw
+    equal a k-row draw), the 5M rung's first 1,000,000 rows were already
+    resident from the preceding 1M rung. Those 200,000 clusters were no longer
+    brand-new, so they fell off the bulk fast path (resolve.py:915) into
+    1,000,000 per-row `upsert_record` calls -- which read exactly like a
+    Postgres-specific engine bug and got filed as one (#2894) before the
+    arithmetic gave it away.
+    """
     from goldenmatch.identity.store import IdentityStore
 
-    if backend == "postgres":
-        if not dsn:
-            raise SystemExit("--backend postgres requires --dsn")
-        return IdentityStore(backend="postgres", connection=dsn)
-    return IdentityStore(backend="sqlite", path=path)
+    if backend != "postgres":
+        store = IdentityStore(backend="sqlite", path=path)
+        try:
+            yield store
+        finally:
+            store.close()
+        return
+
+    if not dsn:
+        raise SystemExit("--backend postgres requires --dsn")
+    import uuid
+    from urllib.parse import urlparse, urlunparse
+
+    import psycopg
+
+    db_name = f"gm_cp_{uuid.uuid4().hex[:12]}"
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        admin.execute(f'CREATE DATABASE "{db_name}"')
+    scoped = urlunparse(urlparse(dsn)._replace(path=f"/{db_name}"))
+    store = IdentityStore(backend="postgres", connection=scoped)
+    try:
+        yield store
+    finally:
+        store.close()
+        with psycopg.connect(dsn, autocommit=True) as admin:
+            admin.execute(f'DROP DATABASE IF EXISTS "{db_name}"')
 
 
 def run_phase(
@@ -294,6 +332,27 @@ def run_phase(
             "Refusing to report a zero measurement as a result. Check that the frame "
             "carries __row_id__ and that cluster members are row ids present in it."
         )
+
+    # The cold phase is only "cold" if the store really was empty: every cluster
+    # must be brand-new, so `created` must equal the clusters processed. Anything
+    # less means residue from an earlier run made some clusters look
+    # already-known, which silently pushes them off the bulk fast path
+    # (resolve.py:915) and into the per-row branch -- inflating wall and call
+    # counts on whichever backend was not isolated. That is exactly how the
+    # first 5M profile produced a Postgres-only 200,000-cluster "degradation"
+    # that was really a shared-database artifact (filed, then withdrawn, as
+    # #2894). Loud failure beats a plausible-looking wrong number.
+    if label == "cold":
+        expected = sum(1 for v in clusters.values() if len(v.get("members") or []) > 1)
+        created = int(getattr(summary, "created", 0) or 0)
+        if created != expected:
+            raise SystemExit(
+                f"[identity-cp] cold phase created {created} identities for "
+                f"{expected} clusters -- the store was NOT empty. {expected - created} "
+                "cluster(s) resolved against pre-existing records, so this run is "
+                "contaminated and its bulk-vs-per-row split is meaningless. "
+                "Postgres needs a freshly provisioned database per invocation."
+            )
     return rec
 
 
@@ -347,50 +406,43 @@ def main(argv: list[str] | None = None) -> int:
         "phases": [],
     }
 
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-        db_path = str(Path(td) / "identity.db")
-        store = open_store(args.backend, args.dsn, db_path)
+    with (
+        tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td,
+        open_store(args.backend, args.dsn, str(Path(td) / "identity.db")) as store,
+    ):
         probe = StoreProbe(store)
         dataset = f"bench_cp_{args.n}"
 
-        try:
-            if args.phase in ("cold", "both"):
-                out["phases"].append(
-                    run_phase(
-                        label="cold",
-                        store=store,
-                        probe=probe,
-                        clusters=clusters,
-                        df=table,
-                        dataset=dataset,
-                        run_name="cold_load",
-                    )
+        if args.phase in ("cold", "both"):
+            out["phases"].append(
+                run_phase(
+                    label="cold",
+                    store=store,
+                    probe=probe,
+                    clusters=clusters,
+                    df=table,
+                    dataset=dataset,
+                    run_name="cold_load",
                 )
+            )
 
-            if args.phase in ("incremental", "both"):
-                # A slice of the SAME clusters, re-resolved against the now-populated
-                # store: every cluster overlaps an existing entity, which is exactly
-                # the condition that disqualifies the bulk fast path (resolve.py:915).
-                keys = list(clusters)[: max(1, int(len(clusters) * args.incremental_frac))]
-                subset = {k: clusters[k] for k in keys}
-                out["phases"].append(
-                    run_phase(
-                        label="incremental",
-                        store=store,
-                        probe=probe,
-                        clusters=subset,
-                        df=table,
-                        dataset=dataset,
-                        run_name="incremental_pass",
-                    )
+        if args.phase in ("incremental", "both"):
+            # A slice of the SAME clusters, re-resolved against the now-populated
+            # store: every cluster overlaps an existing entity, which is exactly
+            # the condition that disqualifies the bulk fast path (resolve.py:915).
+            keys = list(clusters)[: max(1, int(len(clusters) * args.incremental_frac))]
+            subset = {k: clusters[k] for k in keys}
+            out["phases"].append(
+                run_phase(
+                    label="incremental",
+                    store=store,
+                    probe=probe,
+                    clusters=subset,
+                    df=table,
+                    dataset=dataset,
+                    run_name="incremental_pass",
                 )
-        finally:
-            # Release the backend connection before the tempdir is torn down.
-            # Correct hygiene everywhere; load-bearing on Windows, where an
-            # open SQLite handle makes the cleanup raise PermissionError.
-            close = getattr(store, "close", None)
-            if callable(close):
-                close()
+            )
 
     Path(args.out_json).write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
     print(json.dumps(out, indent=2, default=str))
