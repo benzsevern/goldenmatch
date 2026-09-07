@@ -1674,12 +1674,26 @@ def _fs_route_min_rows() -> int:
         return _FS_ROUTE_MIN_ROWS_DEFAULT
 
 
+# col_type given to a domain-extracted, exact-scored derived column (e.g.
+# __title_key__, __model_norm__ -- see the injection at the "Add domain columns
+# to blocking candidate profiles" site below). These are high-cardinality,
+# exact-comparable, no-domain-cap columns functionally like email/identifier/
+# phone for BLOCKING purposes, but are not real email addresses -- #2876:
+# tagging them col_type="email" routed them through _detect_standardization_
+# config's email branch, which built a StandardizationConfig rule applying the
+# std_email standardizer (nulls any value without "@") to a derived key that
+# never contains one.
+_EXACT_DERIVED_COL_TYPE = "exact_derived"
+
 # Exact matchkeys on these col_types are a strong identity claim — when one
 # SURVIVES into the config, exact matching carries the dedup and the probabilistic
 # path tends to lose (verified on anchor_person_match: clean-email exact beats FS).
 # Broader than just "identifier": the dual-strategy harness showed email/phone exact
 # matchkeys are equally strong. `zip` is NOT here (a blocking signal, not identity).
-_STRONG_EXACT_TYPES = ("identifier", "email", "phone")
+# `exact_derived` (#2876) is included for the same reason: a domain-extracted
+# exact-scored column is exactly this kind of strong identity signal for
+# blocking purposes, even though it is not itself an "identifier" column.
+_STRONG_EXACT_TYPES = ("identifier", "email", "phone", _EXACT_DERIVED_COL_TYPE)
 
 
 def _is_probabilistic_shape(
@@ -2506,7 +2520,11 @@ def _build_strong_identifier_union(
 
     def _transforms_for(fields: list[str]) -> list[str]:
         prof = next((p for p in profiles if p.name == fields[0]), None)
-        return ["lowercase", "strip"] if prof and prof.col_type == "email" else ["strip"]
+        return (
+            ["lowercase", "strip"]
+            if prof and prof.col_type in ("email", _EXACT_DERIVED_COL_TYPE)
+            else ["strip"]
+        )
 
     passes = [BlockingKeyConfig(fields=f, transforms=_transforms_for(f))
               for f in candidate_passes]
@@ -2618,7 +2636,7 @@ def _build_compound_blocking(
     from goldenmatch.core.blocking_candidates import _blocking_max_ratio
     _grouping_ratio_max = _blocking_max_ratio()
     _component_null_ceiling = max(max_null_rate, 0.6)
-    _high_card_types = ("identifier", "zip", "email", "phone")
+    _high_card_types = ("identifier", "zip", "email", "phone", _EXACT_DERIVED_COL_TYPE)
 
     def _is_admissible(p: ColumnProfile) -> bool:
         # numeric/date used to be rejected outright. That excluded exactly the
@@ -4074,14 +4092,14 @@ def build_blocking(
 
     exact_cols = [
         p for p in profiles
-        if p.col_type in ("email", "phone", "zip", "identifier", "year")
+        if p.col_type in ("email", "phone", "zip", "identifier", "year", _EXACT_DERIVED_COL_TYPE)
         and _null_rate(p.name) <= NULL_RATE_CEILING  # Tier 2: skip high-null candidates
         and _projected_ratio(p) <= blocking_max_ratio
         and _check_source_overlap(df, p.name) > 0.0
     ]
     # Log columns rejected by the cardinality gate (#408 / #410).
     for p in profiles:
-        if p.col_type not in ("email", "phone", "zip", "identifier", "year"):
+        if p.col_type not in ("email", "phone", "zip", "identifier", "year", _EXACT_DERIVED_COL_TYPE):
             continue
         projected = _projected_ratio(p)
         if projected > blocking_max_ratio and projected < 1.0:
@@ -4093,7 +4111,7 @@ def build_blocking(
             )
     # Log skipped columns (cross-source overlap).
     for p in profiles:
-        if (p.col_type in ("email", "phone", "zip", "identifier", "year")
+        if (p.col_type in ("email", "phone", "zip", "identifier", "year", _EXACT_DERIVED_COL_TYPE)
                 and _null_rate(p.name) <= max_null_rate
                 and _projected_ratio(p) <= blocking_max_ratio
                 and _check_source_overlap(df, p.name) == 0.0):
@@ -4279,7 +4297,11 @@ def build_blocking(
                 safe_exact = []  # fall through to the bounded-compound / name branches
         if safe_exact:
             best = max(safe_exact, key=lambda p: _bf.column(p.name).n_unique())
-            transforms = ["lowercase", "strip"] if best.col_type == "email" else ["strip"]
+            transforms = (
+                ["lowercase", "strip"]
+                if best.col_type in ("email", _EXACT_DERIVED_COL_TYPE)
+                else ["strip"]
+            )
             # #2633: `best` wins by raw cardinality alone, which on bibliographic
             # data (DBLP-ACM: title-derived key ~300+ distinct) always beats a
             # `year`/`date` exact candidate (~10-65 distinct) even though `year`
@@ -5724,7 +5746,7 @@ def _legacy_auto_configure_v0(  # pyright: ignore[reportUnusedFunction]  # kept 
             if null_rate > 0.5:
                 continue
             profiles.append(ColumnProfile(
-                name=col, dtype="Utf8", col_type="email",
+                name=col, dtype="Utf8", col_type=_EXACT_DERIVED_COL_TYPE,
                 confidence=0.9, null_rate=null_rate,
                 cardinality_ratio=cardinality_ratio, avg_len=0,
             ))
@@ -6315,6 +6337,11 @@ def _detect_standardization_config(profiles: list[ColumnProfile]) -> Any:
     _std_rules: dict[str, list[str]] = {}
     _email_typed_cols: set[str] = set()  # guard: skip address detection on these
     for _p in profiles:
+        # #2876: col_type == "exact_derived" (a domain-extracted column like
+        # __title_key__) intentionally falls through every branch below and
+        # gets NO standardization rule -- it is not an email/phone/zip/name/
+        # address, and std_email in particular would null every value that
+        # lacks an "@" (i.e. all of them).
         if _p.col_type == "email":
             _email_typed_cols.add(_p.name)
             _std_rules[_p.name] = ["email"]
