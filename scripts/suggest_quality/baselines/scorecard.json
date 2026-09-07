@@ -63,12 +63,12 @@
       "suggester_prec": 1.0
     },
     "dblp_acm": {
-      "baseline_f1": 0.564539,
+      "baseline_f1": 0.90069,
       "candidate_error": "ColumnNotFoundError: unable to find column \"__title_key__\"; valid columns: [\"__row_id__\", \"id\", \"title\", \"authors\", \"venue\", \"year\"]",
       "candidate_pairs": 0,
       "candidate_recall": null,
-      "convergence_final_f1": 0.729595,
-      "convergence_steps": 1,
+      "convergence_final_f1": 0.90069,
+      "convergence_steps": 0,
       "error": null,
       "gt_pairs": 2224,
       "kind": "real",
@@ -78,16 +78,16 @@
       "rank_corr": null,
       "rows": 4910,
       "suggested_order_lifts": [
-        0.165055
+        -0.010896
       ],
-      "suggester_prec": 1.0
+      "suggester_prec": 0.0
     },
     "historical_50k": {
-      "baseline_f1": 0.836613,
+      "baseline_f1": 0.831138,
       "candidate_error": null,
       "candidate_pairs": 23439513,
       "candidate_recall": 0.879281,
-      "convergence_final_f1": 0.836613,
+      "convergence_final_f1": 0.831138,
       "convergence_steps": 0,
       "error": null,
       "gt_pairs": 303961,
@@ -101,11 +101,11 @@
       "suggester_prec": 1.0
     },
     "ncvr_synthetic": {
-      "baseline_f1": 0.997207,
+      "baseline_f1": 0.992454,
       "candidate_error": null,
       "candidate_pairs": 434530,
       "candidate_recall": 1.0,
-      "convergence_final_f1": 0.997207,
+      "convergence_final_f1": 0.992454,
       "convergence_steps": 0,
       "error": null,
       "gt_pairs": 2500,
@@ -119,21 +119,23 @@
       "suggester_prec": 1.0
     },
     "orgs_hard": {
-      "baseline_f1": 0.293887,
+      "baseline_f1": 0.410758,
       "candidate_error": null,
       "candidate_pairs": 9019,
       "candidate_recall": 0.481517,
-      "convergence_final_f1": 0.293887,
-      "convergence_steps": 0,
+      "convergence_final_f1": 0.416357,
+      "convergence_steps": 1,
       "error": null,
       "gt_pairs": 1055,
       "kind": "anchor",
-      "n_suggestions": 0,
+      "n_suggestions": 1,
       "name": "orgs_hard",
       "native_available": true,
       "rank_corr": null,
       "rows": 845,
-      "suggested_order_lifts": [],
+      "suggested_order_lifts": [
+        0.005599
+      ],
       "suggester_prec": 1.0
     },
     "synthetic": {
@@ -172,7 +174,7 @@
       "febrl3": "absent",
       "ncvr_real": "absent"
     },
-    "git_sha": "4a1af1dfa071d575133feaf254374eebfa62ca97",
-    "native_version": "0.2.0"
+    "git_sha": "c709c48abb3f9772cac433f5fb5c27472e741e7e",
+    "native_version": "0.2.1"
   }
 }
