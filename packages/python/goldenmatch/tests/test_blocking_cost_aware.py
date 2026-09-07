@@ -190,12 +190,11 @@ def _biblio_title_coarser_than_year_df(n_clusters: int = 300, per: int = 5) -> p
 
 def test_exact_pool_compounds_year_instead_of_picking_highest_cardinality_alone():
     """#2633: on real DBLP-ACM, the domain-extracted `__title_key__` column is
-    injected into blocking candidates with `col_type="email"`
-    (`autoconfig.py:5696`'s exact-domain-column injection tags every
-    exact-scored domain column that way -- a separate, pre-existing
-    misclassification, not fixed here, filed separately). That's what makes
-    it `exact_cols`-eligible alongside `year` on bibliographic data (both
-    survive `_is_scale_safe` into `safe_exact`).
+    injected into blocking candidates with `col_type="exact_derived"`
+    (`autoconfig.py`'s exact-domain-column injection tags every exact-scored
+    domain column that way -- see `_EXACT_DERIVED_COL_TYPE`, #2876). That's
+    what makes it `exact_cols`-eligible alongside `year` on bibliographic
+    data (both survive `_is_scale_safe` into `safe_exact`).
 
     Once both are in `safe_exact`, the branch used to do
     ``best = max(safe_exact, key=n_unique)`` and commit `best` ALONE --
@@ -220,11 +219,11 @@ def test_exact_pool_compounds_year_instead_of_picking_highest_cardinality_alone(
     df = _biblio_title_coarser_than_year_df()
     profiles = profile_columns(df)
     # Stand-in for the real __title_key__ injection: force `title`'s profile
-    # to col_type="email", exactly as autoconfig.py:5696 does for any
+    # to col_type="exact_derived", exactly as the real injection does for any
     # exact-scored domain-extracted column, so it enters exact_cols the same
     # way it does on real DBLP-ACM.
     profiles = [
-        dataclasses.replace(p, col_type="email") if p.name == "title" else p
+        dataclasses.replace(p, col_type="exact_derived") if p.name == "title" else p
         for p in profiles
     ]
 
@@ -251,3 +250,51 @@ def test_off_is_default(monkeypatch):
     df = _year_pathology_df()
     cfg = goldenmatch.auto_configure_df(df)
     assert _blocking_key_fields(cfg) == [["birth_year"]]
+
+
+def test_standardization_config_skips_domain_derived_column():
+    """#2876: a domain-extracted exact column (col_type="exact_derived", e.g.
+    __title_key__) must NOT get a standardization rule. It previously carried
+    col_type="email", so _detect_standardization_config's email branch built
+    a rule applying std_email -- which nulls any value lacking "@" -- to a
+    column that is never an email address. A real email column must still get
+    its rule."""
+    from goldenmatch.core.autoconfig import ColumnProfile, _detect_standardization_config
+
+    profiles = [
+        ColumnProfile(
+            name="__title_key__", dtype="Utf8", col_type="exact_derived",
+            confidence=0.9, null_rate=0.0, cardinality_ratio=0.5, avg_len=0,
+        ),
+        ColumnProfile(
+            name="contact_email", dtype="Utf8", col_type="email",
+            confidence=0.9, null_rate=0.0, cardinality_ratio=0.9, avg_len=10,
+        ),
+    ]
+    cfg = _detect_standardization_config(profiles)
+    assert cfg is not None
+    assert "__title_key__" not in cfg.rules, (
+        f"domain-derived column must not get a standardization rule; "
+        f"got {cfg.rules}"
+    )
+    assert cfg.rules.get("contact_email") == ["email"], cfg.rules
+
+
+def test_real_title_key_injection_not_routed_to_email_standardizer():
+    """#2876 end-to-end: the REAL __title_key__ injection (auto_configure_df's
+    domain-column append) must not emit a StandardizationConfig rule for it,
+    and the #2633 title+year compound must still be produced with the
+    corrected col_type."""
+    df = _biblio_title_coarser_than_year_df()
+    cfg = goldenmatch.auto_configure_df(df, allow_red_config=True)
+
+    rules = cfg.standardization.rules if cfg.standardization else {}
+    assert "__title_key__" not in rules, (
+        f"domain-derived __title_key__ must not get a standardization rule "
+        f"(it is not an email); rules={rules}"
+    )
+
+    keys = _bc_keys(cfg.blocking)
+    assert keys and set(keys[0]) == {"__title_key__", "year"}, (
+        f"the #2633 compound must still fire with the corrected col_type; got {keys}"
+    )
