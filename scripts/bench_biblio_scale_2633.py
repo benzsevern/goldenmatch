@@ -184,6 +184,19 @@ def _exact_block_metrics(df: Any, cfg: Any) -> dict:
     if blocking is None:
         return {"error": "config has no blocking section"}
     try:
+        # Stamp `__row_id__` the way ingest does. Domain extraction requires it,
+        # and the >=50K learned-blocking configs key on it directly -- without
+        # this, those rungs died with ColumnNotFoundError and reported NO
+        # candidate-pair number at exactly the scales worth measuring. Confined
+        # to this measurement helper so it cannot perturb the measured path
+        # (auto_configure_df / dedupe_df each stamp their own internally).
+        import polars as pl  # noqa: PLC0415
+        from goldenmatch.core.frame import to_frame as _tf  # noqa: PLC0415
+
+        if "__row_id__" not in _tf(df).columns:
+            df = _tf(df).with_row_index("__row_id__").native
+            if isinstance(df, pl.DataFrame):
+                df = df.with_columns(pl.col("__row_id__").cast(pl.Int64))
         prepared = _apply_domain_extraction(df, cfg)
         total_pairs = 0
         max_block = 0
@@ -284,6 +297,20 @@ def main(argv: list[str] | None = None) -> int:
     out = {"tiers": records, "meta": {"seed": args.seed, "tiers_requested": tiers}}
     Path(args.out_json).write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
     print(f"[bench-biblio-2633] wrote {args.out_json}", flush=True)
+
+    # Candidate pairs is THE metric this bench exists for (#2633 is a
+    # candidate-set-ceiling issue and says outright that recall is not the
+    # constraint). A rung that failed to measure it is a hole in the result,
+    # not a passing run -- the first sweep went green with 2 of 4 rungs
+    # unmeasured, which is how a bench ends up certifying nothing.
+    unmeasured = [r["n_rows"] for r in records if r.get("candidate_pairs") is None]
+    if unmeasured:
+        print(
+            f"[bench-biblio-2633] FAILED to measure candidate_pairs at rungs "
+            f"{unmeasured} -- see the per-rung `error` field.",
+            flush=True,
+        )
+        return 1
     return 0
 
 
